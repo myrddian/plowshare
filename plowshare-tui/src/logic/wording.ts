@@ -2251,6 +2251,20 @@ export function describeFired(
  * never used.
  */
 export function describeQuestion(approval: Approval): string[] {
+  if (approval.web) {
+    const request = approval.web;
+    return [
+      request.verb === 'SEARCH'
+        ? 'SECURITY requests a web search'
+        : 'SECURITY requests a web fetch',
+      `  ${request.target}`,
+      request.verb === 'SEARCH'
+        ? `  page ${request.page ?? 1}, size ${request.pageSize ?? 10}, maximum ${request.max ?? 30}`
+        : `  offset ${request.offset ?? 0}`,
+      `  request SHA-256 ${request.inputDigest}`,
+      '  approve this exact request once, or deny',
+    ];
+  }
   if (approval.file)
     return [
       `a run asks to ${approval.file.kind} on ${approval.file.provider}:`,
@@ -2309,7 +2323,7 @@ export function describeQuestion(approval: Approval): string[] {
 export function describeKeys(state: Asking): string[] {
   switch (state.kind) {
     case 'choosing':
-      if (state.approval.file)
+      if (state.approval.file || state.approval.web)
         return ['o approve operation once · d deny · esc leave it for later'];
       if (state.approval.budget !== undefined)
         return ['o approve extension once · d deny · esc leave it for later'];

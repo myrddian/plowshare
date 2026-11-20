@@ -24,6 +24,7 @@ export interface AdministrativePayloads {
     readonly prefix?: readonly string[];
     readonly reason?: string;
     readonly fileDigest?: string;
+    readonly webDigest?: string;
   };
   'approval.revoke': Id;
   'board.topup': { readonly topic: string; readonly maxModelCalls: number };

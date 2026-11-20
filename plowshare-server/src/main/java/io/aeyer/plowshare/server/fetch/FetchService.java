@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.fetch;
 
 import io.aeyer.plowshare.protocol.fetch.FetchWindow;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import io.aeyer.plowshare.server.search.SearchProperties;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -168,11 +169,17 @@ public class FetchService {
    *     is not included here
    */
   public FetchWindow read(String url, int offset) {
+    return read(url, offset, null);
+  }
+
+  public FetchWindow read(String url, int offset, WebRequestWork work) {
     validate(url, offset);
+    if (work != null && work.stopped()) return stopped(url, offset);
     String key = UrlKey.of(url);
     Instant now = clock.instant();
 
     Optional<FetchedPage> stored = store.find(key);
+    if (work != null && work.stopped()) return stopped(url, offset);
     if (stored.isPresent()) {
       // The row's age is irrelevant on a hit -- see the class comment.
       // touchRead runs before the slice is cut so a read that is about
@@ -221,7 +228,12 @@ public class FetchService {
               + " deployment's own fetcher and may be able to reach it.");
     }
 
-    FetchAnswer answer = fetcher.fetch(url);
+    if (work != null && work.stopped()) return stopped(url, offset);
+    FetchAnswer answer =
+        work == null
+            ? fetcher.fetch(url)
+            : fetcher.fetch(url, work.restrictRedirects(hop -> suppressedBy(hop).isEmpty()));
+    if (work != null && work.stopped()) return stopped(url, offset);
     if (!answer.isOk()) {
       return refusal(
           url,
@@ -231,6 +243,10 @@ public class FetchService {
 
     store.put(key, url, answer.page(), now);
     return window(url, answer.page().title(), answer.page().text(), offset);
+  }
+
+  private static FetchWindow stopped(String url, int offset) {
+    return refusal(url, offset, "Fetch work expired or was cancelled.");
   }
 
   /**

@@ -1,6 +1,6 @@
 ---
 version: 1
-includes: []
+includes: [web-search.md, web-fetch.md]
 rules:
   - id: personal-workspace-reads
     effect: PERSONAL_READ_INTENT

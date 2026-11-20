@@ -190,7 +190,7 @@ class ScriptResearchTest {
               .forEach(t -> t.put("status", op.path("status").asText().toUpperCase()));
         return JSON.createObjectNode().put("updated", true);
       }
-      if (tool.equals("search")) {
+      if (tool.equals("web_search")) {
         retrievalQueries.add(args.path("query").asText());
         if (state.path("pending").path("wave").asInt() == 0) initialSearches++;
         var hits =

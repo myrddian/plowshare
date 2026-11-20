@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -70,23 +71,26 @@ class PersonalApprovalReviewSessionsTest {
                 ApprovalPolicy.Mode.SMART,
                 null,
                 List.of(rule(ApprovalPolicy.Effect.MAY_APPROVE))));
+    ReviewInferenceFactory inference = mock(ReviewInferenceFactory.class);
+    when(inference.within(any(), any(), any(), any()))
+        .thenReturn(
+            (definition, system, evidence, work) -> {
+              consultations.incrementAndGet();
+              if (revokeDuringReview.get()) revoked.set(true);
+              reviewerEvidence.set(evidence);
+              reviewerPrompt.set(system);
+              if (definition.name().equals("security_reviewer")) securityEvidence.set(evidence);
+              if (authenticatedTask != null && authenticatedTask.length() <= 16000)
+                assertTrue(evidence.contains(authenticatedTask));
+              return definition.name().equals("security_reviewer")
+                  ? output.get()
+                  : "{\"approved\":true,\"reason\":\"Matches personal instructions.\"}";
+            });
     var sessions =
         new PersonalApprovalReviewSessions(
             policies,
             bots,
-            (admission, budget, usage, validity) ->
-                (definition, system, evidence, work) -> {
-                  consultations.incrementAndGet();
-                  if (revokeDuringReview.get()) revoked.set(true);
-                  reviewerEvidence.set(evidence);
-                  reviewerPrompt.set(system);
-                  if (definition.name().equals("security_reviewer")) securityEvidence.set(evidence);
-                  if (authenticatedTask != null && authenticatedTask.length() <= 16000)
-                    assertTrue(evidence.contains(authenticatedTask));
-                  return definition.name().equals("security_reviewer")
-                      ? output.get()
-                      : "{\"approved\":true,\"reason\":\"Matches personal instructions.\"}";
-                },
+            inference,
             () -> security,
             Duration.ofSeconds(2),
             mock(HumanApprovalHistory.class),

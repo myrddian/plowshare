@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
@@ -79,6 +80,34 @@ class RunApprovalStoreTest {
 
   private RunApproval asked(String conversation, String side, List<String> argv) {
     return store.ask(project, conversation, conversation, "coder", side, argv, "/repo", null);
+  }
+
+  @Test
+  void web_consent_binds_exact_operation_once_and_is_not_command_permission() {
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    var request =
+        new WebApproval(Verb.SEARCH, "public legal sources", 1, 10, 30, null, "a".repeat(64));
+    var different =
+        new WebApproval(Verb.SEARCH, "different sources", 1, 10, 30, null, "b".repeat(64));
+    RunApproval approved =
+        store.askWeb(project, conversation, conversation, "alice", "coder", request);
+    var calls = new JdbcSuspendedRunCalls(jdbc);
+    calls.retain(
+        approved.id(),
+        conversation,
+        "session",
+        "server",
+        "alice",
+        new ToolCall("reviewed", "web_search", "retained arguments"));
+    assertEquals(request, store.find(approved.id()).orElseThrow().web());
+    assertEquals("web_search", calls.find(approved.id()).orElseThrow().tool().name());
+    assertFalse(store.allow(approved.id(), RunApproval.CONVERSATION, null, "alice"));
+    assertTrue(store.allow(approved.id(), RunApproval.ONCE, null, "alice"));
+    assertTrue(store.consume(project, conversation, "server", List.of(), "").isEmpty());
+    assertFalse(store.consumeWeb(approved.id(), different, Instant.EPOCH));
+    assertFalse(store.consumeWeb(approved.id(), request, Instant.parse("2026-09-15T09:00:01Z")));
+    assertTrue(store.consumeWeb(approved.id(), request, Instant.EPOCH));
+    assertFalse(store.consumeWeb(approved.id(), request, Instant.EPOCH));
   }
 
   @Test

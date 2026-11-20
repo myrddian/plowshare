@@ -864,6 +864,7 @@ public class AgentsConfig {
       ObjectProvider<ScopedTools> scopedTools,
       OperationAuthority operations,
       InferenceCalls inferenceCalls,
+      ObjectProvider<WebToolSecurity> webSecurity,
       ObjectProvider<FailureReporter> failures) {
     JobRuntime runtime =
         new JobRuntime(
@@ -1006,6 +1007,8 @@ public class AgentsConfig {
             return available == null ? tool : available.protect(tool, definition, conversation);
           }
         });
+    webSecurity.ifAvailable(runtime::useWebToolSecurity);
+    runtime.useWebTaskEvidence(entries::authenticatedOpening);
     return runtime;
   }
 

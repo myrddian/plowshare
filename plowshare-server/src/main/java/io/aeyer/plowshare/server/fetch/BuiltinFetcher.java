@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.fetch;
 
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetAddress;
@@ -171,6 +172,12 @@ public class BuiltinFetcher implements PageFetcher {
 
   @Override
   public FetchAnswer fetch(String url) {
+    return fetch(url, null);
+  }
+
+  @Override
+  @SuppressWarnings("try")
+  public FetchAnswer fetch(String url, WebRequestWork work) {
     HttpUrl hop = null;
     try {
       // HttpUrl.parse (unlike java.net.URI) only ever returns a value
@@ -189,7 +196,16 @@ public class BuiltinFetcher implements PageFetcher {
         if (early.isPresent()) {
           return refused(url, hop, early.get());
         }
+        // The previous response is closed before any review of its new destination. A managed
+        // request must authorize that destination before OkHttp can open another connection.
+        if (followed > 0 && work != null && !work.permitsRedirect(hop.toString())) {
+          return FetchAnswer.failed(
+              url,
+              FetchFailure.FETCH_FAILED,
+              "The redirect destination was not authorized for this web request.");
+        }
         long remaining = deadline - System.nanoTime();
+        if (work != null) remaining = work.capNanos(remaining);
         if (remaining <= 0) {
           return FetchAnswer.failed(
               url,
@@ -200,7 +216,8 @@ public class BuiltinFetcher implements PageFetcher {
         Call call = clientFor(hop).newCall(request(hop));
         call.timeout().timeout(remaining, TimeUnit.NANOSECONDS);
 
-        try (Response response = call.execute()) {
+        try (var watch = WebRequestWork.watch(work, call);
+            Response response = call.execute()) {
           if (!REDIRECTS.contains(response.code())) {
             return answer(url, response);
           }

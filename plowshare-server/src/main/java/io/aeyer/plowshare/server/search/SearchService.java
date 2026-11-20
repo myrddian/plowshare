@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.search;
 import io.aeyer.plowshare.protocol.search.Hit;
 import io.aeyer.plowshare.protocol.search.SearchPage;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -160,7 +161,12 @@ public class SearchService {
    *     to {@link io.aeyer.plowshare.protocol.search.SearchAsk}'s own constructor
    */
   public SearchPage search(String query, int pageSize, int max, int page) {
+    return search(query, pageSize, max, page, null);
+  }
+
+  public SearchPage search(String query, int pageSize, int max, int page, WebRequestWork work) {
     validate(query, pageSize, max, page);
+    if (work != null && work.stopped()) return stopped(page, pageSize);
     String key = QueryKey.of(query, max);
     Instant now = clock.instant();
     Duration ttl = properties.resultSetTtlNow();
@@ -172,6 +178,7 @@ public class SearchService {
     // states does not happen.
     if (page > 1) {
       Optional<StoredSet> stored = sets.get(key, now, ttl);
+      if (work != null && work.stopped()) return stopped(page, pageSize);
       if (stored.isPresent()) {
         return slice(stored.get().hits(), page, pageSize);
       }
@@ -188,13 +195,22 @@ public class SearchService {
               + " already produced.");
     }
 
-    LadderResult result = ladder.run(query, max, properties.ignoredDomainsNow());
+    LadderResult result =
+        work == null
+            ? ladder.run(query, max, properties.ignoredDomainsNow())
+            : ladder.run(query, max, properties.ignoredDomainsNow(), work);
+    if (work != null && work.stopped()) return stopped(page, pageSize);
     if (result.providerKey() == null) {
       return new SearchPage(List.of(), page, pageSize, 0, false, result.refusal());
     }
 
     sets.put(key, result.providerKey(), result.hits(), now);
     return slice(result.hits(), page, pageSize);
+  }
+
+  private static SearchPage stopped(int page, int pageSize) {
+    return new SearchPage(
+        List.of(), page, pageSize, 0, false, "Search work expired or was cancelled.");
   }
 
   /**

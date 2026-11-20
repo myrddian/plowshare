@@ -123,10 +123,15 @@ export function pressingOn(state: Asking, stroke: Stroke): Asking {
             'once',
             undefined,
             approval.file?.inputDigest,
+            approval.web?.inputDigest,
           ),
         };
       case 'c':
-        if (approval.budget !== undefined || approval.file !== undefined)
+        if (
+          approval.budget !== undefined ||
+          approval.file !== undefined ||
+          approval.web !== undefined
+        )
           return state;
         return {
           kind: 'answered',
@@ -144,7 +149,8 @@ export function pressingOn(state: Asking, stroke: Stroke): Asking {
         // conversation or deny (V67), and the server refuses a project answer to it.
         return isSet(approval) ||
           approval.budget !== undefined ||
-          approval.file !== undefined
+          approval.file !== undefined ||
+          approval.web !== undefined
           ? state
           : { kind: 'prefixing', approval, length: startingLength(approval) };
       default:

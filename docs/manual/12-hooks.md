@@ -72,7 +72,7 @@ do not combine `{deny, note}` or invent new fields. The type contract is
 | `prompt.pre` | Before a model request; `context`, original `utterance` | `{add, mode: 'volatile' \| 'durable'}` | Adds nothing |
 | `prompt.post` | After model reply; `reply`, requested tool names `tools` | `{note}` or `{redact}` | Adds nothing |
 | `tool.pre` | Before tool execution; exact `tool`, immutable input `args` | `{allow:true}`, `{deny}`, `{rewrite}`, or `{ask}` for `run` | Refuses |
-| `tool.post` | After the tool returned; `tool`, `args`, result string `result` | `{note}` or `{redact}` | Refuses the judged result; the effect already happened |
+| `tool.post` | After the tool returned; `tool`, `args`, result string `result`, optional web `reviewId` | `{note}` or `{redact}` | Refuses the judged result; the effect already happened |
 | `step.post` | After a step that asked for tools; step number, calls/results, optional model/thinking | `{note}` | Adds nothing |
 | `log.open` | Log row exists, before its first turn; context, optional `parent`/`owner` | `{add}` fixed in that log's opening | Adds nothing |
 | `log.close` | Log becomes terminal; `ending`, `turns` | `{notify}` to its owner's inbox | Adds nothing |
@@ -100,6 +100,10 @@ Tool callbacks require `tools: ['file_edit']`, exact names or a prefix ending in
 `*`. A tool callback without its tool list is a load error. Prompt and step
 callbacks have neither `tools` nor `origins`; inspect their run context inside the
 handler when narrowing to an agent or project.
+
+Use `web_search` and `web_fetch` in selectors for the managed web tools.
+Their `tool.post` callbacks receive the settled result. A callback can include
+`reviewId` in a `{note}` to link to the review diagnostic in Trajectory.
 
 Log callbacks, including `stage.*`, use optional `origins`. Current values are:
 

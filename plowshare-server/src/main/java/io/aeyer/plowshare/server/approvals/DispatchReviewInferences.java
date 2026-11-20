@@ -27,14 +27,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class DispatchReviewInferences implements ReviewInferenceFactory, AutoCloseable {
   private final ReviewModelTransport transport;
+  private final ReviewModelTransport webTransport;
   private final InferenceCalls calls;
   private final Semaphore physical;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private final Duration cleanupBudget;
 
-  public DispatchReviewInferences(
+  DispatchReviewInferences(
       ReviewModelTransport transport, InferenceCalls calls, int maximum, Duration cleanupBudget) {
+    this(transport, transport, calls, maximum, cleanupBudget);
+  }
+
+  public DispatchReviewInferences(
+      ReviewModelTransport transport,
+      ReviewModelTransport webTransport,
+      InferenceCalls calls,
+      int maximum,
+      Duration cleanupBudget) {
     this.transport = Objects.requireNonNull(transport);
+    this.webTransport = Objects.requireNonNull(webTransport);
     this.calls = Objects.requireNonNull(calls);
     if (maximum < 1 || maximum > 1024)
       throw new IllegalArgumentException("Review capacity must be 1–1024");
@@ -53,15 +64,34 @@ public final class DispatchReviewInferences implements ReviewInferenceFactory, A
       Budget budget,
       UsageAttribution usage,
       Runnable validity) {
+    return bind(transport, operation, budget, usage, validity);
+  }
+
+  @Override
+  public ReviewInference withinWeb(
+      OperationAuthority.Admission operation,
+      Budget budget,
+      UsageAttribution usage,
+      Runnable validity) {
+    return bind(webTransport, operation, budget, usage, validity);
+  }
+
+  private ReviewInference bind(
+      ReviewModelTransport transport,
+      OperationAuthority.Admission operation,
+      Budget budget,
+      UsageAttribution usage,
+      Runnable validity) {
     Objects.requireNonNull(operation, "Review execution authority");
     Objects.requireNonNull(budget);
     Objects.requireNonNull(usage);
     Objects.requireNonNull(validity);
     return (definition, system, evidence, work) ->
-        consult(operation, budget, usage, validity, definition, system, evidence, work);
+        consult(transport, operation, budget, usage, validity, definition, system, evidence, work);
   }
 
   private String consult(
+      ReviewModelTransport transport,
       OperationAuthority.Admission operation,
       Budget budget,
       UsageAttribution usage,

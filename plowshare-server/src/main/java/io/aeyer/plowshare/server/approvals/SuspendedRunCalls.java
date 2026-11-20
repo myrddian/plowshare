@@ -90,7 +90,9 @@ public interface SuspendedRunCalls {
   }
 
   static boolean supported(String name) {
-    return List.of("run", "file_read", "file_edit", "file_delete", "file_move").contains(name);
+    return List.of(
+            "run", "file_read", "file_edit", "file_delete", "file_move", "web_search", "web_fetch")
+        .contains(name);
   }
 
   /** Retain before the requesting turn closes and before its approval notification is released. */

@@ -40,7 +40,52 @@ public record HookContext(
     String origin,
     Orchestration orchestration,
     Document document,
-    @com.fasterxml.jackson.annotation.JsonIgnore UsageAttribution usage) {
+    @com.fasterxml.jackson.annotation.JsonIgnore UsageAttribution usage,
+    String webReviewId) {
+
+  public HookContext(
+      String agent,
+      boolean bot,
+      Set<String> tools,
+      String project,
+      String conversation,
+      String side,
+      RunEnvironment environment,
+      String origin,
+      Orchestration orchestration,
+      Document document,
+      UsageAttribution usage) {
+    this(
+        agent,
+        bot,
+        tools,
+        project,
+        conversation,
+        side,
+        environment,
+        origin,
+        orchestration,
+        document,
+        usage,
+        null);
+  }
+
+  /** The opaque audit reference exposed to the post hook for one reviewed web result. */
+  public HookContext withWebReview(String reviewId) {
+    return new HookContext(
+        agent,
+        bot,
+        tools,
+        project,
+        conversation,
+        side,
+        environment,
+        origin,
+        orchestration,
+        document,
+        usage,
+        reviewId);
+  }
 
   public record Document(
       String operation,

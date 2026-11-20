@@ -106,23 +106,33 @@ public final class LocalTextFilter implements TextFiltering {
    */
   @Override
   public String inspect(String text, boolean injection, boolean mayMask) {
+    return inspect(text, injection, mayMask, null);
+  }
+
+  @Override
+  public String inspectReleased(String text, String rule) {
+    return inspect(text, true, true, Objects.requireNonNull(rule));
+  }
+
+  private String inspect(String text, boolean injection, boolean mayMask, String reviewedRule) {
     Objects.requireNonNull(text);
     if (!enabled) return text;
     if (text.length() > 524288) throw blocked("input_limit");
     if (injection) {
       String normalized = Normalizer.normalize(text, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
       for (var category : categories) {
+        if (category.name().equals(reviewedRule)) continue;
         // Exceptions never exempt an explicit high-severity override. Apply conditional
         // exceptions per sentence so an unrelated safe sentence cannot whitelist an attack.
         for (var word : category.keywords())
           if (word.severity().equals("high") && phrase(normalized, word.keyword()))
-            throw blocked(category.name());
+            throw new InjectionRefusal(category.name());
         if (conditional)
           for (var sentence : normalized.split("[.!?\\r\\n]+"))
             if (category.identifiers().stream().anyMatch(w -> phrase(sentence, w))
                 && category.targets().stream().anyMatch(w -> phrase(sentence, w))
                 && category.exceptions().stream().noneMatch(w -> phrase(sentence, w)))
-              throw blocked(category.name());
+              throw new InjectionRefusal(category.name());
       }
     }
     // Detect all policies against the original before masking: overlap cannot hide a BLOCK.
@@ -151,5 +161,21 @@ public final class LocalTextFilter implements TextFiltering {
 
   private static LlmException blocked(String rule) {
     return new LlmException("Message filtering refused: " + rule);
+  }
+
+  /**
+   * The web result boundary can review injection findings independently of hard disclosure rules.
+   */
+  public static final class InjectionRefusal extends LlmException {
+    private final String rule;
+
+    private InjectionRefusal(String rule) {
+      super("Message filtering refused: " + rule);
+      this.rule = rule;
+    }
+
+    public String rule() {
+      return rule;
+    }
   }
 }

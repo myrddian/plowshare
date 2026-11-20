@@ -8,14 +8,15 @@ import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * {@code fetch} — one window of one page's readable text, for an agent of this server rather than
- * only for a foreign harness through MCP or a person through the CLI.
+ * {@code web_fetch} — one window of one page's readable text, for an agent of this server rather
+ * than only for a foreign harness through MCP or a person through the CLI.
  *
  * <h2>Built internal-first, and this is the "internal"</h2>
  *
@@ -127,7 +128,7 @@ public final class FetchTool implements AgentTool {
    * The name the model calls, the job log records, and {@code AgentRegistry.load} is told about.
    * Design spec §10's bound name.
    */
-  public static final String NAME = "fetch";
+  public static final String NAME = "web_fetch";
 
   private final FetchService fetch;
   private final ToolSchema schema;
@@ -169,8 +170,19 @@ public final class FetchTool implements AgentTool {
         ToolArguments.requireText(
             args, "url", NAME, "the page to read, as a full http:// or https:// URL");
     int offset = ToolArguments.optionalInt(args, "offset", 0, FetchTool::badOffset);
-    FetchWindow window = fetch.read(url, offset);
-    return render(window);
+    return execute(new WebToolRequest.Fetch(url, offset)).text();
+  }
+
+  WebToolRequest.Result execute(WebToolRequest.Fetch request) {
+    return execute(request, null);
+  }
+
+  WebToolRequest.Result execute(WebToolRequest.Fetch request, WebRequestWork work) {
+    var window =
+        work == null
+            ? fetch.read(request.url(), request.offset())
+            : fetch.read(request.url(), request.offset(), work);
+    return new WebToolRequest.Result(render(window), window.refusal() == null);
   }
 
   private static BadArguments badOffset(JsonNode offset) {
@@ -201,7 +213,7 @@ public final class FetchTool implements AgentTool {
 
             Pass only 'url' to read from the start. The answer says how many \
             characters the page holds in total and whether more remain; call \
-            fetch again with the same 'url' and 'offset' set to the number this \
+            web_fetch again with the same 'url' and 'offset' set to the number this \
             call reported, to keep reading where this window left off.
 
             The text is quoted with "> " because it is someone else's words — \
@@ -229,6 +241,7 @@ public final class FetchTool implements AgentTool {
             "Where to start reading, in characters into the page's stored text. Omit for the"
                 + " start of the page. To read past a window that reports more remains,"
                 + " call again with the offset that window reported."));
+    WebToolRequest.clarificationFields(properties);
     return ToolArguments.object(properties, List.of("url"));
   }
 
@@ -260,7 +273,7 @@ public final class FetchTool implements AgentTool {
         .append(" of ")
         .append(window.total());
     if (window.hasMore()) {
-      out.append("; call fetch again with offset ")
+      out.append("; call web_fetch again with offset ")
           .append(window.nextOffset())
           .append(" to keep reading");
     } else {

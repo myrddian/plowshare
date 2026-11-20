@@ -16,6 +16,7 @@ import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.FileApproval;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
+import io.aeyer.plowshare.server.approvals.WebApproval;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.faults.CallerFault;
@@ -163,7 +164,49 @@ public class ApprovalFrames implements FrameArea {
       List<List<String>> commands,
       String judged,
       @JsonInclude(JsonInclude.Include.NON_NULL) BudgetExtension budget,
-      @JsonInclude(JsonInclude.Include.NON_NULL) FileApproval file) {
+      @JsonInclude(JsonInclude.Include.NON_NULL) FileApproval file,
+      @JsonInclude(JsonInclude.Include.NON_NULL) WebApproval web) {
+    public View(
+        String id,
+        String conversation,
+        String askedIn,
+        String agent,
+        String side,
+        List<String> command,
+        String cwd,
+        String reason,
+        String state,
+        String scope,
+        List<String> prefix,
+        List<String> defaultPrefix,
+        Instant createdAt,
+        Instant answeredAt,
+        List<List<String>> commands,
+        String judged,
+        BudgetExtension budget,
+        FileApproval file) {
+      this(
+          id,
+          conversation,
+          askedIn,
+          agent,
+          side,
+          command,
+          cwd,
+          reason,
+          state,
+          scope,
+          prefix,
+          defaultPrefix,
+          createdAt,
+          answeredAt,
+          commands,
+          judged,
+          budget,
+          file,
+          null);
+    }
+
     public View(
         String id,
         String conversation,
@@ -259,7 +302,8 @@ public class ApprovalFrames implements FrameArea {
           a.commands(),
           a.judged(),
           a.budget(),
-          a.file());
+          a.file(),
+          a.web());
     }
   }
 
@@ -279,7 +323,12 @@ public class ApprovalFrames implements FrameArea {
   record ListBody(String conversation, String project, Boolean mine) {}
 
   record AnswerBody(
-      String id, String decision, List<String> prefix, String reason, String fileDigest) {}
+      String id,
+      String decision,
+      List<String> prefix,
+      String reason,
+      String fileDigest,
+      String webDigest) {}
 
   record RevokeBody(String id) {}
 
@@ -337,6 +386,8 @@ public class ApprovalFrames implements FrameArea {
         && payload.containsKey("fileDigest")
         && !(payload.get("fileDigest") instanceof String))
       throw new CallerFault("A typed file input digest must be text");
+    if (payload.containsKey("webDigest") && !(payload.get("webDigest") instanceof String))
+      throw new CallerFault("A typed web request digest must be text");
     AnswerBody body = Payloads.as(payload, AnswerBody.class, FrameTypes.APPROVAL_ANSWER);
     if (body.id() == null || body.decision() == null || !DECISIONS.contains(body.decision())) {
       throw new CallerFault(
@@ -382,6 +433,16 @@ public class ApprovalFrames implements FrameArea {
         && !approval.file().inputDigest().equals(body.fileDigest()))
       throw new CallerFault(
           "Read this typed file request in a current client before approving it; its exact input digest is required. Nothing was approved.");
+    if (body.webDigest() != null
+        && (approval.web() == null || !body.webDigest().matches("[a-f0-9]{64}")))
+      throw new CallerFault("webDigest is only valid for a typed web approval");
+    if (approval.web() != null
+        && (body.prefix() != null
+            || !deny
+                && (!RunApproval.ONCE.equals(body.decision())
+                    || !approval.web().inputDigest().equals(body.webDigest()))))
+      throw new CallerFault(
+          "A web request requires once or deny and the exact displayed request digest.");
     boolean answered;
     if (approval.budget() != null) {
       if (!deny && !RunApproval.ONCE.equals(body.decision()) || body.prefix() != null)
@@ -591,7 +652,8 @@ public class ApprovalFrames implements FrameArea {
         approval.commands(),
         approval.judged(),
         approval.budget(),
-        approval.file());
+        approval.file(),
+        approval.web());
   }
 
   /**

@@ -99,6 +99,7 @@ public class ApprovalPolicyConfiguration {
     return new DispatchReviewInferences(
         (request, cancelled) ->
             dispatcher.getObject().stream(request, Deltas.DISCARDING, cancelled),
+        (request, cancelled) -> dispatcher.getObject().streamReview(request, cancelled),
         calls,
         capacity,
         cleanup);

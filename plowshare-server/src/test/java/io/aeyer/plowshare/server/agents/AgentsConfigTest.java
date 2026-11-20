@@ -934,7 +934,7 @@ class AgentsConfigTest {
                 var model = row.path("internalAgent");
                 if (model.path("adapter").asText().equals("registered")) {
                   adapters++;
-                  assertTrue(known.contains(name), name);
+                  assertTrue(known.contains(model.path("name").asText(name)), name);
                   if (Set.of("document_search", "document_list", "document_rank").contains(name)) {
                     // Retired corpus discovery/ranking stays registered for compatibility.
                     assertEquals(0, model.path("shippedGrants").size(), name);
@@ -1014,7 +1014,6 @@ class AgentsConfigTest {
                         "document_rank",
                         "document_retrieve",
                         "document_search",
-                        "fetch",
                         "file_delete",
                         "file_edit",
                         "file_glob",
@@ -1039,10 +1038,11 @@ class AgentsConfigTest {
                         "result_list",
                         "result_read",
                         "run",
-                        "search",
                         "send_message",
                         "todo_read",
-                        "todo_write"),
+                        "todo_write",
+                        "web_fetch",
+                        "web_search"),
                     List.copyOf(context.getBean(JobRuntime.class).knownTools())));
   }
 

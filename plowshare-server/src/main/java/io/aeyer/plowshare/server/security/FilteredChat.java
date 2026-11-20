@@ -5,6 +5,8 @@ import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
+import io.aeyer.plowshare.server.security.LocalTextFilter.InjectionRefusal;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
@@ -46,7 +48,7 @@ public final class FilteredChat implements ChatFiltering {
                           .map(
                               p -> {
                                 if (!(p instanceof Content.Text text)) return p;
-                                String approved = local.inspect(text.text(), injection, true);
+                                String approved = inspectText(m, text.text(), injection);
                                 if (untrusted && !approved.isBlank())
                                   approved =
                                       review.review(
@@ -57,7 +59,7 @@ public final class FilteredChat implements ChatFiltering {
                                 // A reviewer must not introduce content that the local policy would
                                 // refuse.
                                 return (Content)
-                                    new Content.Text(local.inspect(approved, injection, true));
+                                    new Content.Text(inspectText(m, approved, injection));
                               })
                           .toList();
                   var calls =
@@ -72,6 +74,19 @@ public final class FilteredChat implements ChatFiltering {
                 })
             .toList();
     return request.withMessages(messages);
+  }
+
+  private String inspectText(ChatMessage message, String text, boolean injection) {
+    try {
+      return local.inspect(text, injection, true);
+    } catch (InjectionRefusal refused) {
+      var receipt = message.webRelease();
+      if (receipt == null) throw refused;
+      if (!receipt.covers(message.toolCallId(), text, refused.rule(), Instant.now()))
+        return "Web evidence was withheld because its reviewed release is no longer valid.";
+      // Only the exact reviewed rule is exempt. Disclosure and other injection rules still apply.
+      return local.inspectReleased(text, refused.rule());
+    }
   }
 
   @Override

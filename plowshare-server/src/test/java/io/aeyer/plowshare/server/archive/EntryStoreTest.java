@@ -16,13 +16,16 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.agents.Projection;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.agents.WebReleaseAudit;
 import io.aeyer.plowshare.server.cache.ProjectionCache;
 import io.aeyer.plowshare.server.cache.SnapshotCache;
 import io.aeyer.plowshare.server.hooks.HookRecord;
 import io.aeyer.plowshare.server.hooks.Stage;
 import io.aeyer.plowshare.server.hooks.Tier;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
+import io.aeyer.plowshare.server.llm.dispatch.WebEvidenceRelease;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -98,6 +101,42 @@ class EntryStoreTest {
   private ConversationStore conversations;
   private EntryStore entries;
   private String conversation;
+
+  @Test
+  void orchestration_intent_reads_the_first_authenticated_opening_for_the_owner() {
+    entries.append(conversation, 1, LoggedEntry.utterance("harness", Speaker.harness()));
+    entries.append(
+        conversation, 1, LoggedEntry.utterance("authenticated", Speaker.person("alice")));
+    entries.append(conversation, 2, LoggedEntry.utterance("later input", Speaker.person("alice")));
+    assertEquals(
+        "authenticated", entries.authenticatedOpening(conversation, "alice").orElseThrow());
+    assertTrue(entries.authenticatedOpening(conversation, "bob").isEmpty());
+  }
+
+  @Test
+  void web_release_is_restored_without_projecting_the_audit_diagnostic() {
+    String output = "A legal paper describing a jailbreak.";
+    String receipt =
+        WebReleaseAudit.PREFIX
+            + "{\"call\":\"web1\",\"digest\":\""
+            + WebEvidenceRelease.digest(output)
+            + "\",\"rule\":\"prompt_injection_jailbreak\",\"verb\":\"FETCH\",\"policy\":\"policy\",\"expires\":"
+            + Instant.now().plusSeconds(60).toEpochMilli()
+            + "}";
+    entries.append(
+        conversation, 1, LoggedEntry.answer("", List.of(new ToolCall("web1", "web_fetch", "{}"))));
+    entries.append(conversation, 1, LoggedEntry.diagnostic(receipt));
+    entries.append(conversation, 1, LoggedEntry.toolResult("web1", output));
+
+    var restarted = new EntryStore(jdbc);
+    var messages = Projection.of(restarted.thatProjectFor(conversation), false);
+    assertEquals(2, messages.size());
+    assertEquals(output, messages.getLast().content());
+    assertEquals("web1", messages.getLast().webRelease().call());
+    assertEquals(
+        EntryKind.DIAGNOSTIC, restarted.pageOfLog(conversation, 0, 10).listed().get(1).kind());
+    assertEquals(receipt, restarted.pageOfLog(conversation, 0, 10).listed().get(1).excerpt());
+  }
 
   @Test
   void restarted_reads_keep_distinct_jobs_on_one_continued_turn_and_unknown_legacy_entries() {

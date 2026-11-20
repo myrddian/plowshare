@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.archive.EntryRecord;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
+import io.aeyer.plowshare.server.llm.dispatch.WebEvidenceRelease;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -99,6 +101,7 @@ import java.util.Set;
  * the situation the sentence below is written about.
  */
 public final class Projection {
+  private record ToolResultKey(int declaration, String call) {}
 
   /**
    * What a model is told in place of a result that never arrived.
@@ -309,23 +312,42 @@ public final class Projection {
     // counts from. It starts at zero and a first seam therefore reads from
     // turn one; see Compaction.SEAM.
     int foldedThrough = 0;
+    Map<ToolResultKey, WebEvidenceRelease> releases = new HashMap<>();
+    Map<String, Integer> declarations = new HashMap<>();
     List<EntryRecord> shown = new ArrayList<>(log.size());
     for (EntryRecord entry : log) {
       // The kind is unconditional -- a roleless entry is not a message on
       // any reading -- and the fold is not: see Superseded for why the
       // column can only be believed by the caller asking about today.
       boolean covered = superseded == Superseded.HIDES_A_ROW && entry.supersededBy() != null;
+      if (entry.kind() == EntryKind.ANSWER)
+        entry.toolCalls().forEach(call -> declarations.put(call.id(), entry.ordinal()));
+      // A receipt follows its assistant declaration, even if approval recovery moves the settled
+      // result into an earlier placeholder slot. A later batch can reuse the same wire ID.
+      if (!covered && entry.kind() == EntryKind.DIAGNOSTIC)
+        WebReleaseAudit.decode(entry.content())
+            .ifPresent(
+                release -> {
+                  Integer declaration = declarations.get(release.call());
+                  if (declaration != null)
+                    releases.put(new ToolResultKey(declaration, release.call()), release);
+                });
       if (!covered && entry.kind().projects()) {
         shown.add(entry);
       }
     }
     List<Content.StoredImage> pictures = new ArrayList<>();
+    Map<String, String> requested = new HashMap<>();
+    int declaration = -1;
     for (EntryRecord entry : inTurnSummariesInPlace(shown)) {
       // Before the message and not after it: a result belongs immediately
       // after the assistant turn that asked for it, so anything that is
       // not itself a result closes the batch. The only thing that ever
       // reopens one is another answer, below.
       if (entry.kind() != EntryKind.TOOL_RESULT) {
+        requested.clear();
+        entry.toolCalls().forEach(call -> requested.put(call.id(), call.name()));
+        declaration = entry.ordinal();
         pairTheUnanswered(messages, unanswered);
         if (!pictures.isEmpty()) {
           messages.add(images(pictures));
@@ -333,7 +355,25 @@ public final class Projection {
         }
       }
       pictures.addAll(images(entry));
-      messages.add(messageFor(entry, unanswered, foldedThrough, canList));
+      ChatMessage projected = messageFor(entry, unanswered, foldedThrough, canList);
+      // A receipt accompanies only its exact, independently projectable tool result. The
+      // diagnostic itself has no message role, and a compaction reference receives no receipt.
+      if (entry.kind() == EntryKind.TOOL_RESULT) {
+        var release = releases.remove(new ToolResultKey(declaration, entry.toolCallId()));
+        String tool = requested.remove(entry.toolCallId());
+        if (release != null
+            && (release.verb() == Verb.SEARCH ? SearchTool.NAME : FetchTool.NAME).equals(tool)
+            && entry.content() != null
+            && release.digest().equals(WebEvidenceRelease.digest(entry.content())))
+          projected =
+              new ChatMessage(
+                  projected.role(),
+                  projected.parts(),
+                  projected.toolCalls(),
+                  projected.toolCallId(),
+                  release);
+      }
+      messages.add(projected);
       if (entry.kind() == EntryKind.SUMMARY) {
         // A summary carries the last turn it stands for as its own turn
         // ordinal, and the log is read in conversation order, so this is

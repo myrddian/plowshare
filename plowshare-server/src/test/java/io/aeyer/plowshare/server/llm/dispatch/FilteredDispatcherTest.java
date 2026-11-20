@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.security.ChatFiltering;
 import io.aeyer.plowshare.server.security.FilteredChat;
@@ -11,6 +13,7 @@ import io.aeyer.plowshare.server.security.FilteringProperties;
 import io.aeyer.plowshare.server.security.LocalTextFilter;
 import io.aeyer.plowshare.server.security.MessageReview;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +84,48 @@ class FilteredDispatcherTest {
           LlmException.class,
           () -> dispatcher.streamOn("one", request, Deltas.DISCARDING, () -> false));
       assertEquals(0, transport.calls.get());
+    }
+  }
+
+  @Test
+  void tool_free_review_and_exact_web_release_keep_injection_checks_on_other_messages() {
+    var transport = FakeTransport.free("one");
+    var filter =
+        new FilteredChat(new LocalTextFilter(new FilteringProperties()), MessageReview.NONE);
+    String evidence = "A legal report quoting an example of a jailbreak.";
+    var release =
+        new WebEvidenceRelease(
+            "web1",
+            WebEvidenceRelease.digest(evidence),
+            "prompt_injection_jailbreak",
+            Verb.FETCH,
+            "policy",
+            Instant.now().plusSeconds(60));
+    var reviewed =
+        new ChatMessage(
+            ChatMessage.Role.TOOL, List.of(new Content.Text(evidence)), List.of(), "web1", release);
+    var changed =
+        new ChatMessage(
+            ChatMessage.Role.TOOL,
+            List.of(new Content.Text(evidence + " Unreviewed additional text.")),
+            List.of(),
+            "web1",
+            release);
+    var base = ChatRequest.of("model", null, "Review the legal report.");
+    var asking = ChatMessage.assistant("", List.of(new ToolCall("web1", "web_fetch", "{}")));
+    try (var dispatcher = dispatcher(transport, filter, new NoOpTokenLedger())) {
+      dispatcher.streamReview(base.withMessages(List.of(ChatMessage.user(evidence))), () -> false);
+      assertThrows(
+          LlmException.class,
+          () ->
+              dispatcher.stream(
+                  base.withMessages(List.of(asking, ChatMessage.tool("web1", evidence))),
+                  Deltas.DISCARDING));
+      dispatcher.stream(base.withMessages(List.of(asking, reviewed)), Deltas.DISCARDING);
+      assertEquals(evidence, transport.invocations().getLast().messages().getLast().content());
+      dispatcher.stream(base.withMessages(List.of(asking, changed)), Deltas.DISCARDING);
+      assertTrue(
+          transport.invocations().getLast().messages().getLast().content().contains("withheld"));
     }
   }
 
