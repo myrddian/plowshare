@@ -987,7 +987,7 @@ public final class EntryStore implements ConversationSearchRepository {
   static final int MOST_GROUPED_ENTRIES = 2_000;
 
   /**
-   * Prototype lexical search over stored passages (V275) and stored term frequencies (V276): score
+   * Prototype lexical search over stored passages (V277) and stored term frequencies (V278): score
    * without unpacking entries, skip postings that cannot reach the page, highlight only the page.
    *
    * <p><b>Unchanged from {@link #SEARCH_SQL}:</b> the visibility predicate, the statement snapshot
@@ -1039,7 +1039,7 @@ public final class EntryStore implements ConversationSearchRepository {
    *
    * <p><b>The bound every route uses.</b> One word's contribution to a score rises with its
    * frequency in the entry and falls with the entry's length, whatever the reader's statistics, and
-   * V276 indexes each word's postings by frequency, then length. "This word contributes at least x"
+   * V278 indexes each word's postings by frequency, then length. "This word contributes at least x"
    * is therefore, for each frequency, "length at most L": the score formula solved for length, one
    * index range per frequency (256 ranges, most of them empty). The solved length is rounded
    * outwards and x is taken a billionth low, so a floating-point tie can only read one posting too
@@ -1180,7 +1180,7 @@ public final class EntryStore implements ConversationSearchRepository {
    *   <li>With stale statistics it answered a probe for one entry's posting from the best-first
    *       index, walking every posting of the word for each probe (4 to 15 seconds at 60,000
    *       entries), and symmetrically could answer a best-first read from the primary key. No fence
-   *       chooses an index, so V276 leaves each question one index that can answer it. The
+   *       chooses an index, so V278 leaves each question one index that can answer it. The
    *       best-first index is partial ({@code WHERE tf >= 1}) and keyed on the lexeme under
    *       collation {@code "POSIX"}: the best-first reads here say {@code t.tf>=1} and compare
    *       under {@code "POSIX"}, the per-entry probes say neither. The best-first reads of the

@@ -126,7 +126,7 @@ CREATE TABLE entry_search_terms (
  ordinal integer NOT NULL,
  doc_length integer NOT NULL CHECK (doc_length >= 1),
  tf smallint NOT NULL CHECK (tf BETWEEN 1 AND 256),
- -- The entry's passage (V275) holding this lexeme most often, earliest first: the excerpt and
+ -- The entry's passage (V277) holding this lexeme most often, earliest first: the excerpt and
  -- duplicate group of a single-word hit, known without reading the passages at search time.
  -- NULL when no stored passage carries the lexeme whole. As wide as the passage position it
  -- copies: an entry of tens of millions of characters has more than 32,767 passages, and a
@@ -294,7 +294,7 @@ $$;
 --     lexemes and their length, ejection), never the text itself. An update that changes none
 --     of those stages nothing; it does read each updated row's lexemes to find that out.
 --
--- On INSERT/UPDATE the posting trigger must run after V275's so the passages it reads exist:
+-- On INSERT/UPDATE the posting trigger must run after V277's so the passages it reads exist:
 -- PostgreSQL fires same-event triggers in name order, and "entry_search_passages" sorts before
 -- "entry_search_terms". The foreign key that carries a changed key to the passages fires before
 -- both for the same reason ("RI_..." sorts first).

@@ -166,7 +166,7 @@ archive. Two migrations add provider-free projections that remove those costs, a
 `EntryStore.searchPassages` reads them. **No transport, tool or hybrid path calls it yet**,
 so served results are unchanged.
 
-`V275__entry_search_passages.sql`:
+`V277__entry_search_passages.sql`:
 
 - A trigger on `entries` cuts each searchable entry's evidence text into consecutive
   passages of about 900 characters (at most 1,900) in the writing transaction. It stores
@@ -175,7 +175,7 @@ so served results are unchanged.
   authorized and matched. An entry without passage rows falls back to a whole-entry excerpt.
 - Passages follow an entry whose key changes, by foreign key.
 
-`V276__entry_search_terms.sql`:
+`V278__entry_search_terms.sql`:
 
 - `entry_search_terms` holds one posting per distinct lexeme per searchable entry: its
   frequency, the entry's length and the passage that holds it most often. No score is
@@ -403,9 +403,9 @@ Costs to check before adoption:
   keeps the plans its triggers made while they were empty until the tables are next
   analysed; one such load of 20,000 single-row statements took three times as long to write.
 - **Migration.** Each migration loads bare tables and builds keys, indexes and foreign keys
-  afterwards, holding a lock that blocks writes to `entries` (and, in V276, new
+  afterwards, holding a lock that blocks writes to `entries` (and, in V278, new
   conversations) until it commits. `statement_timeout` (15 and 30 minutes) bounds each
-  statement, not the migration: V275 has two statements that grow with the archive and V276
+  statement, not the migration: V277 has two statements that grow with the archive and V278
   nine, so the permitted worst case is 30 minutes and four and a half hours. Rehearse both
   on a restored copy first and schedule the measured time as an outage for writes.
 

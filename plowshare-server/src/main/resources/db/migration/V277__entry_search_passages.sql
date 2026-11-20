@@ -14,7 +14,7 @@
 -- entry, and the archive's text is not stored twice.
 --
 -- NOT AN AUTHORITY. Nothing here decides a match, visibility, a corpus statistic or a score:
--- those come from `entries` and from the postings and counts of V276. A passage row only chooses
+-- those come from `entries` and from the postings and counts of V278. A passage row only chooses
 -- which part of an already authorized, already matched entry is shown and which duplicates
 -- collapse together. A missing passage row degrades to the whole-entry excerpt for that one hit;
 -- it never hides or admits a hit.
@@ -112,7 +112,7 @@ CREATE TABLE entry_search_passages (
  text_search tsvector NOT NULL,
  PRIMARY KEY (conversation_id, ordinal, position)
  -- The foreign key to the entry follows the backfill at the end of this file.
- -- Analysed after a fiftieth of the table has changed, not a tenth: see V276.
+ -- Analysed after a fiftieth of the table has changed, not a tenth: see V278.
 ) WITH (autovacuum_analyze_scale_factor = 0.02);
 
 -- Rewrites one entry's passages when what search reads from it changes.
@@ -177,5 +177,5 @@ ALTER TABLE entry_search_passages
  ADD FOREIGN KEY (conversation_id, ordinal)
   REFERENCES entries(conversation_id, ordinal) ON UPDATE CASCADE ON DELETE CASCADE;
 
--- A search must not wait for autovacuum to learn the size of this table (see V276).
+-- A search must not wait for autovacuum to learn the size of this table (see V278).
 ANALYZE entry_search_passages;

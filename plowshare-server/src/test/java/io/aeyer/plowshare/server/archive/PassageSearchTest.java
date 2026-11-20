@@ -56,7 +56,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * The stored-passage lexical search prototype, against real PostgreSQL.
  *
- * <p>Everything asserted here is PostgreSQL's behavior: the V275 trigger and splitter, the V276
+ * <p>Everything asserted here is PostgreSQL's behavior: the V277 trigger and splitter, the V278
  * triggers that keep postings and counts in step under concurrent writers, the foreign keys that
  * remove them with their entry or conversation, and the planner's use of the indexes. A mocked
  * repository can show none of it.
@@ -108,7 +108,7 @@ class PassageSearchTest {
     conversation = conversations.open(Home.global(), Budget.of(20)).id();
   }
 
-  // --- the projection V275 built -------------------------------------------------
+  // --- the projection V277 built -------------------------------------------------
 
   /**
    * The offsets are the whole of what is stored, so they must rebuild the text exactly and no
@@ -368,7 +368,7 @@ class PassageSearchTest {
   }
 
   /**
-   * The lock order V276 exists to keep. A fold inserts a summary and then updates older entries; an
+   * The lock order V278 exists to keep. A fold inserts a summary and then updates older entries; an
    * ejection updates one of those entries. While statistics were updated inside each entry write,
    * the fold held the conversation's statistics row and wanted the entry, the ejection held the
    * entry and wanted the statistics row, and one of them died with "deadlock detected".
@@ -560,7 +560,7 @@ class PassageSearchTest {
         none,
         assigning,
         "a BEFORE UPDATE trigger on entries assigns a column search reads without the statement"
-            + " naming it; the UPDATE OF lists of V275 and V276 no longer see every change");
+            + " naming it; the UPDATE OF lists of V277 and V278 no longer see every change");
     assertEquals(
         List.of("trajectory_image_ejection"),
         jdbc.queryForList(
