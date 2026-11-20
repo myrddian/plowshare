@@ -915,6 +915,10 @@ class PassageSearchTest {
    * <p>Three thousand distinct entries hold the word between one and seven times in bodies of
    * different lengths, so frequency and length pull the score in different directions in different
    * directions. The current search scores all of them.
+   *
+   * <p>The served search is only the oracle here and gets a long budget: it headlines all three
+   * thousand matches, which took more than its two-second default on a slow build host. The pruned
+   * search keeps the default budget.
    */
   @Test
   void aPrunedSingleWordSearchReturnsExactlyTheExhaustivePage() {
@@ -925,8 +929,9 @@ class PassageSearchTest {
             + " FROM generate_series(1, 3000) n",
         conversation);
 
+    EntryStore oracle = new EntryStore(jdbc).useSearchBudget(Duration.ofSeconds(30));
     for (int[] window : new int[][] {{0, 10}, {10, 10}, {0, 50}}) {
-      LogSearch exhaustive = entries.search(Home.global(), "marker", window[0], window[1]);
+      LogSearch exhaustive = oracle.search(Home.global(), "marker", window[0], window[1]);
       BoundedLogSearch pruned =
           entries.searchPassages(Home.global(), "marker", window[0], window[1], null);
 
