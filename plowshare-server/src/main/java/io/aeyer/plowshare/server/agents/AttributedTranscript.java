@@ -15,7 +15,7 @@ import java.util.UUID;
 
 /**
  * Per-run carrier; parent ownership is captured at delegation rather than inferred from later
- * calls.
+ * calls. The underlying transcript owns the opening and its input provenance.
  */
 public record AttributedTranscript(
     Transcript delegate, UsageAttribution usage, UsageAttribution parentUsage)
@@ -74,6 +74,16 @@ public record AttributedTranscript(
   @Override
   public Speaker speaker() {
     return delegate.speaker();
+  }
+
+  @Override
+  public void prepareInput(InputProvenance provenance) {
+    delegate.prepareInput(provenance);
+  }
+
+  @Override
+  public InputProvenance inputProvenance() {
+    return delegate.inputProvenance();
   }
 
   @Override
