@@ -97,7 +97,7 @@ class MonitorTest(unittest.IsolatedAsyncioTestCase):
         await self.settings.save(replace(CHOICE, targets=("192.168.0.13",)))
         await self.settings.apply_pending()
         self.assertEqual(self.worker.config.collection.targets, ("192.168.0.13",))
-        self.assertEqual(json.loads(self.receipts.path.read_text())["version"], 2)
+        self.assertEqual(json.loads(self.receipts.path.read_text())["version"], 3)
         # A scope edited behind the operator boundary still fails the restart fence.
         foreign = replace(
             self.worker.config,

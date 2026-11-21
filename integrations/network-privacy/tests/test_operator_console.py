@@ -455,6 +455,53 @@ class OperatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(self.store.preferences.automatic_investigations)
 
+    async def test_operator_releases_a_confirmed_missing_completion_over_http(
+        self,
+    ) -> None:
+        self.port.events["schedule.due"] = [event("schedule:lost-completion")]
+        with patch.object(
+            self.port,
+            "publish",
+            side_effect=TransportError(Delivery.UNKNOWN, "completion reply lost"),
+        ):
+            with self.assertRaises(TransportError) as stopped:
+                await self.worker.poll()
+        self.worker._attention(stopped.exception)
+        lost = self.receipts.all()[-1]
+        self.assertEqual(lost.phase, "publishing")
+        self.assertEqual(
+            (await self.console.health()).unsettled_completions, (lost.scan_id,)
+        )
+        client = TestClient(
+            TestServer(application(self.worker, TOKEN, console=self.console))
+        )
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+        path, headers = "/api/recovery/completion", {"Authorization": "Bearer " + TOKEN}
+        self.assertEqual(
+            (await client.post(path, json={"scan_id": lost.scan_id})).status, 401
+        )
+        for invalid in ({}, {"scan_id": "not-a-scan"}, {"scan_id": self.scan.scan_id}):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(
+                    (await client.post(path, headers=headers, json=invalid)).status,
+                    400,
+                )
+        self.assertEqual(self.receipts.all()[-1].phase, "publishing")
+        self.recover.assert_not_awaited()
+
+        published = len(self.port.published)
+        response = await client.post(
+            path, headers=headers, json={"scan_id": lost.scan_id}
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {"released": True})
+        # The release sends nothing itself and leaves resumption to the usual check.
+        self.assertEqual(self.receipts.all()[-1].phase, "uploaded")
+        self.assertEqual(len(self.port.published), published)
+        self.recover.assert_awaited_once()
+        self.assertEqual((await self.console.health()).unsettled_completions, ())
+
     async def test_preference_change_does_not_rewrite_unknown_completion(self) -> None:
         receipt = replace(self.scan, phase="publishing")
         expected = self.worker.completion_request(receipt).text

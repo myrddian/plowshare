@@ -2730,6 +2730,7 @@ function renderOverview(value) {
   byId('health-detail').textContent = `Checked ${formatWhen(health.checked_at)}. ${health.detail}`;
   byId('checklist').replaceChildren(...health.checklist.map(item => element('li', item)));
   byId('recovery').replaceChildren(...health.recovery.map(item => element('p', item, 'notice error')));
+  for (const scan of health.unsettled_completions || []) byId('recovery').append(completionRelease(scan));
   const runs = byId('recent-runs'); runs.replaceChildren();
   if (health.runs_detail) runs.append(element('p', health.runs_detail, health.runs.length ? 'hint' : 'empty'));
   else if (!health.runs.length) runs.append(element('p', 'No project investigations yet.', 'empty'));
@@ -2873,6 +2874,25 @@ async function piholeConnection(save) {
 }
 byId('pihole-test').addEventListener('click', () => piholeConnection(false));
 byId('pihole-form').addEventListener('submit', event => {event.preventDefault(); piholeConnection(true);});
+// A lost completion cannot be settled by the read-only check when the server
+// never stored it. The collector reads the retained log again and resends the
+// original completion only when it is confirmed missing; it never rescans.
+function completionRelease(scan) {
+  const row = element('div', undefined, 'actions');
+  const button = element('button', 'Republish missing completion', 'secondary');
+  button.type = 'button';
+  button.title = `Scan ${scan}`;
+  button.addEventListener('click', async () => {
+    setBusy(button, true);
+    try {
+      const result = await api('/api/recovery/completion', {method:'POST', body:JSON.stringify({scan_id: scan})});
+      await refresh();
+      notice(result.released ? 'The completion was confirmed missing and released. It is published once with its original identity; nothing is rescanned.' : 'The completion was already retained. Nothing was resent.');
+    } catch (error) {notice(error.message, true);} finally {setBusy(button, false);}
+  });
+  row.append(element('p', 'If Check retained work cannot settle this scan because its completion never reached Plowshare, republish it. The retained log is checked first.', 'hint'), button);
+  return row;
+}
 byId('recover').addEventListener('click', async () => {
   setBusy(byId('recover'), true);
   try {await api('/api/recovery', {method:'POST', body:'{}'}); await refresh(); notice('Retained receipts checked. Collection can resume; no uncertain effect was resent.');} catch (error) {notice(error.message,true);} finally {setBusy(byId('recover'), false);}

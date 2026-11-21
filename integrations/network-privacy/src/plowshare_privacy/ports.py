@@ -55,6 +55,7 @@ class PrivacyPort(Protocol):
     async def sources(self, name: str) -> tuple[InformationRevisionDto, ...]: ...
     async def read_source(self, revision: str) -> str: ...
     async def find_event(self, topic: str, event_id: str) -> RelayEventDto | None: ...
+    async def oldest_event(self, topic: str) -> RelayEventDto | None: ...
     async def reports(self) -> tuple[InformationRevisionDto, ...]: ...
 
 
@@ -286,3 +287,25 @@ class SdkPrivacyPort:
                 raise ValueError("Relay log cursor did not advance")
             after = result.next
         raise ValueError("Reconciliation read bound reached; inspect the retained log")
+
+    async def oldest_event(self, topic: str) -> RelayEventDto | None:
+        """The earliest event the retained log still holds, or none.
+
+        This is the log's retention horizon for explicit recovery: an event
+        that would sort after it cannot have been removed by retention yet.
+        """
+        result = (
+            await self.client.request(
+                RelayLogRequest(
+                    selection=RelayLogPayloadVariant1Dto(
+                        project=self.config.project,
+                        topic=topic,
+                        after="0",
+                        limit=1,
+                    )
+                )
+            )
+        ).require_payload()
+        if result.scope.project != self.config.project or result.topic.name != topic:
+            raise ValueError("Foreign Relay log")
+        return result.events[0] if result.events else None

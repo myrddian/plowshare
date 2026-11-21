@@ -81,6 +81,9 @@ class Health:
     # When ``runs`` was last read, and why it is not current (None when it is).
     runs_checked_at: str | None = None
     runs_detail: str | None = None
+    # Scans whose completion publication has an unknown outcome. Each can be
+    # checked, and released if confirmed absent, by an explicit operator action.
+    unsettled_completions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -390,6 +393,11 @@ class OperatorConsole:
                 unifi,
                 self._runs_checked_at,
                 self._runs_detail,
+                tuple(
+                    item.scan_id
+                    for item in self.worker.receipts.all()
+                    if item.phase == "publishing"
+                ),
             )
             self.cache_until = time.monotonic() + 20
             return self.cached
@@ -463,6 +471,19 @@ class OperatorConsole:
             # invokes this read-only check before authorizing the worker to resume.
             await self.recover(reconcile_manual)
             self.cache_until = 0
+
+    async def release_completion(self, scan_id: str) -> bool:
+        """Settle or release one unknown completion, then run the ordinary check.
+
+        The worker decides from the retained log whether the completion is
+        already there (settled, nothing sent) or confirmed absent (released for
+        one publication under its original identity). The usual read-only check
+        then decides whether collection may resume; any other unsettled work
+        still keeps it fenced. Returns whether a publication was released.
+        """
+        released = await self.worker.release_absent_completion(scan_id)
+        await self.check_and_resume()
+        return released
 
     async def connect_pihole(
         self, origin: str, password: str, save: bool

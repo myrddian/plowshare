@@ -19,6 +19,7 @@ from .device_detection import DeviceDetection, detect_device
 from .dns_activity import DnsActivity
 from .journal import Receipt
 from .presence import PresenceCount, PresenceView, epoch
+from .scan_retention import CarriedAddress
 from .traffic import TrafficVolume
 
 
@@ -116,8 +117,13 @@ def device_inventory(
     labels: tuple[DeviceLabel, ...],
     receipts: tuple[Receipt, ...],
     presence: PresenceView | None = None,
+    carried: tuple[CarriedAddress, ...] = (),
 ) -> DeviceInventory:
     """Read completed sweeps in journal order. History belongs to an address.
+
+    ``carried`` is what scans that already left the journal established for an
+    address. It is older than every receipt here, so it only seeds the history
+    that the retained sweeps then extend.
 
     An open TCP service or an observed identity promotes an address. Refusals can
     come from network equipment, so they update response history without promoting
@@ -126,7 +132,18 @@ def device_inventory(
     """
     presence = presence if presence is not None else PresenceView()
     names = {item.address: item.label for item in labels}
-    addresses = {address: _AddressHistory() for address in targets}
+    earlier = {item.address: item for item in carried}
+    addresses = {
+        address: _AddressHistory(
+            first_response_at=earlier[address].first_response_at,
+            last_response_at=earlier[address].last_response_at,
+            last_known_identity=earlier[address].last_known_identity,
+            open_service_observed=earlier[address].open_service_observed,
+        )
+        if address in earlier
+        else _AddressHistory()
+        for address in targets
+    }
     recent_start = max(0, len(receipts) - 50)
     for index, receipt in enumerate(receipts):
         evidence = receipt.evidence
@@ -356,6 +373,7 @@ class InventoryProjection:
         self._plan: CollectionPlan | None = None
         self._receipts: tuple[Receipt, ...] = ()
         self._presence: PresenceView | None = None
+        self._carried: tuple[CarriedAddress, ...] = ()
         self._inventory = DeviceInventory()
 
     def current(
@@ -363,20 +381,23 @@ class InventoryProjection:
         plan: CollectionPlan,
         receipts: tuple[Receipt, ...],
         presence: PresenceView,
+        carried: tuple[CarriedAddress, ...] = (),
     ) -> DeviceInventory:
         done = tuple(item for item in receipts if item.phase == "done")
         # The active plan fences visibility, so a plan change always rebuilds.
         if (
             plan != self._plan
             or presence is not self._presence
+            or carried is not self._carried
             or len(done) != len(self._receipts)
             or any(
                 current is not cached for current, cached in zip(done, self._receipts)
             )
         ):
             self._inventory = device_inventory(
-                plan.targets, plan.labels, done, presence
+                plan.targets, plan.labels, done, presence, carried
             )
+            self._carried = carried
             self._presence = presence
             self._plan = plan
             self._receipts = done
