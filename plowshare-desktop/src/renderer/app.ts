@@ -1054,6 +1054,12 @@ function renderStatus() {
         'The job may still be running on the server. Reconnect to check its state.',
       kind: 'warning',
     });
+  else if (job?.status === 'unavailable')
+    alerts.push({
+      label: 'Job status unavailable',
+      text: 'Check the conversation history for recorded results.',
+      kind: 'note',
+    });
   else if (job?.status === 'interrupted')
     alerts.push({
       label: 'Request interrupted',

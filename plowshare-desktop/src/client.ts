@@ -2986,11 +2986,11 @@ export class DesktopClient {
           busy = true;
           try {
             await this.readJob(id);
-            await this.refresh();
+            if (this.timers.has(id)) await this.refresh();
           } catch (error) {
             if (generation !== this.generation) return;
             const job = this.state.jobs.find((row) => row.id === id);
-            if (job)
+            if (job && activeJob(job))
               job.detail =
                 error instanceof Error ? error.message : errorMessage(error);
           } finally {
@@ -3005,13 +3005,38 @@ export class DesktopClient {
     );
     void this.readJob(id).catch(() => {});
   }
+  private stopPolling(id: string) {
+    clearInterval(this.timers.get(id));
+    this.timers.delete(id);
+  }
   private async readJob(id: string) {
     const generation = this.generation;
-    const answer = ok(await this.send(checking(id)));
     const job = this.state.jobs.find((row) => row.id === id);
-    if (!job) return;
+    if (!job || !activeJob(job)) return;
     const ticket = this.tickets.get(job);
-    if (!ticket || generation !== this.generation) return;
+    if (!ticket) return;
+    const answer = await this.send(checking(id));
+    if (
+      generation !== this.generation ||
+      this.tickets.get(job) !== ticket ||
+      !activeJob(job)
+    )
+      return;
+    if (answer.code === 'NOT_FOUND') {
+      // A missing handle ends this watch. The conversation still owns any recorded
+      // results, and the status reply carries no job outcome or approval decision.
+      this.stopPolling(id);
+      this.lifecycle.forget(ticket);
+      this.tickets.delete(job);
+      job.status = 'unavailable';
+      job.detail = 'The server no longer has live status for this job.';
+      delete job.thinking;
+      delete job.thinkingTruncated;
+      this.emit();
+      if (job.conversation) this.background(this.catchUp(job.conversation));
+      return;
+    }
+    ok(answer);
     const status = jobStatusOf(answer, id);
     if (
       status &&
@@ -3061,8 +3086,7 @@ export class DesktopClient {
       job.ending = ending;
       if (typeof outcome?.text === 'string') job.text = outcome.text;
       job.detail = ended?.detail;
-      clearInterval(this.timers.get(id));
-      this.timers.delete(id);
+      this.stopPolling(id);
       // A fast completion can stop polling before its first approval read. The durable
       // outcome is sufficient to discover questions even if no Inbox push arrives.
       if (ending === 'AWAITING') await this.refresh();

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { protocolFixture } from './protocol-fixture.mjs';
 const profile = await mkdtemp(join(tmpdir(), 'plowshare-questions-'));
-const fixture = await protocolFixture();
+const fixture = await protocolFixture({ emptyApprovals: true });
 const env = { ...process.env, PLOWSHARE_CONFIG_DIR: join(profile, 'credentials'), PLOWSHARE_DESKTOP_CONFIG: join(profile, 'config'), PLOWSHARE_DESKTOP_PROFILE: profile }; delete env.ELECTRON_RUN_AS_NODE;
 let app;
 try {
@@ -58,6 +58,40 @@ try {
   assert.equal(answers().length, 2); assert.equal(fixture.frames.some(frame => frame.type === 'agent.run'), false);
   await assert.rejects(main.evaluate(() => window.plowshare.request({ action: 'run-answer', id: 'foreign', question: 'invented', answer: 'yes' })), /current pending/);
   await assert.rejects(main.evaluate(() => window.plowshare.request({ action: 'run-cancel', id: 'fixture-old-root' })), /Open Activity/);
+
+  const prior = await main.evaluate(() => window.plowshare.request({
+    action: 'run', conversation: 'fixture-first', agent: 'fixture-bot', text: 'Pre-restart chat job',
+  }));
+  const job = prior.state.jobs.find(row => row.task === 'Pre-restart chat job');
+  assert.ok(job);
+  await expect(main.locator('#transcript')).toContainText('Fixture streaming: Pre-restart chat job');
+  fixture.disconnect();
+  await expect(main.locator('#conversation-alerts')).toContainText('Outcome uncertain');
+  fixture.completeJob(job.id);
+  fixture.forgetJobStatus(job.id);
+  fixture.changeRun('fixture-old-root', 'asking');
+  fixture.setQuestion({
+    id: 'objective-review',
+    text: 'Approve the objectives?',
+    structure: { lead: 'Review the objectives.', questions: [
+      { header: 'Objectives', question: 'Approve the objectives?', multi: false,
+        options: [{ label: 'Approve', description: 'Continue the run.' }] },
+    ] },
+  });
+  await main.evaluate(base => window.plowshare.request({
+    action: 'connect', base, handle: 'fixture', password: '',
+  }), fixture.base);
+  await expect(modal).toContainText('Approve the objectives?');
+  await modal.locator('input[value="Approve"]').check();
+  await modal.locator('#run-answer-send').click();
+  await expect(modal).not.toBeVisible();
+  await expect(main.locator('#conversation-alerts')).toContainText('Job status unavailable');
+  await expect(main.locator('#conversation-alerts')).not.toContainText('Outcome uncertain');
+  await expect(main.locator('#composer-status-text')).toHaveText('Ready');
+  await expect(main.locator('#transcript')).toContainText('Fixture answer: Pre-restart chat job');
+  assert.deepEqual(answers()[2]?.payload.choices, [{ header: 'Objectives', chosen: ['Approve'] }]);
+  assert.equal(answers().length, 3);
+  assert.equal(fixture.frames.filter(frame => frame.type === 'agent.run').length, 1);
   assert.deepEqual(errors, []);
-  console.log('PASS: chat question popup, scoped queue, no Activity window, drafts, Later/Escape, stale-question guard, multi-select/other/notes, free text, remote settlement and no replay.');
+  console.log('PASS: chat question popup, scoped queue, drafts, stale questions, structured decisions, remote settlement and post-restart approval without replay.');
 } finally { if (app) await app.close(); await fixture.close(); await rm(profile, { recursive: true, force: true }); }

@@ -164,6 +164,7 @@ export interface Job {
     | 'cancelling'
     | 'finished'
     | 'interrupted'
+    | 'unavailable'
     | 'unknown';
   text: string;
   thinking?: string;

@@ -263,6 +263,9 @@ Live document browsing, memory management and search use the connected server.
 Closing the application disconnects it and does not cancel server jobs. Active job handles are retained for reconnects within the same
 window, but are not restored after app quit. The Chat jobs list tracks those
 jobs; the separate Runs view discovers account orchestrations.
+When the server reports a job handle missing after reconnect, Desktop stops
+polling that handle and checks the conversation for recorded results. The Runs
+view continues to show recorded orchestration decisions.
 
 The **Inbox** and **Runs** pages are separate sidebar destinations. **Scheduled work**
 is separate too; **Orchestration** shares only **Definitions** and **Orchestration builder** tabs. Inbox shows up to

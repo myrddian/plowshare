@@ -30,8 +30,10 @@ import { DesktopClient, validatedBase } from './client.ts';
 import type { Connector } from './client.ts';
 import type { Outcome } from 'plowshare-client-ts/binding/envelope';
 import {
+  activeJob,
   contextKey,
   replyState,
+  runQuestion,
   stoppedJob,
   THINKING_PREVIEW_CHARACTERS,
 } from './shared.ts';
@@ -2051,9 +2053,100 @@ await test('disconnect leaves an uncertain outcome and never resubmits a run', a
   f.closed();
   assert.equal(f.client.state.connected, false);
   assert.equal(present(f.client.state.jobs[0]).status, 'unknown');
+  f.status(() => ({ code: 'ARCHIVE_UNAVAILABLE' }));
   await connect(f.client);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(present(f.client.state.jobs[0]).status, 'unknown');
   assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 1);
   assert.equal(f.client.state.mode, 'live');
+});
+
+await test('a missing pre-restart job retires independently of a recorded orchestration approval', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  let state = 'asking';
+  f.orchestration((type) => {
+    if (type === 'orchestration.list')
+      return {
+        code: 'OK',
+        payload: { orchestrations: [runWire('root', state)] },
+      };
+    if (type === 'orchestration.answer') {
+      state = 'running';
+      return { code: 'OK', payload: { id: 'root', state } };
+    }
+    assert.equal(type, 'orchestration.status');
+    return { code: 'OK', payload: statusWire('root', state) };
+  });
+  await connect(f.client);
+  await f.client.dispatch({
+    action: 'run',
+    conversation: 'first',
+    agent: 'bot',
+    text: 'Original task',
+  });
+  f.closed();
+  let returnStatus: ((answer: Outcome) => void) | undefined;
+  f.status(
+    () =>
+      new Promise((resolve) => {
+        returnStatus = resolve;
+      }),
+  );
+  await connect(f.client);
+  await f.client.activity.open('runs');
+  await f.client.activity.select('root');
+  const shown = present(f.client.state.activity.details.root?.wire);
+  await f.client.dispatch({
+    action: 'run-answer',
+    id: 'root',
+    question: runQuestion(shown),
+    answer: 'Approve',
+  });
+
+  const readsBeforeMissing = f.calls.filter(
+    (call) =>
+      call.type === 'conversation.trajectory' &&
+      call.payload.conversation === 'first',
+  ).length;
+  present(returnStatus)({
+    code: 'NOT_FOUND',
+    said: 'Job missing after restart',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const formerJob = present(f.client.state.jobs[0]);
+  assert.equal(formerJob.status, 'unavailable');
+  assert.equal(activeJob(formerJob), false);
+  assert.equal(formerJob.ending, undefined);
+  assert.equal(f.client.savedJobs().length, 0);
+  assert.equal(
+    f.calls.filter(
+      (call) =>
+        call.type === 'conversation.trajectory' &&
+        call.payload.conversation === 'first',
+    ).length,
+    readsBeforeMissing + 1,
+  );
+  const statuses = f.calls.filter((call) => call.type === 'job.status').length;
+  f.push({ job: formerJob.id, kind: 'ended', ending: 'ANSWERED' });
+  assert.equal(
+    f.calls.filter((call) => call.type === 'job.status').length,
+    statuses,
+  );
+  assert.equal(
+    f.client.state.activity.details.root?.value?.run.state,
+    'running',
+  );
+  assert.equal(
+    f.client.state.activity.decisions?.root?.notice,
+    'Answer recorded.',
+  );
+  assert.equal(
+    f.calls.filter((call) => call.type === 'orchestration.answer').length,
+    1,
+  );
+  assert.equal(f.calls.filter((call) => call.type === 'agent.run').length, 1);
 });
 
 await test('returning to demo drops live data and ignores old socket callbacks', async (t) => {
