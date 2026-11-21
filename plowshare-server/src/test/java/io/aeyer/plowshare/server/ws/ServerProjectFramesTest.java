@@ -231,7 +231,8 @@ class ServerProjectFramesTest {
     when(session.id()).thenReturn("checkout");
     when(sessions.find("checkout")).thenReturn(Optional.of(session));
     var unions = mock(UnionRouting.class);
-    when(unions.providers(anyString(), anyList(), any(), any())).thenReturn(Optional.empty());
+    when(unions.providers(anyString(), anyList(), any(), any(), any()))
+        .thenReturn(Optional.empty());
     var routing =
         new AgentsConfig()
             .runProviders(

@@ -34,7 +34,7 @@ public final class FileApprovalPolicyRepository implements ApprovalPolicyReposit
   private static final int MAX_BYTES = 1024 * 1024;
   private static final ObjectMapper JSON = strictMapper();
 
-  private static ObjectMapper strictMapper() {
+  static ObjectMapper strictMapper() {
     ObjectMapper mapper =
         JsonMapper.builder()
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)

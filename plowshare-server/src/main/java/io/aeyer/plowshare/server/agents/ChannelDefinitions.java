@@ -5,6 +5,7 @@ import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.FileResult;
 import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.approvals.ReviewWork;
 import io.aeyer.plowshare.server.files.FileRefusedException;
 import io.aeyer.plowshare.server.files.FileWords;
 import io.aeyer.plowshare.server.files.SessionChannel;
@@ -13,6 +14,7 @@ import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.text.Normalizer;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -221,6 +223,17 @@ public final class ChannelDefinitions implements DefinitionSource {
 
   /** A harness resource/rule read; the client retains its existing filesystem enforcement. */
   FileRead resource(String path) {
+    return resource(path, null, MAX_DEFINITION_BYTES);
+  }
+
+  /** Read a checkout-relative security file using the enclosing review's remaining budget. */
+  FileRead securityResource(String path, ReviewWork work, long maxBytes) {
+    if (maxBytes <= 0 || maxBytes > MAX_DEFINITION_BYTES)
+      throw new IllegalArgumentException("Security resource byte limit is invalid");
+    return resource(path, Objects.requireNonNull(work), maxBytes);
+  }
+
+  private FileRead resource(String path, ReviewWork work, long maxBytes) {
     Path parsed = Path.of(path);
     if (!parsed.normalize().toString().equals(path)) {
       return FileRead.unreadable("a resource path must already be normalized");
@@ -230,10 +243,11 @@ public final class ChannelDefinitions implements DefinitionSource {
         return FileRead.unreadable("a resource path contains an unsafe segment");
       }
     }
-    if (parsed.isAbsolute() && clientRoots(true).stream().noneMatch(parsed::startsWith)) {
+    if (parsed.isAbsolute()
+        && (work != null || clientRoots(true).stream().noneMatch(parsed::startsWith))) {
       return FileRead.unreadable("a resource must belong to this session's roots");
     }
-    FileRead read = readWhole(path, true);
+    FileRead read = readWhole(path, true, work, maxBytes);
     requireCurrent();
     return read;
   }
@@ -885,6 +899,11 @@ public final class ChannelDefinitions implements DefinitionSource {
 
   /** Required resources preserve transport failures; optional caps keep their last known values. */
   private FileRead readWhole(String path, boolean requireAvailable) {
+    return readWhole(path, requireAvailable, null, MAX_DEFINITION_BYTES);
+  }
+
+  private FileRead readWhole(
+      String path, boolean requireAvailable, ReviewWork work, long maxBytes) {
     List<String> lines = new ArrayList<>();
     long bytes = 0;
     int offset = 0;
@@ -893,7 +912,7 @@ public final class ChannelDefinitions implements DefinitionSource {
       Window window = Window.of(offset, Window.MAX_WINDOW_LINES);
       Span span;
       try {
-        FileReply reply = ask(FileRequest.read(id(), path, window));
+        FileReply reply = ask(FileRequest.read(id(), path, window), work);
         if (reply.span() == null) {
           throw brokenAnswer(
               FileRequest.READ,
@@ -939,6 +958,11 @@ public final class ChannelDefinitions implements DefinitionSource {
             window.limit());
         return FileRead.unreadable("the session's answer could not be assembled");
       }
+      if (work != null
+          && (span.offset() != offset
+              || !span.more() && span.totalLines() != (long) offset + span.lines().size())) {
+        return FileRead.unreadable("the security file window is incomplete or out of order");
+      }
       if (expectedTotal < 0) {
         expectedTotal = span.totalLines();
       } else if (span.totalLines() != expectedTotal) {
@@ -970,14 +994,14 @@ public final class ChannelDefinitions implements DefinitionSource {
         // measured after the loop is an accumulator with no ceiling.
         // Both numbers are this server's own -- see the constants.
         bytes += line == null ? 1 : line.getBytes(StandardCharsets.UTF_8).length + 1L;
-        if (bytes > MAX_DEFINITION_BYTES) {
+        if (bytes > maxBytes) {
           log.debug(
               "session '{}': '{}' is past {} bytes, which is more than this"
                   + " server will assemble for one definition, so it contributes"
                   + " nothing",
               sessionId,
               path,
-              MAX_DEFINITION_BYTES);
+              maxBytes);
           return FileRead.unreadable("the file is larger than this server assembles");
         }
         lines.add(line);
@@ -1044,13 +1068,29 @@ public final class ChannelDefinitions implements DefinitionSource {
    * copied rather than reinvented, minus the grant it has no equivalent of here.
    */
   private FileReply ask(FileRequest request) {
+    return ask(request, null);
+  }
+
+  private FileReply ask(FileRequest request, ReviewWork work) {
     // Marked here, in the one place every request this class sends passes
     // through, so no call site above can forget: Ruling 7 says only
     // FileRequest.DEFINITIONS reaches a client's .plowshare/agents or
     // .plowshare/bots, and this is the harness saying so rather than a
     // model's file tool, which never calls forDefinitions() at all.
     channel.requireCurrent(sessionId);
-    FileReply reply = channel.ask(sessionId, request.forDefinitions());
+    FileReply reply;
+    if (work == null) {
+      reply = channel.ask(sessionId, request.forDefinitions());
+    } else {
+      // The file transport owns the physical exchange. Every reply wait consumes the
+      // review's remaining time, and a stopped review neither pages again nor uses a reply.
+      Duration remaining = work.remaining();
+      if (remaining.isZero() || work.stopped())
+        throw new WorkspaceUnavailableException("Security guidance read expired or was cancelled");
+      reply = channel.ask(sessionId, request.forDefinitions(), remaining);
+      if (work.stopped())
+        throw new WorkspaceUnavailableException("Security guidance read expired or was cancelled");
+    }
     channel.requireCurrent(sessionId);
     if (!request.id().equals(reply.id())) {
       throw brokenAnswer(request.op(), "answered a different request");

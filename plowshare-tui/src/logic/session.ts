@@ -317,6 +317,8 @@ export function approvalsWaiting(
  * acceptance commands, each of which the lines that show a set whole name.
  */
 export function approvalAsks(approval: Approval): string {
+  if (approval.web)
+    return `allow the exact web ${approval.web.verb === 'SEARCH' ? 'search' : 'fetch'} request once`;
   if (approval.file)
     return `${approval.file.kind} ${approval.file.paths.join(' → ')} on ${approval.file.provider}`;
   return approval.commands === undefined

@@ -239,6 +239,8 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    * @param depth how many parents this run has; a root is 0. {@link #startNested} is the only thing
    *     that passes anything else, and the database refuses a parent without a depth or a depth
    *     without a parent
+   * @param authenticatedWebTask the runtime's authenticated task evidence, separate from the
+   *     generated request and supplied context
    */
   public record Start(
       OrchestrationDefinition definition,
@@ -252,7 +254,37 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       String parent,
       int depth,
       RelayCausation causation,
-      Speaker source) {
+      Speaker source,
+      String authenticatedWebTask) {
+    public Start(
+        OrchestrationDefinition definition,
+        Home home,
+        String request,
+        String context,
+        String callerConversation,
+        String callerAgent,
+        String callerHandle,
+        String callerSession,
+        String parent,
+        int depth,
+        RelayCausation causation,
+        Speaker source) {
+      this(
+          definition,
+          home,
+          request,
+          context,
+          callerConversation,
+          callerAgent,
+          callerHandle,
+          callerSession,
+          parent,
+          depth,
+          causation,
+          source,
+          null);
+    }
+
     public Start(
         OrchestrationDefinition definition,
         Home home,
@@ -1037,6 +1069,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
     var caller = callerAdmission(start, admittedCaller);
 
     OrchestrationDefinition definition = start.definition();
+    String webTask = authenticatedWebTask(start);
     // The person's caps (spec 2026-09-29 §2): the budget the conversation is logged with and
     // the first turn's steps. Every later turn is rebuilt, and capped again, in rebuild.
     AgentDefinition conductor = capped(definition.conductor(), start.home().project());
@@ -1112,6 +1145,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                                 start.parent(),
                                 start.depth(),
                                 start.causation()));
+                    if (webTask != null) store.pinWebTask(inserted.id(), webTask);
                     seeding.seedStages(
                         conversation.id(),
                         ownStages.stream()
@@ -1175,6 +1209,14 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                 definition.name(), start.request(), start.context(), own, parentDir, phase);
     speakOrFail(run, conductor, utterance, null, start.source());
     return store.find(run.id()).orElse(run);
+  }
+
+  /** Startup handoffs only confer authority when their source was authenticated by the host. */
+  private static String authenticatedWebTask(Start start) {
+    if (start.source() != null
+        && start.source().kind() == Speaker.Kind.PERSON
+        && Objects.equals(start.source().name(), start.callerHandle())) return start.request();
+    return start.authenticatedWebTask();
   }
 
   private OperationAuthority.Admission callerAdmission(
@@ -1290,6 +1332,17 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
       String request,
       String context,
       boolean wait) {
+    return startNested(parentId, definition, request, context, wait, null);
+  }
+
+  /** Only the runtime's authenticated task may accompany the generated child handoff. */
+  Started startNested(
+      String parentId,
+      OrchestrationDefinition definition,
+      String request,
+      String context,
+      boolean wait,
+      String authenticatedParentTask) {
     OrchestrationRecord parent = store.find(parentId).orElse(null);
     if (parent == null) {
       return new Started(lostRace(parentId, START_A_CHILD), null, false);
@@ -1331,7 +1384,10 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                 parent.callerHandle(),
                 parent.callerSession(),
                 parent.id(),
-                parent.depth() + 1));
+                parent.depth() + 1,
+                null,
+                null,
+                authenticatedParentTask));
     Optional<OrchestrationRecord> after = store.find(parent.id());
     if (after.isEmpty() || after.get().state().terminal()) {
       // The parent ended while this child was being inserted and first-turned, and a cascade

@@ -44,6 +44,7 @@ import io.aeyer.plowshare.server.agents.Pace;
 import io.aeyer.plowshare.server.agents.ProjectCaps;
 import io.aeyer.plowshare.server.agents.RecordingLogStages;
 import io.aeyer.plowshare.server.agents.RunLimits;
+import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.StructuredQuestions;
 import io.aeyer.plowshare.server.agents.StudioTools;
 import io.aeyer.plowshare.server.agents.Turn;
@@ -3916,6 +3917,71 @@ class OrchestrationsTest {
                 + kid.id()
                 + "/"),
         first);
+  }
+
+  @Test
+  void a_nested_script_pins_only_authenticated_parent_intent() throws Exception {
+    var engine = engine();
+    String task = "Review the public legal report";
+    var parent =
+        engine.start(
+            new Orchestrations.Start(
+                definition,
+                Home.of("story"),
+                task,
+                "Supplied parent context",
+                null,
+                "interlocutor",
+                "enzo",
+                "s-live",
+                null,
+                0,
+                null,
+                Speaker.person("enzo")));
+    String retained =
+        store.webTask(parent.conductorConversation(), parent.callerHandle()).orElseThrow();
+    assertEquals(task, retained);
+    var script =
+        OrchestrationRegistry.parsePinned(
+            "research",
+            "research.js",
+            """
+        // plowshare-script v1
+        export const manifest = {name:'research', description:'Check public evidence',
+          model:'reasoning', tools:['web_search'], 'max-turns':5, 'max-model-calls':5,
+          stages:[{id:'evidence'}]};
+        export function step(input) { return {state:{}, command:{tool:'web_search',
+          arguments:{query:'public legal report'}}}; }
+        """,
+            Set.of("web_search"),
+            Tier.PROJECT);
+
+    var nested =
+        child(
+            engine.startNested(
+                parent.id(),
+                script,
+                "Generated child request",
+                "Supplied child context",
+                false,
+                retained));
+
+    assertEquals(Optional.of(task), store.webTask(nested.conductorConversation(), "enzo"));
+    assertTrue(store.webTask(nested.conductorConversation(), "another-account").isEmpty());
+    var handoff = JSON.readTree(voice.calls.getLast().utterance());
+    assertEquals("Generated child request", handoff.path("request").asText());
+    assertEquals("Supplied child context", handoff.path("context").asText());
+    assertEquals(2, handoff.size());
+
+    var withoutIntent =
+        child(
+            engine.startNested(
+                parent.id(),
+                script,
+                "Another generated request",
+                "Another supplied context",
+                false));
+    assertTrue(store.webTask(withoutIntent.conductorConversation(), "enzo").isEmpty());
   }
 
   @Test

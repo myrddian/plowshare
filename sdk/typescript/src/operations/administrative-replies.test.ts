@@ -615,7 +615,7 @@ describe('complete administrative WS replies', () => {
           if (
             (type === 'InboxItem' && field.name.getText(source) === 'about') ||
             (type === 'ApprovalView' &&
-              ['budget', 'file'].includes(field.name.getText(source)))
+              ['budget', 'file', 'web'].includes(field.name.getText(source)))
           )
             expect(field.questionToken, type).toBeDefined();
           else expect(field.questionToken, type).toBeUndefined();

@@ -861,10 +861,8 @@ public class ConversationController {
       @RequestParam(required = false) String snapshot,
       @RequestParam(required = false) String conversation,
       @RequestParam(required = false) Boolean includeInputs) {
-    if (mode == null
-        && snapshot == null
-        && conversation == null
-        && !Boolean.TRUE.equals(includeInputs)) return searchEntries(q, project, offset, limit);
+    // A request naming no mode takes this same call: the retrieval service treats it as lexical,
+    // chooses the configured engine and discloses a bounded total.
     String question = RequestedLogQuestion.in(q);
     RequestedWindow window = RequestedWindow.in(offset, limit);
     return ResponseEntity.ok(
@@ -879,21 +877,6 @@ public class ConversationController {
                 null,
                 conversation,
                 Boolean.TRUE.equals(includeInputs)));
-  }
-
-  public ResponseEntity<LogSearchView> searchEntries(
-      @RequestParam(required = false) String q,
-      @RequestParam(required = false) String project,
-      @RequestParam(required = false) Integer offset,
-      @RequestParam(required = false) Integer limit) {
-
-    String question = RequestedLogQuestion.in(q);
-    RequestedWindow window = RequestedWindow.in(offset, limit);
-    return ResponseEntity.ok(
-        LogSearchView.of(
-            entryReads().search(RequestedHome.in(project), question, window.skip(), window.most()),
-            window.skip(),
-            window.most()));
   }
 
   /**

@@ -115,6 +115,52 @@ class OrchestrationStoreTest {
   }
 
   @Test
+  void pinned_web_task_and_script_result_receipt_survive_reconstruction() {
+    String conversation = conductorConversation();
+    var run = store.insert(newOrchestration(conversation, 2));
+    store.pinWebTask(run.id(), "Authenticated parent intent");
+    assertEquals(Optional.of("Authenticated parent intent"), store.webTask(conversation, "enzo"));
+    assertTrue(store.webTask(conversation, "another-account").isEmpty());
+    assertThrows(IllegalStateException.class, () -> store.pinWebTask(run.id(), "new intent"));
+
+    var scripts = new JdbcScriptStore(jdbc);
+    String source =
+        ScriptProgram.MARKER
+            + "\nexport const manifest = {name:'fixture'};"
+            + "\nexport function step(input) { return {"
+            + "state:{}, command:{tool:'web_fetch',arguments:{url:'https://example.org'}} }; }";
+    var input =
+        new ScriptStore.Input(
+            conversation,
+            "handoff",
+            0,
+            UUID.randomUUID(),
+            null,
+            null,
+            List.of(),
+            ScriptProgram.sourceHash(source));
+    var step =
+        assertInstanceOf(ScriptStore.Prepared.class, scripts.prepareNext(source, input, true))
+            .step();
+    String args = assertInstanceOf(ScriptStore.Tool.class, step.command()).arguments();
+    scripts.started(conversation, 0, args);
+    var receipt =
+        new ScriptStore.WebResult(
+            "d".repeat(64), "policy", "review-id", null, T0.plusSeconds(90), false, false);
+    scripts.executedWeb(conversation, 0, "held text", receipt);
+
+    var recovered = new JdbcScriptStore(jdbc).head(conversation).step().orElseThrow();
+    assertEquals("held text", recovered.raw());
+    assertNull(recovered.result());
+    assertEquals(receipt, recovered.webReview());
+    assertThrows(
+        IllegalStateException.class,
+        () -> scripts.executedWeb(conversation, 0, "replacement", receipt));
+    scripts.completed(conversation, 0, "released text");
+    assertEquals("released text", scripts.latest(conversation).orElseThrow().result());
+  }
+
+  @Test
   void resume_receipt_preserves_progress_and_never_replays_after_another_failure() {
     var run = store.insert(newOrchestration(conductorConversation(), 2));
     store.restarted(run.id());

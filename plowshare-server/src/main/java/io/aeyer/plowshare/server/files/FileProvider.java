@@ -10,6 +10,8 @@ import io.aeyer.plowshare.protocol.Window;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -97,6 +99,43 @@ public interface FileProvider {
    *     gone, a root that is no longer there
    */
   List<Path> roots();
+
+  /**
+   * The best path identity this provider can supply for intent review. Remote providers that cannot
+   * resolve links through their protocol can only attest to the normalized named path. Execution
+   * still applies the provider's own path and access checks.
+   */
+  default Path reviewPath(Path path) {
+    return path.normalize();
+  }
+
+  /** The owner and exact workspace root established by server-side Personal routing. */
+  record PersonalWorkspace(String owner, Path root) {
+    public PersonalWorkspace {
+      Objects.requireNonNull(owner);
+      if (!root.isAbsolute())
+        throw new IllegalArgumentException("Personal workspace root must be absolute");
+      root = root.normalize();
+    }
+  }
+
+  /** Evidence of Personal ownership for this provider, independent of the path being requested. */
+  default Optional<PersonalWorkspace> personalWorkspace() {
+    return Optional.empty();
+  }
+
+  /** Capture the provider binding used to check roots and execute a reviewed read. */
+  default FileProvider forReviewedRead() {
+    return this;
+  }
+
+  /** Capture the provider binding used to check roots and execute a reviewed mutation. */
+  default FileProvider forReviewedMutation() {
+    return this;
+  }
+
+  /** Confirm a reviewed routing snapshot still refers to the same provider connection. */
+  default void requireReviewBinding() {}
 
   /**
    * One window of one file's text.

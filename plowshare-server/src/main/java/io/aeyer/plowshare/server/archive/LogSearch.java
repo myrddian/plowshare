@@ -32,7 +32,9 @@ import java.util.UUID;
  *     page past the end, which {@link #total} tells apart
  * @param total how many distinct matching passage groups were found, which is a number about the
  *     tier and not about this page. Asked in the same statement as {@link #reach}, so the four
- *     numbers describe one instant
+ *     numbers describe one instant. <b>Exact unless this page travels in a {@link BoundedLogSearch}
+ *     marked truncated</b>; then it counts only the groups among the entries the search grouped, a
+ *     lower bound, and each hit's {@code sourceCount} likewise omits copies outside them.
  * @param reach what the search could and could not look at
  */
 public record LogSearch(List<Hit> hits, int total, Reach reach) {

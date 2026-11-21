@@ -1,21 +1,24 @@
 package io.aeyer.plowshare.server.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.search.Hit;
 import io.aeyer.plowshare.protocol.search.SearchPage;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import io.aeyer.plowshare.server.search.SearchLadder;
 import io.aeyer.plowshare.server.search.SearchService;
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * {@code search} — one page of results from outside this project, for an agent of this server
+ * {@code web_search} — one page of results from outside this project, for an agent of this server
  * rather than only for a foreign harness through MCP or a person through the CLI.
  *
  * <h2>The hole {@link FetchTool}'s own javadoc names, closed the same way</h2>
@@ -136,7 +139,7 @@ public final class SearchTool implements AgentTool {
    * The name the model calls, the job log records, and {@code AgentRegistry.load} is told about.
    * Names no provider.
    */
-  public static final String NAME = "search";
+  public static final String NAME = "web_search";
 
   /**
    * How many hits a page holds when {@code page_size} is omitted. {@code
@@ -177,6 +180,10 @@ public final class SearchTool implements AgentTool {
     return copy;
   }
 
+  boolean structuredResult() {
+    return scripted;
+  }
+
   @Override
   public ToolSchema schema() {
     return schema;
@@ -212,11 +219,32 @@ public final class SearchTool implements AgentTool {
         ToolArguments.optionalInt(args, "page_size", DEFAULT_PAGE_SIZE, SearchTool::badPageSize);
     int max = ToolArguments.optionalInt(args, "max", DEFAULT_MAX, SearchTool::badMax);
     int page = ToolArguments.optionalInt(args, "page", DEFAULT_PAGE, SearchTool::badPage);
-    var pageResult = search.search(query, pageSize, max, page);
+    return execute(new WebToolRequest.Search(query, pageSize, max, page)).text();
+  }
+
+  WebToolRequest.Result execute(WebToolRequest.Search request) {
+    return execute(request, null);
+  }
+
+  WebToolRequest.Result execute(WebToolRequest.Search request, WebRequestWork work) {
+    var page =
+        work == null
+            ? search.search(request.query(), request.pageSize(), request.max(), request.page())
+            : search.search(
+                request.query(), request.pageSize(), request.max(), request.page(), work);
+    return new WebToolRequest.Result(renderForCaller(page), page.refusal() == null);
+  }
+
+  String refused(String reason) {
+    return renderForCaller(
+        new SearchPage(List.of(), DEFAULT_PAGE, DEFAULT_PAGE_SIZE, 0, false, reason));
+  }
+
+  private String renderForCaller(SearchPage pageResult) {
     if (scripted) {
       try {
-        return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(pageResult);
-      } catch (java.io.IOException broken) {
+        return new ObjectMapper().writeValueAsString(pageResult);
+      } catch (IOException broken) {
         throw new IllegalStateException(broken);
       }
     }
@@ -324,6 +352,7 @@ public final class SearchTool implements AgentTool {
                 + " against the exact query and max that produced page one; asking for"
                 + " page 1 again searches again rather than repeating the last answer."
                 + " Omit for page one."));
+    WebToolRequest.clarificationFields(properties);
     return ToolArguments.object(properties, List.of("query"));
   }
 

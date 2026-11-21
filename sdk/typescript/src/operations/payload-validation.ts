@@ -963,7 +963,7 @@ export const SHAPES: Record<
   'approval.list': [[], ['conversation', 'project', 'mine']],
   'approval.answer': [
     ['id', 'decision'],
-    ['prefix', 'reason', 'fileDigest'],
+    ['prefix', 'reason', 'fileDigest', 'webDigest'],
   ],
   'approval.revoke': [['id'], []],
   'message.instances': [['project'], ['archived', 'offset', 'limit']],
@@ -1696,6 +1696,12 @@ export function commandProblem(
         !/^[a-f0-9]{64}$/.test(body['fileDigest']))
     )
       return 'fileDigest must be the exact SHA-256 from a typed file approval';
+    if (
+      body['webDigest'] !== undefined &&
+      (typeof body['webDigest'] !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(body['webDigest']))
+    )
+      return 'webDigest must be the exact SHA-256 from a typed web approval';
     if (
       body['reason'] !== undefined &&
       (body['decision'] !== 'deny' ||

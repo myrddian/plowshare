@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.orchestrations.scripted;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -226,7 +227,17 @@ public final class JdbcScriptStore implements ScriptStore {
         row.getString("result"),
         row.getTimestamp("started_at") != null,
         row.getString("effective_arguments"),
-        retryOfReport);
+        retryOfReport,
+        webResult(row.getString("web_review")));
+  }
+
+  private static WebResult webResult(String value) {
+    if (value == null) return null;
+    try {
+      return JSON.readValue(value, WebResult.class);
+    } catch (JsonProcessingException invalid) {
+      throw new IllegalStateException("Invalid stored web review receipt", invalid);
+    }
   }
 
   @Override
@@ -413,6 +424,19 @@ public final class JdbcScriptStore implements ScriptStore {
             conversation,
             sequence)
         != 1) throw new IllegalStateException("script command receipt already exists");
+  }
+
+  @Override
+  public void executedWeb(String conversation, int sequence, String held, WebResult review) {
+    if (jdbc.update(
+            "UPDATE orchestration_script_steps SET raw_result=?,web_review=?::jsonb,executed_at=now()"
+                + " WHERE conversation_id=? AND sequence=? AND raw_result IS NULL"
+                + " AND started_at IS NOT NULL AND command->>'tool' IN ('web_search','web_fetch')",
+            held,
+            JSON.valueToTree(java.util.Objects.requireNonNull(review)).toString(),
+            conversation,
+            sequence)
+        != 1) throw new IllegalStateException("Script web review receipt already exists");
   }
 
   /** A readiness observer has no acquisition, processing or model side effects to repeat. */

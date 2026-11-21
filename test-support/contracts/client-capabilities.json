@@ -1848,6 +1848,7 @@
       "internalAgent": {
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
+        "name": "web_search",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/SearchTool.java",
         "shippedGrants": [
           "plowshare-server/src/main/resources/agents/critic.md",
@@ -1903,6 +1904,7 @@
       "internalAgent": {
         "adapter": "registered",
         "grant": "definition-dependent; registration does not grant every agent access",
+        "name": "web_fetch",
         "source": "plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/FetchTool.java",
         "shippedGrants": [
           "plowshare-server/src/main/resources/agents/critic.md",

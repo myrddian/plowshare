@@ -830,7 +830,7 @@ describe("the frame types a conversation is made of are the server's own", () =>
     // The four
     // decisions in the words the server reads.
     expect(source).toMatch(
-      /record AnswerBody\(\s*String id, String decision, List<String> prefix, String reason, String fileDigest\)/,
+      /record AnswerBody\(\s*String id,\s*String decision,\s*List<String> prefix,\s*String reason,\s*String fileDigest,\s*String webDigest\)/,
     );
     // `mine` is what listingMyApprovals sends, for the questions no screen has open.
     expect(source).toMatch(

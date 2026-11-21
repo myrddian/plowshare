@@ -2591,21 +2591,32 @@ class ConversationControllerTest {
    */
   @Test
   void a_search_answers_with_hits_and_with_what_it_could_not_look_at() throws Exception {
-    when(entries.search(
-            Home.global(), "retry budget", 0, ConversationController.MOST_ENTRIES_A_PAGE))
+    when(entries.searchView(
+            Home.global(),
+            "retry budget",
+            0,
+            ConversationController.MOST_ENTRIES_A_PAGE,
+            null,
+            null,
+            null,
+            null,
+            false))
         .thenReturn(
-            new LogSearch(
-                List.of(
-                    aHit(
-                        "cnv_1",
-                        7,
-                        EntryKind.TOOL_RESULT,
-                        0.25,
-                        "... the [retry] [budget] refilled ...",
-                        96_000,
-                        4)),
-                3,
-                new LogSearch.Reach(120, 4, 31)));
+            LogSearchView.of(
+                new LogSearch(
+                    List.of(
+                        aHit(
+                            "cnv_1",
+                            7,
+                            EntryKind.TOOL_RESULT,
+                            0.25,
+                            "... the [retry] [budget] refilled ...",
+                            96_000,
+                            4)),
+                    3,
+                    new LogSearch.Reach(120, 4, 31)),
+                0,
+                ConversationController.MOST_ENTRIES_A_PAGE));
 
     mvc.perform(get("/v1/entries/search").param("q", "retry budget"))
         .andExpect(status().isOk())
@@ -2630,12 +2641,25 @@ class ConversationControllerTest {
    */
   @Test
   void a_search_names_the_tier_it_was_asked_of() throws Exception {
-    when(entries.search(any(), any(), anyInt(), anyInt())).thenReturn(LogSearch.NONE);
+    when(entries.searchView(
+            any(), any(), anyInt(), anyInt(), any(), any(), any(), any(), anyBoolean()))
+        .thenAnswer(
+            asked -> LogSearchView.of(LogSearch.NONE, asked.getArgument(2), asked.getArgument(3)));
 
     mvc.perform(get("/v1/entries/search").param("q", "budget").param("project", "payments"))
         .andExpect(status().isOk());
 
-    verify(entries).search(PAYMENTS_HOME, "budget", 0, ConversationController.MOST_ENTRIES_A_PAGE);
+    verify(entries)
+        .searchView(
+            PAYMENTS_HOME,
+            "budget",
+            0,
+            ConversationController.MOST_ENTRIES_A_PAGE,
+            null,
+            null,
+            null,
+            null,
+            false);
   }
 
   /**
@@ -2651,7 +2675,8 @@ class ConversationControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail", containsString("'q'")));
 
-    verify(entries, never()).search(any(), any(), anyInt(), anyInt());
+    verify(entries, never())
+        .searchView(any(), any(), anyInt(), anyInt(), any(), any(), any(), any(), anyBoolean());
   }
 
   /**
@@ -2660,12 +2685,25 @@ class ConversationControllerTest {
    */
   @Test
   void a_search_is_bounded_by_the_same_window_a_page_is() throws Exception {
-    when(entries.search(any(), any(), anyInt(), anyInt())).thenReturn(LogSearch.NONE);
+    when(entries.searchView(
+            any(), any(), anyInt(), anyInt(), any(), any(), any(), any(), anyBoolean()))
+        .thenAnswer(
+            asked -> LogSearchView.of(LogSearch.NONE, asked.getArgument(2), asked.getArgument(3)));
 
     mvc.perform(get("/v1/entries/search").param("q", "budget").param("limit", "100000"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.limit").value(ConversationController.MOST_ENTRIES_A_PAGE));
-    verify(entries).search(Home.global(), "budget", 0, ConversationController.MOST_ENTRIES_A_PAGE);
+    verify(entries)
+        .searchView(
+            Home.global(),
+            "budget",
+            0,
+            ConversationController.MOST_ENTRIES_A_PAGE,
+            null,
+            null,
+            null,
+            null,
+            false);
 
     mvc.perform(get("/v1/entries/search").param("q", "budget").param("limit", "0"))
         .andExpect(status().isBadRequest());

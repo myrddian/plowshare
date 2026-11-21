@@ -854,8 +854,21 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       @Override
       public FileReply ask(String asked, FileRequest request, Duration wait) {
         requireCurrent(asked);
-        return FileChannelHandler.this.ask(
-            session, captured, request, clientWork.requestBudget(wait));
+        boolean mutation =
+            !FileRequest.CANCEL.equals(request.op()) && !ClientWork.readOnly(request);
+        if (mutation) {
+          clientWork.beforeRequest(session);
+          requireCurrent(asked);
+        }
+        Duration remaining = clientWork.requestBudget(wait);
+        try {
+          return FileChannelHandler.this.ask(session, captured, request, remaining);
+        } catch (SessionGoneException gone) {
+          // A sent mutation may have completed on the lost connection. Retain its uncertainty
+          // under the existing lifecycle and never replay it on a replacement connection.
+          if (mutation) clientWork.interrupted(session, request);
+          throw gone;
+        }
       }
     };
   }

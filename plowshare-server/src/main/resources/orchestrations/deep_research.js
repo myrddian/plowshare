@@ -5,7 +5,7 @@
 export const manifest = {
   name: 'deep_research',
   description: 'Scripted research: decomposes objectives, retains evidence, gathers fresh counter-evidence, adjudicates findings, expands and edits each revised finding and stores a detailed cited draft report.',
-  model: 'reasoning', tools: ['search', 'information_read', 'information_write'],
+  model: 'reasoning', tools: ['web_search', 'information_read', 'information_write'],
   calls: ['research_analyst'], scopes: [], 'max-turns': 2000, 'max-model-calls': 400,
   'max-returns': 2, triggers: ['deep research', 'research report', '/research'],
   stages: ['objectives', 'objective_review', 'preflight', 'decomposition', 'query_review', 'retrieval', 'evidence', 'plan_review',
@@ -770,7 +770,7 @@ function collect(s,wave,input,queries) {
   // Abstract objectives must not replace the concrete subject of the research.
   const anchors=s.topicAnchors || [], query=anchors.length && !anchors.some(a=>q.query.toLowerCase().includes(a.toLowerCase()))?q.query+' '+anchors[0]:q.query;
   if(s.queryPart!=='web') return command(s,'information_read',{operation:'search',query,limit:3},{kind:'corpus',objective:q.objective,wave});
-  return command(s,'search',{query,page_size:3,max:3},{kind:'search',objective:q.objective,wave});
+  return command(s,'web_search',{query,page_size:3,max:3},{kind:'search',objective:q.objective,wave});
 }
 function selectionCandidates(s,wave) {
   const available=s.candidates.filter(c=>c.wave===wave && !s.fetchAudit.some(a=>a.wave===wave && a.key===(c.key || c.revision || c.url))).sort((a,b)=>b.frequency-a.frequency);

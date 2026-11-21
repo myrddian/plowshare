@@ -289,6 +289,11 @@ public final class LocalProvider implements FileProvider {
   }
 
   @Override
+  public Path reviewPath(Path path) {
+    return FileAccess.canonical(path);
+  }
+
+  @Override
   public io.aeyer.plowshare.protocol.FileSource fingerprint(Path path) {
     byte[] bytes = codeBytes(path, io.aeyer.plowshare.protocol.FileSource.MAX_BYTES);
     return new io.aeyer.plowshare.protocol.FileSource(

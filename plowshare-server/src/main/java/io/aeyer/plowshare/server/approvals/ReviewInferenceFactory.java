@@ -11,4 +11,11 @@ public interface ReviewInferenceFactory {
       Budget budget,
       UsageAttribution usage,
       Runnable validity);
+
+  /** Reviews quoted web evidence under the same limits as an ordinary SECURITY consult. */
+  ReviewInference withinWeb(
+      OperationAuthority.Admission operation,
+      Budget budget,
+      UsageAttribution usage,
+      Runnable validity);
 }

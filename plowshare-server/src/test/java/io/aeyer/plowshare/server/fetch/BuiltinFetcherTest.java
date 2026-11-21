@@ -6,18 +6,26 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.server.hooks.Deadline;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.Proxy;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -79,6 +87,56 @@ class BuiltinFetcherTest {
   }
 
   // --- what fetch did before the guard, through an allowlisted mock ---------
+
+  @Test
+  void managed_fetch_inherits_the_request_deadline_and_cancels_an_active_read() throws Exception {
+    try (var remote = new MockWebServer();
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      remote.start();
+      remote.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+      String url = remote.url("/slow").toString();
+      var fetcher = allowing(remote);
+      var shortWork = new WebRequestWork(Deadline.after(Duration.ofMillis(300)), () -> false);
+      assertFalse(
+          assertTimeout(Duration.ofMillis(1500), () -> fetcher.fetch(url, shortWork)).isOk());
+      assertTrue(remote.takeRequest(1, TimeUnit.SECONDS) != null);
+
+      remote.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+      var cancelled = new AtomicBoolean();
+      var work = new WebRequestWork(Deadline.after(Duration.ofSeconds(5)), cancelled::get);
+      var active = executor.submit(() -> fetcher.fetch(url, work));
+      assertTrue(remote.takeRequest(1, TimeUnit.SECONDS) != null);
+      cancelled.set(true);
+      assertFalse(active.get(1, TimeUnit.SECONDS).isOk());
+    }
+  }
+
+  @Test
+  void each_managed_redirect_needs_destination_authorization_before_the_next_request()
+      throws Exception {
+    for (boolean allowed : List.of(false, true)) {
+      try (var remote = new MockWebServer()) {
+        remote.enqueue(redirectTo("/final"));
+        remote.enqueue(html("<article><p>the destination</p></article>"));
+        remote.start();
+        String first = remote.url("/start").toString();
+        String destination = remote.url("/final").toString();
+        var checked = new ArrayList<String>();
+        var work =
+            new WebRequestWork(
+                Deadline.after(TIMEOUT),
+                () -> false,
+                target -> {
+                  checked.add(target);
+                  return allowed;
+                });
+
+        assertEquals(allowed, allowing(remote).fetch(first, work).isOk());
+        assertEquals(List.of(destination), checked);
+        assertEquals(allowed ? 2 : 1, remote.getRequestCount());
+      }
+    }
+  }
 
   @Test
   void a_page_comes_back_extracted() throws Exception {

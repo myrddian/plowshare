@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.search;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.search.SearchAnswer;
 import io.aeyer.plowshare.protocol.search.SearchAsk;
+import io.aeyer.plowshare.server.net.WebRequestWork;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -109,6 +110,12 @@ public class RemoteSearchProvider implements SearchProvider {
 
   @Override
   public SearchAnswer search(Registration at, SearchAsk ask) {
+    return search(at, ask, null);
+  }
+
+  @Override
+  @SuppressWarnings("try")
+  public SearchAnswer search(Registration at, SearchAsk ask, WebRequestWork work) {
     long startedAt = System.nanoTime();
     try {
       // Inside the try, not above it. This method's contract is that
@@ -126,9 +133,12 @@ public class RemoteSearchProvider implements SearchProvider {
               : new SearchAsk(ask.requestId(), ask.query(), ask.max(), List.of());
       RequestBody body = RequestBody.create(json.writeValueAsString(outbound), JSON);
       Request request = new Request.Builder().url(at.baseUrl() + SEARCH_PATH).post(body).build();
+      long remaining = work == null ? timeout.toNanos() : work.capNanos(timeout.toNanos());
+      if (remaining <= 0) return failed(ask, at, "Search work expired or was cancelled", startedAt);
       Call call = http.newCall(request);
-      call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
-      try (Response response = call.execute()) {
+      call.timeout().timeout(remaining, TimeUnit.NANOSECONDS);
+      try (var watch = WebRequestWork.watch(work, call);
+          Response response = call.execute()) {
         if (!response.isSuccessful() || response.body() == null) {
           return failed(ask, at, "HTTP " + response.code(), startedAt);
         }

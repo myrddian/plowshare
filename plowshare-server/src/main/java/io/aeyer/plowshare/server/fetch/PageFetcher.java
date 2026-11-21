@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.fetch;
 
+import io.aeyer.plowshare.server.net.WebRequestWork;
+
 /**
  * The one thing the fetch facade does to a URL: hand it over, and get a page back — never an
  * exception.
@@ -32,4 +34,12 @@ package io.aeyer.plowshare.server.fetch;
 public interface PageFetcher {
 
   FetchAnswer fetch(String url);
+
+  /** A provider handling managed work must check every redirect before dialing it. */
+  default FetchAnswer fetch(String url, WebRequestWork work) {
+    return FetchAnswer.failed(
+        url,
+        FetchFailure.FETCH_FAILED,
+        "This provider does not support managed fetch authorization.");
+  }
 }

@@ -133,9 +133,14 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
         }
         Optional<OrchestrationRecord> conductor = conductorRun(context);
         if (conductor.isPresent()) {
+          OrchestrationRecord parent = conductor.orElseThrow();
+          String authenticatedParentTask =
+              context.callerHandle() != null && context.callerHandle().equals(parent.callerHandle())
+                  ? context.authenticatedWebTask()
+                  : null;
           Orchestrations.Started started =
               orchestrations.startNested(
-                  conductor.get().id(), definition, request, suppliedContext, wait);
+                  parent.id(), definition, request, suppliedContext, wait, authenticatedParentTask);
           if (started.refusal() != null) {
             return started.refusal();
           }
@@ -375,7 +380,10 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
             context.callerHandle(),
             context.sessionId(),
             null,
-            0);
+            0,
+            null,
+            null,
+            context.authenticatedWebTask());
     if (context.operation() != null)
       return orchestrations.startFromRun(start, context.operation(), invocation, payload);
     return invocation == null

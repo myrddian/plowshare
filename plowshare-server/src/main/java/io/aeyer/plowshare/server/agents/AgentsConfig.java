@@ -44,6 +44,7 @@ import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.AbsentPresence;
 import io.aeyer.plowshare.server.files.CommandIsolationProperties;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.FileStores;
 import io.aeyer.plowshare.server.files.LocalProvider;
 import io.aeyer.plowshare.server.files.RemoteProvider;
@@ -84,6 +85,7 @@ import io.aeyer.plowshare.server.telemetry.FailureReporter;
 import io.aeyer.plowshare.server.todos.TodoBoard;
 import io.aeyer.plowshare.server.union.UnionRouting;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -589,43 +591,54 @@ public class AgentsConfig {
       Optional<String> personalOwner =
           home.isGlobal() ? Optional.empty() : projects.personalOwner(home.project());
       if (personalOwner.isPresent() && !personalOwner.get().equals(owner)) return List.of(local);
-      Optional<String> rooting =
-          !permitted
-              ? Optional.empty()
-              : home.isGlobal()
-                  ? Optional.ofNullable(sessionId)
-                  : presences.serving(home.project()).map(Presence::session);
+      Optional<Presence> serving =
+          permitted && !home.isGlobal() ? presences.serving(home.project()) : Optional.empty();
       boolean separateCheckout =
           !home.isGlobal()
               && projects.find(home.project()).filter(ProjectRecord::serverProject).isPresent();
       if (separateCheckout && permitted) {
         // A server project's local checkout is tied to the asking session, including a standby
         // serving the same folder. Primary routing must not hide that session's own file claim.
-        rooting =
+        serving =
             presences
                 .rootedBy(sessions.canonical(sessionId))
-                .filter(claim -> claim.project().equals(home.project()))
-                .map(Presence::session);
+                .filter(claim -> claim.project().equals(home.project()));
       }
+      Optional<String> rooting =
+          home.isGlobal() && permitted
+              ? Optional.ofNullable(sessionId)
+              : serving.map(Presence::session);
       Optional<Session> machine =
           rooting.flatMap(sessions::find).filter(session -> session.has(Role.FILE_PROVIDER));
+      Optional<Presence> selectedPresence = serving;
+      Function<String, FileProvider> remoteFor =
+          session -> {
+            workspaceRuns.requires(session);
+            var personal =
+                selectedPresence
+                    .filter(claim -> session.equals(claim.session()))
+                    .flatMap(
+                        claim ->
+                            personalOwner
+                                .filter(
+                                    account ->
+                                        sessions
+                                            .accountOf(session)
+                                            .filter(account::equals)
+                                            .isPresent())
+                                .flatMap(account -> personalWorkspace(account, claim.root())));
+            return new RemoteProvider(channel, session, grants, home, images, personal);
+          };
       if (!home.isGlobal()) {
         Optional<List<FileProvider>> union =
             unions.providers(
-                home.project(),
-                grants,
-                machine.map(Session::id),
-                session -> {
-                  workspaceRuns.requires(session);
-                  return new RemoteProvider(channel, session, grants, home, images);
-                });
+                home.project(), grants, machine.map(Session::id), remoteFor, personalOwner);
         if (union.isPresent()) {
           return union.get();
         }
       }
       if (machine.isPresent()) {
-        workspaceRuns.requires(machine.get().id());
-        FileProvider remote = new RemoteProvider(channel, machine.get().id(), grants, home, images);
+        FileProvider remote = remoteFor.apply(machine.get().id());
         if (separateCheckout)
           return List.of(remote); // Only this checkout's run uses its local files.
         // `local` IS LEFT OUT FOR A PROJECT WHOSE ROW NAMES ANOTHER MACHINE,
@@ -671,6 +684,16 @@ public class AgentsConfig {
       // server does not hold has no claim to be in the set at all.
       return List.of(new AbsentPresence(home.project(), workspace.refusal()));
     };
+  }
+
+  private static Optional<PersonalWorkspace> personalWorkspace(String owner, String remoteRoot) {
+    try {
+      Path root = Path.of(remoteRoot);
+      return root.isAbsolute() ? Optional.of(new PersonalWorkspace(owner, root)) : Optional.empty();
+    } catch (InvalidPathException malformed) {
+      // A root this server cannot compare cannot establish standing read consent.
+      return Optional.empty();
+    }
   }
 
   private record ServerWorkspace(boolean rootedHere, String refusal) {}
@@ -841,6 +864,7 @@ public class AgentsConfig {
       ObjectProvider<ScopedTools> scopedTools,
       OperationAuthority operations,
       InferenceCalls inferenceCalls,
+      ObjectProvider<WebToolSecurity> webSecurity,
       ObjectProvider<FailureReporter> failures) {
     JobRuntime runtime =
         new JobRuntime(
@@ -983,6 +1007,8 @@ public class AgentsConfig {
             return available == null ? tool : available.protect(tool, definition, conversation);
           }
         });
+    webSecurity.ifAvailable(runtime::useWebToolSecurity);
+    runtime.useWebTaskEvidence(entries::authenticatedOpening);
     return runtime;
   }
 
