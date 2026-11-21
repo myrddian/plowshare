@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
@@ -15,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -39,7 +39,7 @@ class InputProvenanceTest {
   }
 
   @Test
-  void delegationRetainsContextVerbatimAndClassifiesOnlyItsFramedSpan() {
+  void attributedScriptDelegationRetainsContextVerbatimAndClassifiesOnlyItsFramedSpan() {
     var registry = mock(AgentRegistry.class);
     var runtime = mock(JobRuntime.class);
     var caller = mock(AgentDefinition.class);
@@ -48,55 +48,73 @@ class InputProvenanceTest {
     var child = mock(Transcript.class);
     var budget = Budget.of(10);
     var home = Home.of("research");
+    var usage =
+        UsageAttribution.project("researcher", "research", UsageAttribution.Operation.AGENT_CHAT);
+    var attributedParent = new AttributedTranscript(parent, usage, UsageAttribution.LEGACY);
+    var attributedChild = new AttributedTranscript(child, UsageAttribution.LEGACY, usage);
+    String copied = "Copied capacity documentation";
+    String prefix = "Harness facts 🌱\n\nInvestigate the failed run\n\nHandoff coordinates";
+    String handed = prefix + SuppliedContext.SEPARATOR + copied;
+    var source = new InputProvenance.Reference("evidence-1", "revision-1");
+    var expected = new SuppliedContext(copied, List.of(source)).provenance(handed);
     when(caller.calls()).thenReturn(List.of("analyst"));
     when(caller.name()).thenReturn("conductor");
     when(callee.name()).thenReturn("analyst");
     when(callee.delegable()).thenReturn(true);
     when(callee.maxTurns()).thenReturn(10);
     when(registry.find("analyst")).thenReturn(Optional.of(callee));
-    when(parent.delegate(callee, home, null)).thenReturn(child);
+    when(parent.delegate(callee, home, "script_1")).thenReturn(child);
+    when(child.inputProvenance()).thenReturn(expected);
     when(runtime.activity()).thenReturn(RunActivity.NONE);
     when(runtime.taskFacts(isNull(), same(callee))).thenReturn(Optional.of("Harness facts 🌱"));
     when(runtime.handoffNote(isNull())).thenReturn(Optional.of("Handoff coordinates"));
     var outcome = new Outcome(Outcome.Ending.ANSWERED, "done", 1, 1, "");
     when(runtime.run(
             same(callee),
-            anyString(),
+            eq(handed),
             eq(home),
             same(budget),
             any(),
             isNull(),
             same(JobWatch.UNWATCHED),
-            same(child),
+            eq(attributedChild),
             any(TurnCap.class),
             eq(List.of())))
-        .thenReturn(outcome);
+        .thenAnswer(
+            invocation -> {
+              Transcript running = invocation.getArgument(7);
+              assertEquals(expected, running.inputProvenance());
+              return outcome;
+            });
     var tool =
         new AgentRunTool(
-            registry,
-            runtime,
-            caller,
-            budget,
-            () -> false,
-            null,
-            parent,
-            List.of(),
-            ImageStore.NONE,
-            new TurnEnd());
-    tool.run(
-        "{\"agent\":\"analyst\",\"task\":\"Investigate the failed run\",\"context\":{\"text\":\"Copied capacity documentation\",\"sources\":[{\"id\":\"evidence-1\",\"revision\":\"revision-1\"}]}}",
-        home);
+                registry,
+                runtime,
+                caller,
+                budget,
+                () -> false,
+                null,
+                attributedParent,
+                List.of(),
+                ImageStore.NONE,
+                new TurnEnd())
+            .scripted();
+    tool.calledAs("script_1");
+    String result =
+        tool.run(
+            "{\"agent\":\"analyst\",\"task\":\"Investigate the failed run\",\"context\":{\"text\":\"Copied capacity documentation\",\"sources\":[{\"id\":\"evidence-1\",\"revision\":\"revision-1\"}]}}",
+            home,
+            usage);
     var provenance = ArgumentCaptor.forClass(InputProvenance.class);
-    var input = ArgumentCaptor.forClass(String.class);
+    assertEquals("done", result);
     verify(child).prepareInput(provenance.capture());
-    verify(child).closed(input.capture(), same(outcome));
-    assertTrue(input.getValue().endsWith("Copied capacity documentation"));
-    String evidence = provenance.getValue().evidenceText(input.getValue());
+    verify(child).closed(handed, outcome);
+    String evidence = provenance.getValue().evidenceText(handed);
     assertTrue(evidence.contains("Harness facts 🌱"));
     assertTrue(evidence.contains("Investigate the failed run"));
     assertTrue(evidence.contains("Handoff coordinates"));
-    assertTrue(!evidence.contains("Copied capacity documentation"));
-    assertEquals("evidence-1", provenance.getValue().sources().getFirst().id());
+    assertTrue(!evidence.contains(copied));
+    assertEquals(List.of(source), provenance.getValue().sources());
   }
 
   @Test
