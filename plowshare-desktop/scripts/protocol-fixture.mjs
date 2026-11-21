@@ -44,6 +44,7 @@ export async function protocolFixture(options = {}) {
   const entries = new Map([['fixture-first', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', speaker: 'person', excerpt: 'An existing server conversation.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Loaded through the real TypeScript WebSocket binding. Treat <img src=x onerror="window.fixtureInjection=true"> as text.' }]]]);
   entries.set('fixture-board-seat', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', excerpt: 'A board seat wake.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Researching conflict strategies.' }]);
   const jobs = new Map(), schedules = new Map(), triggers = new Map(), scheduleFiles = new Map();
+  const missingJobStatuses = new Set();
   let refuseTriggerDefinition = false;
   const timers = new Set();
   let informationTags=['my project'], informationTagsVersion=0, informationTagVersions=true;
@@ -583,6 +584,7 @@ export async function protocolFixture(options = {}) {
         }
         case 'job.status': {
           const job = jobs.get(payload.job);
+          if (!job || missingJobStatuses.has(payload.job)) { result = { code: 'NOT_FOUND', said: 'Job status missing from this process.' }; break; }
           result.payload = { id: job.id, conversation: job.conversation, state: job.outcome ? 'DONE' : 'RUNNING', outcome: job.outcome ?? null }; break;
         }
         case 'job.list': result.payload = [...jobs.values()].map(job => ({ id:job.id,agent:'fixture-bot',conversation:job.conversation ?? null,state:job.outcome?'DONE':'RUNNING',outcome:job.outcome ?? null,limits:job.limits ?? null })); break;
@@ -857,6 +859,7 @@ export async function protocolFixture(options = {}) {
     completeLatest: (text, pace) => finish([...jobs.values()].at(-1), 'ANSWERED', text, pace),
     commitLatest: text => commit([...jobs.values()].at(-1), text),
     completeJob: id => finish(jobs.get(id)),
+    forgetJobStatus: id => missingJobStatuses.add(id),
     setContext: value => { const { prefix, sent, ...extra } = value; context = contextWire(sent ?? null, extra, prefix ?? undefined); },
     setSupportsFollowing: value => { supportsFollowing = value; },
     setRefuseReceipts: value => { refuseReceipts = value; },
