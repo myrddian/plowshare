@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.files.Changed;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.FileWords;
 import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.files.ProviderRouter.Target;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.nio.file.InvalidPathException;
@@ -26,7 +27,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * The file tools: read a window of one file, measure one without reading it, find files by name and
@@ -326,27 +326,23 @@ public final class FileTools {
 
       @Override
       public String run(String arguments, Home home) {
-        return mutation(arguments, home, () -> routed.run(arguments, home));
+        return runFrom(arguments, home, path -> router.targetFor(home, path));
       }
 
       @Override
-      public String runFrom(String arguments, Home home, FileProvider provider) {
-        return mutation(arguments, home, () -> routed.runFrom(arguments, home, provider));
-      }
-
-      private String mutation(String arguments, Home home, Supplier<String> execute) {
+      public String runFrom(String arguments, Home home, Function<Path, Target> targets) {
         reads.codeMap.beforeMutation(home);
+        var changed = new ArrayList<Path>();
         try {
-          return execute.get();
+          return routed.runFrom(
+              arguments,
+              home,
+              path -> {
+                Target target = targets.apply(path);
+                changed.add(target.path().normalize());
+                return target;
+              });
         } finally {
-          var changed = new ArrayList<Path>();
-          try {
-            var args = ToolArguments.parse(arguments, name, "a file change");
-            for (String key : List.of("path", "to"))
-              if (args.path(key).isTextual())
-                changed.add(Path.of(args.path(key).asText()).normalize());
-          } catch (BadArguments | InvalidPathException ignored) {
-          }
           reads.codeMap.afterMutation(home, changed);
         }
       }
@@ -357,7 +353,7 @@ public final class FileTools {
 
   /** Executes the exact reviewed arguments using the provider binding checked before execution. */
   interface Routed extends AgentTool {
-    String runFrom(String argumentsJson, Home home, FileProvider provider);
+    String runFrom(String argumentsJson, Home home, Function<Path, Target> targets);
   }
 
   // --- file_read ---------------------------------------------------------------
@@ -413,18 +409,18 @@ public final class FileTools {
       // model's. See AgentTool.
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
-      return answer(argumentsJson, path -> router.providerFor(home, path));
+      return answer(argumentsJson, path -> router.targetFor(home, path));
     }
 
     // Reviewed reads must use the same binding used to confirm the current scoped approval.
     @Override
-    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
-      return answer(argumentsJson, path -> provider);
+    public String runFrom(String argumentsJson, Home home, Function<Path, Target> targets) {
+      return answer(argumentsJson, targets);
     }
 
-    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String answer(String argumentsJson, Function<Path, Target> targets) {
       try {
-        return read(argumentsJson, providerFor);
+        return read(argumentsJson, targets);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         // The two halves of "the caller was wrong", and nothing else.
         // WorkspaceUnavailableException shares no supertype with the
@@ -435,7 +431,7 @@ public final class FileTools {
       }
     }
 
-    private String read(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String read(String argumentsJson, Function<Path, Target> targets) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -443,9 +439,9 @@ public final class FileTools {
               "{\"path\": \"/srv/repo/src/Main.java\", \"offset\": 0, \"limit\": 500}");
       Path path = path(args, READ_NAME);
       Asked asked = window(args);
-      FileProvider provider = providerFor.apply(path);
-      Span span = provider.read(path, asked.window());
-      reads.saw(path);
+      Target target = targets.apply(path);
+      Span span = target.provider().read(target.path(), asked.window());
+      reads.saw(target.path());
       var type = io.aeyer.plowshare.protocol.DocumentType.classify(path.toString(), null);
       String rendered = render(span, path, asked);
       return type.isCode()
@@ -453,7 +449,7 @@ public final class FileTools {
               + type.subtype()
               + "; language inferred from filename; offsets count from 0. "
               + "This is a live file window, not an indexed document revision."
-              + (reads.codeHint(path)
+              + (reads.codeHint(target.path())
                   ? " Harness hint: use code_map overview for the repository map,"
                       + " symbols for a declaration-name prefix, or outline for this absolute path"
                       + " within the selected pattern. code_map read uses the returned source_hash"
@@ -757,8 +753,8 @@ public final class FileTools {
       JsonNode args =
           ToolArguments.parse(argumentsJson, STAT_NAME, "{\"path\": \"/srv/repo/src/Main.java\"}");
       Path path = path(args, STAT_NAME);
-      FileProvider provider = router.providerFor(home, path);
-      Span span = provider.stat(path);
+      Target target = router.targetFor(home, path);
+      Span span = target.provider().stat(target.path());
       if (span.totalLines() == 0) {
         // The same sentence file_read gives, deliberately: a model that
         // stats an empty file and then reads it must not get two
@@ -1038,8 +1034,8 @@ public final class FileTools {
       Needle needle = needle(args);
       Path path = optionalPath(args, GREP_NAME);
       if (path != null) {
-        FileProvider provider = router.providerFor(home, path);
-        Found found = provider.grep(needle, path);
+        Target target = router.targetFor(home, path);
+        Found found = target.provider().grep(needle, target.path());
         return render(found.matches(), found.capped(), needle, path.toString(), List.of());
       }
 
@@ -1282,17 +1278,17 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
-      return result(argumentsJson, path -> router.providerFor(home, path));
+      return result(argumentsJson, path -> router.targetFor(home, path));
     }
 
     @Override
-    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
-      return result(argumentsJson, path -> provider);
+    public String runFrom(String argumentsJson, Home home, Function<Path, Target> targets) {
+      return result(argumentsJson, targets);
     }
 
-    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String result(String argumentsJson, Function<Path, Target> targets) {
       try {
-        return answer(argumentsJson, providerFor);
+        return answer(argumentsJson, targets);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
@@ -1302,7 +1298,7 @@ public final class FileTools {
         " Send either {\"path\", \"content\"} to write the"
             + " whole file, or {\"path\", \"old\", \"new\"} to replace one piece of text.";
 
-    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String answer(String argumentsJson, Function<Path, Target> targets) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -1322,7 +1318,8 @@ public final class FileTools {
       if (!whole && !replacing) {
         throw new BadArguments(EDIT_NAME + " was given nothing to change." + SHAPES);
       }
-      FileProvider provider = providerFor.apply(path);
+      Target target = targets.apply(path);
+      FileProvider provider = target.provider();
       if (whole) {
         // requireExactText and never requireText: that method strips and
         // refuses blank, which for a file's contents means dropping the
@@ -1334,8 +1331,10 @@ public final class FileTools {
         // Reads owns why: a file this run never read may be created and
         // never replaced, and the owning machine enforces it.
         Changed written =
-            reads.seen(path) ? provider.write(path, content) : provider.create(path, content);
-        reads.saw(path);
+            reads.seen(target.path())
+                ? provider.write(target.path(), content)
+                : provider.create(target.path(), content);
+        reads.saw(target.path());
         // The line count and nothing of the text: it is exactly what the
         // model sent, so showing it back would spend a turn's worth of
         // context on something already in front of it. The file side's
@@ -1352,7 +1351,7 @@ public final class FileTools {
       String replacement =
           ToolArguments.requireExactText(
               args, "new", EDIT_NAME, "the text to put in its place, which may be empty." + SHAPES);
-      Changed edited = provider.edit(path, old, replacement);
+      Changed edited = provider.edit(target.path(), old, replacement);
       // The lines shown are not a read of the file, and only a read — or a
       // write of the whole of it — lets a whole-file write replace what is
       // there. Every line of the file, uncut, is the one exception, and the
@@ -1360,7 +1359,7 @@ public final class FileTools {
       // already read stays read: the edit changed text the run had seen
       // into text the run chose.
       if (edited.showedWholeFile()) {
-        reads.saw(path);
+        reads.saw(target.path());
       }
       String done = "Replaced the one occurrence of the text in " + path + ".";
       // Worded here from the facts, by the one renderer; or — from a client
@@ -1465,28 +1464,29 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
-      return result(argumentsJson, path -> router.providerFor(home, path));
+      return result(argumentsJson, path -> router.targetFor(home, path));
     }
 
     @Override
-    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
-      return result(argumentsJson, path -> provider);
+    public String runFrom(String argumentsJson, Home home, Function<Path, Target> targets) {
+      return result(argumentsJson, targets);
     }
 
-    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String result(String argumentsJson, Function<Path, Target> targets) {
       try {
-        return answer(argumentsJson, providerFor);
+        return answer(argumentsJson, targets);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
     }
 
-    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String answer(String argumentsJson, Function<Path, Target> targets) {
       JsonNode args =
           ToolArguments.parse(argumentsJson, DELETE_NAME, "{\"path\": \"/srv/repo/src/Old.java\"}");
       Path path = path(args, DELETE_NAME);
-      Changed deleted = providerFor.apply(path).delete(path);
-      reads.forget(path);
+      Target target = targets.apply(path);
+      Changed deleted = target.provider().delete(target.path());
+      reads.forget(target.path());
       return FileTools.deleted(path, deleted.facts());
     }
   }
@@ -1529,23 +1529,23 @@ public final class FileTools {
     public String run(String argumentsJson, Home home) {
       Objects.requireNonNull(argumentsJson, "argumentsJson");
       Objects.requireNonNull(home, "home");
-      return result(argumentsJson, path -> router.providerFor(home, path));
+      return result(argumentsJson, path -> router.targetFor(home, path));
     }
 
     @Override
-    public String runFrom(String argumentsJson, Home home, FileProvider provider) {
-      return result(argumentsJson, path -> provider);
+    public String runFrom(String argumentsJson, Home home, Function<Path, Target> targets) {
+      return result(argumentsJson, targets);
     }
 
-    private String result(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String result(String argumentsJson, Function<Path, Target> targets) {
       try {
-        return answer(argumentsJson, providerFor);
+        return answer(argumentsJson, targets);
       } catch (BadArguments | WorkspaceRefusedException correctable) {
         return correctable.getMessage();
       }
     }
 
-    private String answer(String argumentsJson, Function<Path, FileProvider> providerFor) {
+    private String answer(String argumentsJson, Function<Path, Target> targets) {
       JsonNode args =
           ToolArguments.parse(
               argumentsJson,
@@ -1553,31 +1553,29 @@ public final class FileTools {
               "{\"path\": \"/srv/repo/src/Old.java\", \"to\": \"/srv/repo/src/New.java\"}");
       Path from = path(args, MOVE_NAME);
       Path to = named(args, "to", MOVE_NAME);
-      FileProvider source = providerFor.apply(from);
-      FileProvider destination = providerFor.apply(to);
-      // By name and not by identity: the router asks for its providers
-      // afresh on every call, so one filesystem arrives as two instances.
-      // A run holds at most one provider of each kind.
-      if (!source.name().equals(destination.name())) {
+      Target source = targets.apply(from);
+      Target destination = targets.apply(to);
+      // Separate routing calls can return distinct bindings for one filesystem.
+      if (!source.provider().identity().equals(destination.provider().identity())) {
         // No machine could carry this out: each provider is a different
         // filesystem, and a move between two is a copy and a delete that
         // would each have to succeed on its own.
         throw new WorkspaceRefusedException(
             from
                 + " is on "
-                + source.name()
+                + source.provider().name()
                 + " and "
                 + to
                 + " is on "
-                + destination.name()
+                + destination.provider().name()
                 + ", and a file can only be moved"
                 + " within one filesystem; read it, write it at the new path, and delete"
                 + " the old one");
       }
-      Changed moved = source.move(from, to);
-      if (reads.seen(from)) {
-        reads.forget(from);
-        reads.saw(to);
+      Changed moved = source.provider().move(source.path(), destination.path());
+      if (reads.seen(source.path())) {
+        reads.forget(source.path());
+        reads.saw(destination.path());
       }
       return FileTools.moved(from, to, moved.facts());
     }

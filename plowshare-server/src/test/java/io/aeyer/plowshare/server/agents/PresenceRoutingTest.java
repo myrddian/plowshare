@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -118,6 +119,8 @@ class PresenceRoutingTest {
     SessionChannel bound = (session, request) -> FileReply.listed(request.id(), roots.get());
     var transport = mock(SessionChannel.class);
     when(transport.bound("client")).thenReturn(bound);
+    when(transport.ask(eq("client"), any()))
+        .thenAnswer(call -> bound.ask("client", call.getArgument(1)));
     var providers =
         new AgentsConfig()
             .runProviders(
@@ -134,6 +137,17 @@ class PresenceRoutingTest {
         Optional.of(new PersonalWorkspace("alice", root)),
         router.readTarget(personal, preferences).personalWorkspace());
 
+    Path alias = PersonalWorkspace.LOGICAL_ROOT.resolve("Resources/personal/preferences.md");
+    assertEquals(preferences, router.targetFor(personal, alias).path());
+    assertTrue(router.readTarget(personal, alias).personalWorkspace().isEmpty());
+    assertTrue(
+        router
+            .mutationTarget(personal, PersonalWorkspace.LOGICAL_ROOT.resolve("security.md"))
+            .securityFile());
+    assertThrows(
+        WorkspaceRefusedException.class,
+        () -> router.targetFor(personal, PersonalWorkspace.LOGICAL_ROOT.resolve("../outside.md")));
+
     roots.set(List.of(root.toString(), extra.toString()));
     assertTrue(router.readTarget(personal, preferences).personalWorkspace().isEmpty());
     assertTrue(
@@ -141,6 +155,7 @@ class PresenceRoutingTest {
     assertThrows(
         WorkspaceRefusedException.class,
         () -> router.readTarget(personal, root.resolve("../unbound/preferences.md")));
+    assertThrows(WorkspaceRefusedException.class, () -> router.targetFor(personal, alias));
 
     roots.set(List.of(root.toString()));
     presences.withdraw("client");
@@ -148,6 +163,7 @@ class PresenceRoutingTest {
     presences.declare(new Presence("other", "laptop", root.toString(), project));
     when(transport.bound("other")).thenReturn(bound);
     assertTrue(router.readTarget(personal, preferences).personalWorkspace().isEmpty());
+    assertThrows(WorkspaceRefusedException.class, () -> router.readTarget(personal, alias));
   }
 
   // --- the feature ---------------------------------------------------------

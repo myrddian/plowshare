@@ -32,6 +32,12 @@ The server's logical file root is `/personal`. Its actual union storage follows
 the normal `<data-dir>/projects/<id>/{sync.git,tree}` layout. Server filesystem
 paths are never sent as client mount locations.
 
+A job in its owner's Personal project can use paths such as `/personal/In/note.md`
+with file tools whether the server mirror or the live Personal mount is serving
+the workspace. Live routing resolves the logical path against the authenticated
+mount's advertised root before file I/O. File-operation approval binds the resolved
+target, so a remount cannot redirect an approved write.
+
 ## Internal message routing
 
 See the [Internal project messaging manual](internal-messaging.md) for qualified

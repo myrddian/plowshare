@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.files;
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.approvals.SecurityPolicyFiles;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -154,43 +155,48 @@ public final class ProviderRouter {
     return List.copyOf(providers.forHome(home));
   }
 
-  /** Provider selected for a read, with Personal evidence only for its exact workspace root. */
-  public record ReadTarget(
-      FileProvider provider, Optional<FileProvider.PersonalWorkspace> personalWorkspace) {}
+  /** The provider path to open and the scope path and roots used for containment. */
+  public record Target(FileProvider provider, Path path, Path scopePath, List<Path> roots) {
+    public Target {
+      roots = List.copyOf(roots);
+    }
+  }
+
+  /** Target selected for a read, with Personal evidence only for its exact workspace root. */
+  public record ReadTarget(Target target, Optional<PersonalWorkspace> personalWorkspace) {}
 
   /**
    * A mutation and whether it names a security policy file or a path under its fragment directory.
    */
-  public record MutationTarget(FileProvider provider, boolean securityFile) {}
-
-  private record Resolved(FileProvider provider, List<Path> roots) {}
+  public record MutationTarget(Target target, boolean securityFile) {}
 
   /**
    * Resolve once so the roots used to classify the read belong to the provider that will read it.
    */
   public ReadTarget readTarget(Home home, Path path) {
-    Resolved target = resolve(home, path, FileProvider::forReviewedRead);
+    Target target = resolve(home, path, FileProvider::forReviewedRead, true);
     FileProvider provider = target.provider();
     // An alias must not give a read standing intent when exact account rules name the original.
     // A Personal read also uses the provider's single, declared workspace.
     return new ReadTarget(
-        provider,
+        target,
         provider
             .personalWorkspace()
             .filter(workspace -> target.roots().equals(List.of(workspace.root())))
+            .filter(workspace -> path.equals(target.path()))
             .filter(workspace -> path.startsWith(workspace.root()))
             .filter(workspace -> path.equals(provider.reviewPath(path))));
   }
 
   /** Classifies a direct mutation against the same provider roots used for routing it. */
   public MutationTarget mutationTarget(Home home, Path path) {
-    Resolved target = resolve(home, path, FileProvider::forReviewedMutation);
-    Path named = path.normalize();
-    Path reviewed = target.provider().reviewPath(path);
+    Target target = resolve(home, path, FileProvider::forReviewedMutation, true);
+    Path named = target.path().normalize();
+    Path reviewed = target.provider().reviewPath(target.path());
     boolean protectedPath =
         target.roots().stream()
             .anyMatch(root -> securityFile(root, named) || securityFile(root, reviewed));
-    return new MutationTarget(target.provider(), protectedPath);
+    return new MutationTarget(target, protectedPath);
   }
 
   private static boolean securityFile(Path root, Path path) {
@@ -217,26 +223,34 @@ public final class ProviderRouter {
    *     in which case nothing can be concluded
    */
   public FileProvider providerFor(Home home, Path path) {
-    return resolve(home, path, UnaryOperator.identity()).provider();
+    return resolve(home, path, UnaryOperator.identity(), false).provider();
   }
 
-  private Resolved resolve(Home home, Path path, UnaryOperator<FileProvider> bind) {
-    // No null checks of its own. Both arguments are dereferenced a line or
-    // two down — `canonical` on the path, `providersFor` on the home, which
-    // does check — so a requireNonNull here is a line no mutant can kill,
-    // and this project removes those rather than keeping them for the shape.
-    // The construction-time check on `providers` is the one that earns its
-    // place: without it the wiring bug surfaces at the first file call
-    // instead of at the frame that made it.
-    Path candidate = FileAccess.canonical(path);
+  /** Resolves file references, including the logical root of the run's admitted Personal space. */
+  public Target targetFor(Home home, Path path) {
+    return resolve(home, path, UnaryOperator.identity(), true);
+  }
 
+  private Target resolve(
+      Home home, Path path, UnaryOperator<FileProvider> bind, boolean allowPersonalAlias) {
     List<FileProvider> all = providersFor(home);
-    List<FileProvider> covering = new ArrayList<>();
+    boolean personalAlias =
+        allowPersonalAlias
+            && path.startsWith(PersonalWorkspace.LOGICAL_ROOT)
+            && all.stream().anyMatch(provider -> provider.personalWorkspace().isPresent());
+    // The alias belongs to the selected Personal provider. Never canonicalize it on this host
+    // or use an unrelated provider's directory as a replacement for the authenticated mount.
+    if (personalAlias && !path.equals(path.normalize()))
+      throw new WorkspaceRefusedException("Use a normalized path under /personal.");
+    Path candidate = personalAlias ? path : FileAccess.canonical(path);
+    List<Target> covering = new ArrayList<>();
     List<FileProvider> answered = new ArrayList<>();
     List<List<Path>> rootsOf = new ArrayList<>();
     WorkspaceUnavailableException unreachable = null;
 
     for (FileProvider provider : all) {
+      var personal = provider.personalWorkspace();
+      if (personalAlias && personal.isEmpty()) continue;
       List<Path> roots;
       try {
         provider = bind.apply(provider);
@@ -261,8 +275,18 @@ public final class ProviderRouter {
       }
       answered.add(provider);
       rootsOf.add(roots);
-      if (covers(roots, candidate)) {
-        covering.add(provider);
+      if (personalAlias) {
+        Path root = personal.orElseThrow().root();
+        if (roots.equals(List.of(root))) {
+          // Keep the advertised spelling usable even for a mount located under the alias.
+          Path resolved =
+              root.startsWith(PersonalWorkspace.LOGICAL_ROOT) && path.startsWith(root)
+                  ? path
+                  : root.resolve(PersonalWorkspace.LOGICAL_ROOT.relativize(path));
+          covering.add(new Target(provider, resolved, resolved, roots));
+        }
+      } else if (covers(roots, candidate)) {
+        covering.add(new Target(provider, path, candidate, roots));
       }
     }
 
@@ -272,7 +296,7 @@ public final class ProviderRouter {
               + path
               + " is covered by more than one"
               + " filesystem — "
-              + named(covering)
+              + named(covering.stream().map(Target::provider).toList())
               + " — and the same path on two"
               + " machines is two different files, so this will not be guessed at."
               + " Name a path that only one of them covers.");
@@ -319,11 +343,10 @@ public final class ProviderRouter {
                 + " covered this path, the answer came from one of two machines and"
                 + " nothing else will say so.",
             path,
-            covering.get(0).name(),
+            covering.getFirst().provider().name(),
             unreachable.getMessage());
       }
-      FileProvider selected = covering.getFirst();
-      return new Resolved(selected, rootsOf.get(answered.indexOf(selected)));
+      return covering.getFirst();
     }
     if (unreachable != null) {
       // Its own sentence and not one built here: the reason travels with

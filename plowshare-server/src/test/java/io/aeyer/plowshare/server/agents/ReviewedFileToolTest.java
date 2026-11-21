@@ -17,6 +17,7 @@ import static org.mockito.Mockito.when;
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
+import io.aeyer.plowshare.protocol.FileResult;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.approvals.ApprovalReviews;
 import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
@@ -24,6 +25,7 @@ import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.approvals.SecurityReviewer;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.LocalProvider;
 import io.aeyer.plowshare.server.files.Mode;
@@ -35,6 +37,7 @@ import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceCodeMap;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.ToolPre;
+import io.aeyer.plowshare.server.images.ImageStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -268,6 +271,74 @@ class ReviewedFileToolTest {
     assertTrue(tool.run(checked.arguments(), home).startsWith("Deleted"));
     verify(review).humanOverride(any(), eq("approval"));
     assertFalse(Files.exists(target));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_retained_personal_alias_writes_only_to_its_approved_mount(boolean remounted)
+      throws Exception {
+    Path workspace = root.toRealPath();
+    Path target = workspace.resolve("In/note.md");
+    var mount = new AtomicReference<>(workspace);
+    SessionChannel channel = mock(SessionChannel.class);
+    SessionChannel bound = mock(SessionChannel.class);
+    when(channel.bound("client")).thenReturn(bound);
+    when(bound.ask(
+            eq("client"),
+            argThat(request -> request != null && FileRequest.ROOTS.equals(request.op()))))
+        .thenAnswer(
+            call ->
+                FileReply.listed(
+                    call.getArgument(1, FileRequest.class).id(), List.of(mount.get().toString())));
+    when(bound.ask(
+            eq("client"),
+            argThat(request -> request != null && FileRequest.WRITE.equals(request.op()))))
+        .thenAnswer(
+            call ->
+                FileReply.changed(
+                    call.getArgument(1, FileRequest.class).id(),
+                    FileResult.written(target.toString(), 4, 1)));
+    var router =
+        new ProviderRouter(
+            at ->
+                List.of(
+                    new RemoteProvider(
+                        channel,
+                        "client",
+                        List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)),
+                        at,
+                        ImageStore.NONE,
+                        Optional.of(new PersonalWorkspace("owner", mount.get())))));
+    var tool = tool(FileTools.EDIT_NAME, router);
+    when(review.review(any(), any())).thenReturn(decision(ApprovalReviews.Action.ASK_HUMAN));
+    String args = "{\"path\":\"/personal/In/note.md\",\"content\":\"note\"}";
+    assertTrue(gate(tool, args).isDenied());
+    assertEquals(List.of(target.toString()), question.get().file().paths());
+    String frozen = tool.retainedArguments(args, home);
+    if (remounted) mount.set(workspace.resolve("replacement"));
+    else when(store.consumeFile(question.get().id(), question.get().file())).thenReturn(true);
+
+    ToolPre checked =
+        tool.gateRetained(
+            frozen, "local", home, context, (at, original) -> ToolPre.allowed(original));
+
+    if (remounted) {
+      assertTrue(checked.isDenied());
+      verifyNoInteractions(store);
+      verify(bound, never())
+          .ask(eq("client"), argThat(request -> FileRequest.WRITE.equals(request.op())));
+    } else {
+      assertFalse(checked.isDenied());
+      assertEquals(
+          "Wrote 1 line (4 bytes) to /personal/In/note.md.", tool.run(checked.arguments(), home));
+      verify(bound)
+          .ask(
+              eq("client"),
+              argThat(
+                  request ->
+                      FileRequest.WRITE.equals(request.op())
+                          && target.toString().equals(request.path())));
+    }
   }
 
   @ParameterizedTest

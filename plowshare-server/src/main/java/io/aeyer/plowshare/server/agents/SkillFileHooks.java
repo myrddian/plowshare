@@ -1,6 +1,5 @@
 package io.aeyer.plowshare.server.agents;
 
-import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.ProviderRouter;
@@ -44,8 +43,9 @@ public final class SkillFileHooks implements Hooks {
     Edit edit = edit(tool, arguments);
     if (edit == null || edit.content() == null) return ToolPre.allowed(arguments);
     try {
-      FileProvider provider = files.providerFor(home(context), edit.path());
-      SkillFileValidation.Target target = SkillFileValidation.target(edit.path(), provider.roots());
+      var routed = files.targetFor(home(context), edit.path());
+      SkillFileValidation.Target target =
+          SkillFileValidation.target(routed.scopePath(), routed.roots());
       if (target == null) return ToolPre.allowed(arguments);
       String invalid = target.check(edit.content());
       if (invalid.isEmpty()) return ToolPre.allowed(arguments);
@@ -71,11 +71,13 @@ public final class SkillFileHooks implements Hooks {
     if (edit == null) return ToolPost.untouched(result);
     String example = "";
     try {
-      FileProvider provider = files.providerFor(home(context), edit.path());
-      SkillFileValidation.Target target = SkillFileValidation.target(edit.path(), provider.roots());
+      var routed = files.targetFor(home(context), edit.path());
+      FileProvider provider = routed.provider();
+      SkillFileValidation.Target target =
+          SkillFileValidation.target(routed.scopePath(), routed.roots());
       if (target == null) return ToolPost.untouched(result);
       example = target.example();
-      var metadata = provider.fingerprint(edit.path());
+      var metadata = provider.fingerprint(routed.path());
       if (metadata.size() > ChannelDefinitions.MAX_DEFINITION_BYTES) {
         return note(
             result,
@@ -87,7 +89,7 @@ public final class SkillFileHooks implements Hooks {
       // Raw snapshots preserve line endings and detect concurrent changes. They do not affect
       // the file tools' read-before-replace ledger. Older clients may refuse this capability.
       byte[] bytes =
-          provider.snapshot(edit.path(), metadata, (int) ChannelDefinitions.MAX_DEFINITION_BYTES);
+          provider.snapshot(routed.path(), metadata, (int) ChannelDefinitions.MAX_DEFINITION_BYTES);
       String source = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
       String invalid = target.check(source);
       return note(
@@ -164,7 +166,7 @@ public final class SkillFileHooks implements Hooks {
           || !arguments.get("new").isTextual()) {
         return null;
       }
-      return new Edit(FileAccess.canonical(path), whole ? content.asText() : null);
+      return new Edit(path, whole ? content.asText() : null);
     } catch (ToolArguments.BadArguments | InvalidPathException invalid) {
       return null;
     }

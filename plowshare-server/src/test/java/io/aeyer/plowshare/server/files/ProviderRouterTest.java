@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -14,12 +16,15 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.Needle;
 import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -87,6 +92,23 @@ class ProviderRouterTest {
   @BeforeEach
   void canonicalTree() throws IOException {
     real = tmp.toRealPath();
+  }
+
+  @Test
+  void a_personal_mount_under_the_logical_root_keeps_both_spellings() {
+    Path mount = PersonalWorkspace.LOGICAL_ROOT.resolve("replica");
+    Path file = mount.resolve("In/note.md");
+    var provider = mock(FileProvider.class);
+    when(provider.roots()).thenReturn(List.of(mount));
+    when(provider.personalWorkspace())
+        .thenReturn(Optional.of(new PersonalWorkspace("owner", mount)));
+    var router = over(provider);
+    Home personal = Home.of(PersonalSpaces.name("owner"));
+
+    assertEquals(file, router.targetFor(personal, file).path());
+    assertEquals(
+        file,
+        router.targetFor(personal, PersonalWorkspace.LOGICAL_ROOT.resolve("In/note.md")).path());
   }
 
   @Test

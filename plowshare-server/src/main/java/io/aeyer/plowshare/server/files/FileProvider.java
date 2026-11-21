@@ -111,6 +111,9 @@ public interface FileProvider {
 
   /** The owner and exact workspace root established by server-side Personal routing. */
   record PersonalWorkspace(String owner, Path root) {
+    /** The logical project root persisted for Personal and used by its server mirror. */
+    public static final Path LOGICAL_ROOT = Path.of("/personal");
+
     public PersonalWorkspace {
       Objects.requireNonNull(owner);
       if (!root.isAbsolute())

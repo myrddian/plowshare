@@ -5355,18 +5355,25 @@ public final class JobRuntime {
     Instant started = clock.get();
     String result;
     try {
-      ToolPre checked =
-          run.gateRetained(
-              retained.tool().arguments(),
-              retained.side(),
-              home,
-              context,
-              (at, arguments) ->
-                  toolPre(
-                      activeHooks(route, harnessRun, skillChecks),
-                      at,
-                      retained.tool().name(),
-                      arguments));
+      ToolPre checked;
+      try {
+        checked =
+            run.gateRetained(
+                retained.tool().arguments(),
+                retained.side(),
+                home,
+                context,
+                (at, arguments) ->
+                    toolPre(
+                        activeHooks(route, harnessRun, skillChecks),
+                        at,
+                        retained.tool().name(),
+                        arguments));
+      } catch (WorkspaceRefusedException refused) {
+        // The approval was claimed, but preflight refused before dispatch. Settle the retained
+        // call with the provider's guidance so the model can correct its path.
+        return refused.getMessage() + " The approved tool did not run.";
+      }
       checked.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
       if (checked.isDenied()) result = "The retained command was refused: " + checked.denied();
       else {

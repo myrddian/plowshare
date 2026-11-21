@@ -9,9 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -19,6 +23,8 @@ import io.aeyer.plowshare.protocol.JobDelta;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.approvals.SuspendedRunCalls;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
@@ -7404,6 +7410,90 @@ class JobRuntimeTest {
     Outcome outcome = runtime.run(agent("reader"), "go", Home.global(), generous(), null);
 
     assertEquals(Ending.ANSWERED, outcome.ending());
+  }
+
+  @Test
+  void a_retained_file_path_refusal_settles_the_call_and_preserves_earlier_work() throws Exception {
+    String conversation = "cnv_personal";
+    String approval = "apr_file";
+    String name = FileTools.EDIT_NAME;
+    var edit = call("edit", name, "{\"path\":\"/personal/In/note.md\",\"content\":\"evidence\"}");
+    String refusal =
+        "path /personal/In/note.md is outside every root this job can reach."
+            + " What it can reach — remote: /client/personal."
+            + " Ask for the roots you have rather than guessing at paths.";
+    var question = mock(RunApproval.class);
+    when(question.id()).thenReturn(approval);
+    when(question.conversation()).thenReturn(conversation);
+    when(question.side()).thenReturn("local");
+    var tool = mock(RetainedApprovalTool.class);
+    when(tool.schema()).thenReturn(Probe.returning(name, "").schema());
+    when(tool.gate(eq(edit.arguments()), any(), any(), any()))
+        .thenReturn(new ToolPre(edit.arguments(), "Awaiting approval", List.of()));
+    when(tool.waitingApproval()).thenReturn(Optional.of(question));
+    String retained = "retained edit arguments";
+    when(tool.retainedArguments(eq(edit.arguments()), any())).thenReturn(retained);
+    when(tool.gateRetained(eq(retained), eq("local"), any(), any(), any()))
+        .thenThrow(new WorkspaceRefusedException(refusal));
+    var calls = mock(SuspendedRunCalls.class);
+    when(calls.find(approval))
+        .thenReturn(
+            Optional.of(
+                new SuspendedRunCalls.Call(
+                    approval,
+                    conversation,
+                    null,
+                    "local",
+                    call(edit.id(), name, retained),
+                    "waiting",
+                    RunApproval.ALLOWED,
+                    "owner",
+                    null,
+                    null)));
+    when(calls.claim(approval)).thenReturn(true);
+
+    var search = Probe.returning("conversation_search", "earlier search evidence");
+    var transport =
+        new Scripted()
+            .then(() -> asking("", call("search", search.schema().name(), "{}"), edit))
+            .then(() -> answer("I can locate the workspace and continue."));
+    var runtime = runtimeOver(transport, search, tool);
+    runtime.useSuspendedRunCalls(calls);
+    var log = new Recorded(List.of(), conversation);
+    var transcript = mock(Transcript.class, AdditionalAnswers.delegatesTo(log));
+    doAnswer(
+            invocation -> {
+              log.record(invocation.getArgument(0));
+              return null;
+            })
+        .when(transcript)
+        .recordDurably(any());
+
+    var outcome =
+        runtime.run(
+            agent("echo").withTools(List.of(search.schema().name(), name)),
+            "Save a note",
+            Home.of("personal"),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript);
+
+    assertEquals(Ending.ANSWERED, outcome.ending(), outcome.text());
+    assertEquals(List.of("{}"), search.seen());
+    assertTrue(toolResults(transport, 1).contains("earlier search evidence"));
+    assertTrue(toolResults(transport, 1).contains(refusal));
+    assertEquals(
+        List.of(ToolLines.REFUSED),
+        log.entries().stream()
+            .filter(entry -> edit.id().equals(entry.toolCallId()))
+            .map(LoggedEntry::outcome)
+            .toList());
+    verify(tool, never()).run(any(), any());
+    verify(tool, never()).run(any(), any(), any());
+    verify(calls).complete(eq(approval), contains(refusal));
+    verify(calls).acknowledged(approval);
   }
 
   /**
