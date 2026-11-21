@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,12 +15,16 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import io.aeyer.plowshare.server.llm.accounting.UsageOwners;
 import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.telemetry.WorkPerformanceReporter;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,7 +34,14 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.ResultSetExtractor;
+import org.springframework.mock.env.MockEnvironment;
 
 class ConversationSearchTest {
   private static final Home HOME = Home.of("project");
@@ -54,6 +67,10 @@ class ConversationSearchTest {
     when(entries.search(any(), anyString(), anyInt(), anyInt())).thenReturn(LogSearch.NONE);
     when(entries.search(any(), anyString(), anyInt(), anyInt(), anyString()))
         .thenReturn(LogSearch.NONE);
+    when(entries.search(any(), anyString(), anyInt(), anyInt(), any(), eq(true)))
+        .thenReturn(LogSearch.NONE);
+    when(entries.searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean()))
+        .thenReturn(BoundedLogSearch.NONE);
     when(index.inConversation(any())).thenReturn(index);
     when(index.capture(anyString(), any(UsageAttribution.class), eq(HOME)))
         .thenReturn(new PassageIndex.Query(new float[768], null));
@@ -138,8 +155,10 @@ class ConversationSearchTest {
             "hash",
             List.of(a, b),
             2);
-    when(entries.search(HOME, "question", 0, 200))
-        .thenReturn(new LogSearch(List.of(lexical), 1, new LogSearch.Reach(2, 0, 0)));
+    when(entries.searchBounded(HOME, "question", 0, 200, null, true))
+        .thenReturn(
+            new BoundedLogSearch(
+                new LogSearch(List.of(lexical), 1, new LogSearch.Reach(2, 0, 0)), false));
     ranking(List.of(new PassageIndex.Match(a.id(), 0, "restricted distinct excerpt", .8, "hash")));
     when(entries.searchSources(eq(HOME), anyList()))
         .thenReturn(List.of(a, b))
@@ -158,6 +177,8 @@ class ConversationSearchTest {
     verify(entries).searchReach(HOME, "cnv_a");
     verify(entries, never()).search(any(), anyString(), anyInt(), anyInt(), anyString());
     verify(entries, never()).search(any(), anyString(), anyInt(), anyInt());
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
     assertThrows(
         ValidationException.class,
         () ->
@@ -251,7 +272,7 @@ class ConversationSearchTest {
             any(PassageIndex.ReadSelection.class));
     verify(entries, times(4)).searchSources(eq(HOME), anyList());
     if (mode.equals("hybrid"))
-      verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES);
+      verify(entries).searchBounded(HOME, "question", 0, ConversationSearch.CANDIDATES, null, true);
   }
 
   @ParameterizedTest
@@ -373,5 +394,479 @@ class ConversationSearchTest {
     var replay = search.search(HOME, "question", 0, 10, "semantic", result.retrieval().snapshot());
     assertFalse(replay.retrieval().complete());
     assertEquals(true, replay.retrieval().truncated());
+  }
+
+  // --- lexical engine selection and bounded totals ---------------------------------------------
+
+  private static final String EXACT_TOTAL = "distinct matching passage groups";
+  private static final String EXACT_PROVENANCE =
+      "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination; "
+          + "explicit supplied context excluded; legacy inputs remain unclassified";
+
+  private LogSearch.Hit lexicalHit() {
+    return new LogSearch.Hit(
+        "cnv_a",
+        1,
+        1,
+        EntryKind.UTTERANCE,
+        1,
+        "[common] passage",
+        20,
+        null,
+        null,
+        Instant.EPOCH,
+        "hash",
+        List.of(a),
+        1);
+  }
+
+  private LogSearch onePage() {
+    return new LogSearch(List.of(lexicalHit()), 1, new LogSearch.Reach(2, 0, 0));
+  }
+
+  private ConversationSearch engine(LexicalEngine engine) {
+    return new ConversationSearch(
+        entries, index, Duration.ofSeconds(2), WorkPerformanceReporter.NONE, engine);
+  }
+
+  @Test
+  void thePrunedPassageEngineLetsTheRepositorySkipMatchesAndTheDefaultDoesNot() {
+    var pruned = engine(LexicalEngine.PASSAGES_PRUNED);
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+
+    pruned.search(HOME, "question", 3, 10, null, null);
+    pruned.search(HOME, "question", 0, 10, "lexical", null, "cnv_a");
+    pruned.search(HOME, "question", 0, 10, "hybrid", null);
+    verify(entries).searchBounded(HOME, "question", 3, 10, null, false);
+    verify(entries).searchBounded(HOME, "question", 0, 10, "cnv_a", false);
+    verify(entries).searchBounded(HOME, "question", 0, ConversationSearch.CANDIDATES, null, false);
+    verify(entries, never()).searchBounded(any(), anyString(), anyInt(), anyInt(), any(), eq(true));
+
+    engine(LexicalEngine.PASSAGES).search(HOME, "question", 3, 10, null, null);
+    engine(LexicalEngine.PASSAGES).search(HOME, "question", 0, 10, "hybrid", null);
+    verify(entries).searchBounded(HOME, "question", 3, 10, null, true);
+    verify(entries).searchBounded(HOME, "question", 0, ConversationSearch.CANDIDATES, null, true);
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt());
+  }
+
+  @Test
+  void thePassageEngineIsTheDefaultAndAnswersLexicalRetrievalThroughTheBoundedContract() {
+    search.search(HOME, "question", 3, 10, "lexical", null);
+    search.search(HOME, "question", 0, 10, null, null, "cnv_a");
+    verify(entries).searchBounded(HOME, "question", 3, 10, null, true);
+    verify(entries).searchBounded(HOME, "question", 0, 10, "cnv_a", true);
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt());
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt(), anyString());
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), eq(false));
+    verify(index, never()).capture(anyString(), any(UsageAttribution.class), any(Home.class));
+  }
+
+  @Test
+  void theLegacyEngineUsesTheOriginalSearchForLexicalAndHybridAndNeverTheBoundedOne() {
+    var legacy = engine(LexicalEngine.LEGACY);
+    when(entries.search(HOME, "question", 3, 10)).thenReturn(onePage());
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a));
+
+    var explicit = legacy.search(HOME, "question", 3, 10, "lexical", null);
+    legacy.search(HOME, "question", 0, 10, null, null, "cnv_a");
+    legacy.search(HOME, "question", 0, 10, "hybrid", null);
+
+    verify(entries).search(HOME, "question", 3, 10);
+    verify(entries).search(HOME, "question", 0, 10, "cnv_a");
+    verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES);
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
+    assertEquals(1, explicit.total());
+    assertEquals(EXACT_TOTAL, explicit.retrieval().totalMeaning());
+    assertFalse(explicit.retrieval().truncated());
+    assertTrue(explicit.retrieval().complete());
+  }
+
+  @ParameterizedTest
+  @EnumSource(LexicalEngine.class)
+  void fullInputSearchKeepsTheOriginalQueryUnderEitherEngine(LexicalEngine selected) {
+    var chosen = engine(selected);
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+    when(index.includingInputs(true)).thenReturn(index);
+
+    var lexical = chosen.search(HOME, "question", 0, 10, "lexical", null, null, null, true);
+    chosen.search(HOME, "question", 0, 10, "hybrid", null, null, "cnv_a", true);
+
+    verify(entries).search(HOME, "question", 0, 10, null, true);
+    verify(entries).search(HOME, "question", 0, ConversationSearch.CANDIDATES, "cnv_a", true);
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
+    assertFalse(lexical.retrieval().truncated());
+    assertTrue(lexical.retrieval().complete());
+    assertEquals(EXACT_TOTAL, lexical.retrieval().totalMeaning());
+  }
+
+  @Test
+  void anExactLexicalAnswerKeepsItsOriginalResponse() {
+    when(entries.searchBounded(HOME, "question", 0, 10, null, true))
+        .thenReturn(new BoundedLogSearch(onePage(), false));
+
+    var unasked = search.search(HOME, "question", 0, 10, null, null);
+    var explicit = search.search(HOME, "question", 0, 10, "lexical", null);
+
+    // The whole records, so that no field of an exact answer can drift unnoticed.
+    assertEquals(LogSearchView.of(onePage(), 0, 10), unasked);
+    assertEquals(null, unasked.retrieval());
+    assertEquals(
+        new LogSearchView(
+            unasked.hits(),
+            1,
+            0,
+            10,
+            unasked.reach(),
+            new LogSearchView.Retrieval(
+                "lexical",
+                "lexical",
+                EXACT_TOTAL,
+                null,
+                false,
+                true,
+                null,
+                null,
+                null,
+                0,
+                EXACT_PROVENANCE)),
+        explicit);
+  }
+
+  /** The two ways a passage engine truncates, and what each must say about its total. */
+  private static String truncatedTotal(LexicalEngine engine) {
+    return engine == LexicalEngine.PASSAGES_PRUNED
+        ? ConversationSearch.LOWER_BOUND_TOTAL
+        : ConversationSearch.GROUPING_WINDOW_TOTAL;
+  }
+
+  private static String truncatedCounts(LexicalEngine engine) {
+    return engine == LexicalEngine.PASSAGES_PRUNED
+        ? "lower-ranked lexical matches were not counted, so the lexical group total and source"
+            + " counts are lower bounds; "
+        : "more entries matched than the lexical search groups, so the lexical group total and"
+            + " source counts cover only the best-ranked matches; ";
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = LexicalEngine.class,
+      names = {"PASSAGES", "PASSAGES_PRUNED"})
+  void aTruncatedDefaultLexicalAnswerSaysWhatItsTotalMeansForItsEngine(LexicalEngine selected) {
+    boolean every = selected == LexicalEngine.PASSAGES;
+    when(entries.searchBounded(HOME, "question", 0, 10, null, every))
+        .thenReturn(new BoundedLogSearch(onePage(), true));
+
+    var result = engine(selected).search(HOME, "question", 0, 10, null, null);
+
+    assertEquals(1, result.total());
+    assertEquals(LogSearchView.of(onePage(), 0, 10).hits(), result.hits());
+    var retrieval = result.retrieval();
+    assertEquals("lexical", retrieval.requestedMode());
+    assertEquals("lexical", retrieval.effectiveMode());
+    assertTrue(retrieval.truncated());
+    assertFalse(retrieval.complete());
+    assertEquals(truncatedTotal(selected), retrieval.totalMeaning());
+    assertEquals(null, retrieval.snapshot());
+    assertEquals(0, retrieval.queryEmbeddingCalls());
+    assertEquals(
+        "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination; "
+            + truncatedCounts(selected)
+            + "explicit supplied context excluded; legacy inputs remain unclassified",
+        retrieval.provenance());
+  }
+
+  @Test
+  void theTwoTruncationsDoNotShareAMeaning() {
+    // A pruned total grows with the page; a grouping-window total is final and says so.
+    assertTrue(ConversationSearch.LOWER_BOUND_TOTAL.startsWith("lower bound"));
+    assertFalse(ConversationSearch.GROUPING_WINDOW_TOTAL.contains("lower bound"));
+    assertTrue(ConversationSearch.GROUPING_WINDOW_TOTAL.contains("reachable by paging"));
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = LexicalEngine.class,
+      names = {"PASSAGES", "PASSAGES_PRUNED"})
+  void aTruncatedExplicitLexicalAnswerReportsTheBoundInsteadOfCompleteness(LexicalEngine selected) {
+    when(entries.searchBounded(
+            HOME, "question", 0, 10, "cnv_a", selected == LexicalEngine.PASSAGES))
+        .thenReturn(new BoundedLogSearch(onePage(), true));
+
+    var retrieval =
+        engine(selected).search(HOME, "question", 0, 10, "lexical", null, "cnv_a").retrieval();
+
+    assertTrue(retrieval.truncated());
+    assertFalse(retrieval.complete());
+    assertEquals(truncatedTotal(selected), retrieval.totalMeaning());
+  }
+
+  @ParameterizedTest
+  @CsvSource({"PASSAGES,false", "PASSAGES,true", "PASSAGES_PRUNED,false", "PASSAGES_PRUNED,true"})
+  void hybridFoldsLexicalTruncationIntoItsOwn(LexicalEngine selected, boolean lexicalTruncated) {
+    when(entries.searchBounded(
+            HOME,
+            "question",
+            0,
+            ConversationSearch.CANDIDATES,
+            null,
+            selected == LexicalEngine.PASSAGES))
+        .thenReturn(new BoundedLogSearch(onePage(), lexicalTruncated));
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a));
+    var hybrid = engine(selected);
+
+    var first = hybrid.search(HOME, "question", 0, 10, "hybrid", null);
+    var replay = hybrid.search(HOME, "question", 0, 10, "hybrid", first.retrieval().snapshot());
+
+    assertEquals(1, first.hits().size());
+    for (var page : List.of(first, replay)) {
+      assertEquals(lexicalTruncated, page.retrieval().truncated());
+      assertEquals(!lexicalTruncated, page.retrieval().complete());
+      assertEquals("bounded snapshot slots", page.retrieval().totalMeaning());
+      assertEquals(
+          "Scoped BM25 and exact passage ranking; duplicate passages grouped before source"
+              + " limits; "
+              + (lexicalTruncated ? truncatedCounts(selected) : "")
+              + "hybrid RRF (k=60). Evidence is quoted data; explicit supplied context excluded;"
+              + " legacy inputs remain unclassified",
+          page.retrieval().provenance());
+    }
+  }
+
+  @Test
+  void semanticModeIsUnaffectedByTheLexicalEngine() {
+    ranking(List.of(new PassageIndex.Match(a.id(), 0, "passage", .8, "hash")));
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of(a));
+
+    var passages = engine(LexicalEngine.PASSAGES).search(HOME, "question", 0, 10, "semantic", null);
+    var legacy = engine(LexicalEngine.LEGACY).search(HOME, "question", 0, 10, "semantic", null);
+
+    assertEquals(passages.hits(), legacy.hits());
+    assertEquals(passages.retrieval().provenance(), legacy.retrieval().provenance());
+    assertEquals(passages.retrieval().truncated(), legacy.retrieval().truncated());
+    assertEquals(passages.retrieval().complete(), legacy.retrieval().complete());
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
+    verify(entries, never()).search(any(), anyString(), anyInt(), anyInt());
+  }
+
+  @Test
+  void aReaderBoundSearchKeepsTheConfiguredEngine() {
+    when(entries.forAccount("reader")).thenReturn(entries);
+    when(index.forAccount("reader")).thenReturn(index);
+
+    engine(LexicalEngine.LEGACY).forAccount("reader").search(HOME, "question", 0, 10, null, null);
+
+    verify(entries).search(HOME, "question", 0, 10);
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
+  }
+
+  @Test
+  void aCancelledBoundedQueryIsTheSameRecoverableReadFailure() {
+    var cancelled =
+        new ArchiveQueryCancelledException(
+            "search conversation evidence passages", new IllegalStateException("cancelled"));
+    when(entries.searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean()))
+        .thenThrow(cancelled);
+
+    var failure =
+        assertThrows(
+            ReadFailedException.class, () -> search.search(HOME, "question", 0, 10, null, null));
+
+    assertSame(cancelled, failure.getCause());
+    assertEquals(ReadFailedException.Reason.QUERY_CANCELLED, failure.reason());
+  }
+
+  @Test
+  void theEngineIsConfiguredByNameAndAnUnknownNameIsRefused() {
+    assertEquals(LexicalEngine.PASSAGES, LexicalEngine.configured(null));
+    assertEquals(LexicalEngine.PASSAGES, LexicalEngine.configured(" "));
+    assertEquals(LexicalEngine.PASSAGES, LexicalEngine.configured("passages"));
+    assertEquals(LexicalEngine.PASSAGES_PRUNED, LexicalEngine.configured("passages-pruned"));
+    assertEquals(LexicalEngine.PASSAGES_PRUNED, LexicalEngine.configured(" Passages-Pruned"));
+    assertEquals(LexicalEngine.LEGACY, LexicalEngine.configured("LEGACY "));
+    var refused =
+        assertThrows(IllegalArgumentException.class, () -> LexicalEngine.configured("lucene"));
+    assertTrue(refused.getMessage().contains("plowshare.retrieval.lexical-engine"));
+    assertTrue(refused.getMessage().contains("passages-pruned"));
+    assertThrows(IllegalArgumentException.class, () -> LexicalEngine.configured("passages_pruned"));
+    assertThrows(IllegalArgumentException.class, () -> LexicalEngine.configured("passage"));
+  }
+
+  @Test
+  void compositionSelectsTheEngineFromConfigurationAndRefusesAnInvalidValue() {
+    var config = new RetrievalIndexConfig();
+    var legacy =
+        config.conversationSearch(
+            entries,
+            index,
+            new MockEnvironment().withProperty("plowshare.retrieval.lexical-engine", "legacy"),
+            WorkPerformanceReporter.NONE);
+    legacy.search(HOME, "question", 0, 10, null, null);
+    verify(entries).search(HOME, "question", 0, 10);
+    verify(entries, never())
+        .searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean());
+
+    config
+        .conversationSearch(entries, index, new MockEnvironment(), WorkPerformanceReporter.NONE)
+        .search(HOME, "question", 0, 10, null, null);
+    verify(entries).searchBounded(HOME, "question", 0, 10, null, true);
+
+    config
+        .conversationSearch(
+            entries,
+            index,
+            new MockEnvironment()
+                .withProperty("plowshare.retrieval.lexical-engine", "passages-pruned"),
+            WorkPerformanceReporter.NONE)
+        .search(HOME, "question", 0, 10, null, null);
+    verify(entries).searchBounded(HOME, "question", 0, 10, null, false);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            config.conversationSearch(
+                entries,
+                index,
+                new MockEnvironment().withProperty("plowshare.retrieval.lexical-engine", "fast"),
+                WorkPerformanceReporter.NONE));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"semantic", "hybrid"})
+  void anEmbeddingSearchResolvesItsOwnerOnceAndALexicalSearchNever(String mode) {
+    UsageOwners owners = mock(UsageOwners.class);
+    var owner = UsageAttribution.system("project", UsageAttribution.Operation.EMBEDDING_QUERY);
+    when(owners.in(HOME, null, UsageAttribution.Operation.EMBEDDING_QUERY)).thenReturn(owner);
+    search.useUsageOwners(owners);
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+
+    search.search(HOME, "question", 0, 10, null, null);
+    search.search(HOME, "question", 0, 10, "lexical", null, "cnv_a");
+    verifyNoInteractions(owners);
+
+    search.search(HOME, "question", 0, 10, mode, null);
+    verify(owners).in(HOME, null, UsageAttribution.Operation.EMBEDDING_QUERY);
+    verify(index).capture("question", owner, HOME);
+  }
+
+  /**
+   * The production entry, as {@code EntryStore.searchView} calls it with the caller's owner: an
+   * attributed owner is the one charged, and only an absent or unattributed one is resolved here.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"semantic", "hybrid"})
+  void anExplicitOwnerIsChargedAsGivenAndAnUnattributedOneIsResolved(String mode) {
+    UsageOwners owners = mock(UsageOwners.class);
+    var resolved = UsageAttribution.system("project", UsageAttribution.Operation.EMBEDDING_QUERY);
+    when(owners.in(HOME, null, UsageAttribution.Operation.EMBEDDING_QUERY)).thenReturn(resolved);
+    search.useUsageOwners(owners);
+    ranking(List.of());
+    when(entries.searchSources(eq(HOME), anyList())).thenReturn(List.of());
+    var given =
+        UsageAttribution.project("alice", "project", UsageAttribution.Operation.EMBEDDING_QUERY);
+    assertFalse(given.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED);
+    assertEquals(UsageAttribution.Status.LEGACY_UNATTRIBUTED, UsageAttribution.LEGACY.status());
+
+    search.search(HOME, "question", 0, 10, mode, null, given, null, false);
+    verify(index).capture("question", given, HOME);
+    verifyNoInteractions(owners);
+
+    search.search(HOME, "question", 0, 10, mode, null, UsageAttribution.LEGACY, null, false);
+    verify(owners).in(HOME, null, UsageAttribution.Operation.EMBEDDING_QUERY);
+    verify(index).capture("question", resolved, HOME);
+    verify(index, never()).capture("question", UsageAttribution.LEGACY, HOME);
+  }
+
+  // --- how a default request reaches this service ----------------------------------------------
+
+  @Test
+  void aDefaultRequestToTheStoreIsAnsweredByTheServiceBoundToItsReader() {
+    ConversationSearch root = mock(ConversationSearch.class);
+    ConversationSearch bound = mock(ConversationSearch.class);
+    when(root.forAccount("reader")).thenReturn(bound);
+    var answer = LogSearchView.of(onePage(), 0, 10);
+    when(bound.search(HOME, "question", 0, 10, null, null, null, null, false)).thenReturn(answer);
+    EntryStore store = new EntryStore(mock(JdbcTemplate.class)).retrieving(() -> root);
+
+    assertSame(answer, store.forAccount("reader").searchView(HOME, "question", 0, 10, null, null));
+
+    // The reader's own copy answered; the unbound service and the store's query did not.
+    verify(root).forAccount("reader");
+    verify(bound).search(HOME, "question", 0, 10, null, null, null, null, false);
+    verify(root, never())
+        .search(any(), any(), anyInt(), anyInt(), any(), any(), any(), any(), anyBoolean());
+  }
+
+  @Test
+  void aStoreComposedWithoutRetrievalAnswersADefaultRequestFromTheLegacyQuery() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(
+            anyString(),
+            any(PreparedStatementSetter.class),
+            ArgumentMatchers.<ResultSetExtractor<LogSearch>>any()))
+        .thenReturn(onePage());
+    EntryStore store = new EntryStore(jdbc);
+
+    var view = store.searchView(Home.global(), "question", 0, 10, null, null);
+
+    assertEquals(LogSearchView.of(onePage(), 0, 10), view);
+    assertEquals(null, view.retrieval());
+    verify(jdbc)
+        .query(
+            eq(EntryStore.SEARCH_SQL.replace("/*information*/", "")),
+            any(PreparedStatementSetter.class),
+            ArgumentMatchers.<ResultSetExtractor<LogSearch>>any());
+    // An explicit mode has no service to go to, and is refused instead of quietly served.
+    assertThrows(
+        ValidationException.class,
+        () -> store.searchView(Home.global(), "question", 0, 10, "lexical", null));
+  }
+
+  @Test
+  void aRepositoryWithoutABoundedSearchAnswersExactlyThroughItsOriginalOne() {
+    var page = onePage();
+    ConversationSearchRepository plain =
+        new ConversationSearchRepository() {
+          @Override
+          public ConversationSearchRepository forAccount(String account) {
+            return this;
+          }
+
+          @Override
+          public LogSearch search(
+              Home home, String question, int skip, int most, String conversation) {
+            return conversation == null ? page : LogSearch.NONE;
+          }
+
+          @Override
+          public List<LogSearch.Source> searchSources(
+              Home home, List<LogSearch.Reference> expected) {
+            return List.of();
+          }
+
+          @Override
+          public LogSearch.Reach searchReach(Home home, String conversation) {
+            return page.reach();
+          }
+        };
+
+    assertEquals(
+        new BoundedLogSearch(page, false),
+        plain.searchBounded(HOME, "question", 0, 10, null, true));
+    assertEquals(
+        BoundedLogSearch.NONE.page(),
+        plain.searchBounded(HOME, "question", 0, 10, "cnv", false).page());
+    var view = new ConversationSearch(plain, index).search(HOME, "question", 0, 10, null, null);
+    assertEquals(1, view.total());
+    assertEquals(null, view.retrieval());
   }
 }

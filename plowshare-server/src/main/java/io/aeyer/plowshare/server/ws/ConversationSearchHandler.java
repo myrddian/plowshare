@@ -1,7 +1,6 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
-import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.requests.RequestedHome;
 import io.aeyer.plowshare.server.requests.RequestedLogQuestion;
@@ -36,9 +35,9 @@ import java.util.Objects;
 public final class ConversationSearchHandler implements FrameHandler {
 
   /**
-   * {@code GET /v1/entries/search}'s four query parameters, as a payload.
+   * {@code GET /v1/entries/search}'s eight query parameters, as a payload.
    *
-   * <p>All four in one record rather than {@code q} and {@code project} beside a {@link Paged}:
+   * <p>All of them in one record rather than {@code q} and {@code project} beside a {@link Paged}:
    * this endpoint's window is the same window a page takes, but its request is a search rather than
    * a page of one conversation, and a record naming what it actually asks for is what a reader of
    * the wire needs.
@@ -47,6 +46,11 @@ public final class ConversationSearchHandler implements FrameHandler {
    * @param project which tier, or null for the global one
    * @param offset how many hits to pass over, or null for the beginning
    * @param limit how many hits this page may hold, or null for the cap
+   * @param mode {@code lexical}, {@code semantic} or {@code hybrid}, or null for a lexical request
+   *     that carries retrieval metadata only when its total is bounded
+   * @param snapshot the first page's snapshot for a later semantic or hybrid page, or null
+   * @param conversation a conversation that narrows the tier, or null for the whole tier
+   * @param includeInputs whether supplied context is searched as well as evidence; null is no
    */
   record Asked(
       String q,
@@ -72,16 +76,9 @@ public final class ConversationSearchHandler implements FrameHandler {
     Asked asked = Payloads.as(payload, Asked.class, FrameTypes.CONVERSATION_SEARCH);
     String question = RequestedLogQuestion.in(asked.q());
     RequestedWindow window = RequestedWindow.in(asked.offset(), asked.limit());
-    if (asked.mode() == null
-        && asked.snapshot() == null
-        && asked.conversation() == null
-        && !Boolean.TRUE.equals(asked.includeInputs()))
-      return Outcome.ok(
-          LogSearchView.of(
-              entries.search(
-                  RequestedHome.in(asked.project()), question, window.skip(), window.most()),
-              window.skip(),
-              window.most()));
+    // One call for every request, as GET /v1/entries/search makes: a payload naming no mode is a
+    // lexical request to the retrieval service, which chooses the engine and discloses a bounded
+    // total.
     return Outcome.ok(
         entries.searchView(
             RequestedHome.in(asked.project()),

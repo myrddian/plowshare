@@ -43,11 +43,18 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.springframework.jdbc.core.ArgumentPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.RowMapperResultSetExtractor;
+import org.springframework.jdbc.core.StatementCallback;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Every message each conversation has held, in the order it held them.
@@ -968,6 +975,612 @@ public final class EntryStore implements ConversationSearchRepository {
           .replace("coalesce(e.evidence_text_search,e.text_search)", "e.text_search")
           .replace("coalesce(e.evidence_search_length,e.search_length)", "e.search_length");
 
+  /**
+   * The most top-ranked matches a multi-word passage search groups, and the size below which it
+   * does not prune.
+   *
+   * <p>Choosing a passage for a match reads that entry's passages, so only the best-scoring matches
+   * go on to be grouped. When more matched, the answer is marked truncated: the page is still the
+   * best of everything, but the group total and the per-group source counts describe this window. A
+   * question that no more entries than this are expected to match is scored whole, because
+   * estimating a threshold would cost more than it saves.
+   */
+  static final int MOST_GROUPED_ENTRIES = 2_000;
+
+  /**
+   * Lexical search over stored passages (V277) and stored term frequencies (V278), served through
+   * {@link #searchBounded} unless the {@code legacy} engine is configured: score without unpacking
+   * entries, skip postings that cannot reach the page, highlight only the page.
+   *
+   * <p><b>Unchanged from {@link #SEARCH_SQL}:</b> the visibility predicate, the statement snapshot
+   * shared by statistics and matches, web-search matching (phrases and exclusions included), and
+   * BM25 (k1=1.2, b=.75) over the corpus the reader can see. Stored frequencies and lengths are the
+   * values that query derives, so the same entries match and a hit's rank agrees to nine decimal
+   * places; it is not the same double, because the parts of a score are added from different
+   * sources. Every count and rank is computed after {@code seen}, the one step that decides which
+   * conversations the reader may see.
+   *
+   * <p><b>The visible set is built once and tested by position.</b> {@code seen} joins the visible
+   * conversations to their statistics rows a single time and reduces them to one row: the sums that
+   * corpus statistics and reach need, and {@code numbers}, a bitmap with one bit per conversation
+   * number up to the highest visible one (125 kB per million conversation numbers). Every later
+   * visibility test is {@code get_bit} on that value at the row's own conversation number. It is an
+   * expression over a value computed once, so there is nothing for the planner to choose: it cannot
+   * become a join, it needs no hash table, and its cost does not depend on how many conversations
+   * are visible or on what the planner believes about them. An earlier version tested {@code x IN
+   * (SELECT ... FROM visible)}, which PostgreSQL only hashes while it estimates the set to fit in
+   * {@code work_mem}: past about 262,000 visible conversations (150,000 for the text keys) each of
+   * the eight tests became a linear scan of the set per row and a single-word search was cancelled
+   * at 30 seconds; below that, each test built its own hash of the set. The bitmap is built from
+   * visible conversations only, so a hidden conversation's number has no bit, and a number beyond
+   * the bitmap is hidden.
+   *
+   * <p>{@code seen} names the three ways a reader is scoped as separate branches (a global reader,
+   * a project's reader, either narrowed to one conversation) because their sizes differ by orders
+   * of magnitude and one predicate covering all three was estimated at one row: {@code project_id
+   * IS NOT DISTINCT FROM NULL} has no statistics, and 300,000 global conversations were then joined
+   * by 300,000 index probes (571 ms). With the parameters known the planner removes the branches
+   * that cannot apply and sizes the remaining one from the column's statistics; a generic plan
+   * keeps all three behind one-time filters and plans each for its own size.
+   *
+   * <p><b>Where an answer differs from {@link #SEARCH_SQL}'s.</b>
+   *
+   * <ul>
+   *   <li>Grouping. The legacy query groups hits whose 60-word headline reads the same; this one
+   *       groups hits whose stored passage does. Entries that differ outside the headline are one
+   *       group there and several here, so group counts and therefore pages can differ even for
+   *       entries of a few dozen words: on 3,000 short random entries a review found different
+   *       pages for 54 of 600 questions. The excerpt of a long entry is likewise a passage, not a
+   *       headline over the whole text.
+   *   <li>A compound lexeme such as {@code up-to-date}. The legacy query finds a word's document
+   *       frequency by parsing the lexeme again, which splits a compound and finds nothing, so it
+   *       weighs the compound as if no entry held it. This query reads the stored count of the
+   *       lexeme itself. The entries and their order were the same where this was measured; the
+   *       ranks are lower.
+   * </ul>
+   *
+   * <p><b>The bound every route uses.</b> One word's contribution to a score rises with its
+   * frequency in the entry and falls with the entry's length, whatever the reader's statistics, and
+   * V278 indexes each word's postings by frequency, then length. "This word contributes at least x"
+   * is therefore, for each frequency, "length at most L": the score formula solved for length, one
+   * index range per frequency (256 ranges, most of them empty). The solved length is rounded
+   * outwards and x is taken a billionth low, so a floating-point tie can only read one posting too
+   * many, never one too few. A range holds the postings of every conversation; those the reader may
+   * not see are read and discarded there.
+   *
+   * <p><b>Three routes, chosen by the question's shape.</b>
+   *
+   * <ul>
+   *   <li><b>One plain word</b> ({@code shape.single}). A posting alone decides the match, so the
+   *       search never reads entries to match. {@code probe} reads the shortest few postings of
+   *       each frequency, which must contain the best entries overall, scores them exactly, and
+   *       takes the score of the last group the page needs as a threshold. {@code reached} then
+   *       reads the postings that contribute at least that threshold. Every visible entry scoring
+   *       at least the threshold is read, so the page is exactly the page an exhaustive search
+   *       returns. If the probe holds fewer groups than the page needs there is no threshold and
+   *       every posting of the word is read: a page deeper than the word's distinct groups, or a
+   *       word whose entries are mostly copies of each other. That read was measured at 541 ms for
+   *       150,000 postings, so it meets the two-second budget near half a million.
+   *   <li><b>Several words, pruned</b> ({@code choice} has a row). See the next paragraph.
+   *   <li><b>Several words, exhaustive</b>. Matches come from the GIN index, every one is scored by
+   *       probing stored frequencies, and the best {@link #MOST_GROUPED_ENTRIES} go on to choose a
+   *       passage (one satisfying the whole question if any does, otherwise the densest in question
+   *       words). Taken whenever pruning is not expected to pay ({@code worth}), when no threshold
+   *       could be estimated, and for a negation combined with OR, parentheses or a phrase. Pruning
+   *       is not attempted when few entries can match (the words' postings together for a question
+   *       with OR, or for a conjunction the number of entries expected to hold all its words if
+   *       they occurred independently, do not exceed the grouping window or sixteen times the
+   *       window asked for); when the window ends beyond a quarter of the grouping window, where
+   *       the threshold is too low to exclude much and a page past the grouping window is empty on
+   *       either route; or for a conjunction of more than three words, whose bounds are too weak
+   *       (below). These are guesses at which route is cheaper; both are exact.
+   * </ul>
+   *
+   * <p><b>How several words are pruned, and why the page cannot change.</b> Write {@code s_i(e)}
+   * for what word {@code i} contributes to entry {@code e}, zero when the entry lacks the word; a
+   * score is their sum. {@code sampled} reads, index-only, the shortest postings of each frequency
+   * of each word: a thirty-second of the word's postings per frequency, between 256 and 16,384. The
+   * largest contribution among a word's is {@code ub_i}, an upper bound on {@code s_i} for every
+   * visible entry, because the shortest posting of each frequency is in the sample. Entries are
+   * ranked by what the sample saw of them, which favours entries found in several words' slices;
+   * the best few hundred are scored exactly, checked against the whole question on the entry itself
+   * (so AND, phrases and negation are respected) and grouped by their real passage key. The score
+   * of the {@code wanted}-th best distinct group is {@code floor}, written θ. Those groups exist in
+   * the archive, so the page's last group scores at least θ, and any entry scoring less than θ is
+   * on no page that an exhaustive search would return. It remains to read every matching entry that
+   * scores at least θ. How deep the sample goes only decides how close θ comes to the true score;
+   * it cannot make it too high.
+   *
+   * <ul>
+   *   <li><b>A plain conjunction</b> (no OR, parenthesis or negation in the parsed question; {@code
+   *       live.required}). Every match holds every word of the question, and for each word {@code
+   *       j} a match scoring θ has {@code s_j >= θ - (total - ub_j)}, since the other words give at
+   *       most their bounds. Each required word's postings meeting its own condition are read, and
+   *       only entries found in all of them are candidates: an entry missing from one either lacks
+   *       that word or scores below θ.
+   *   <li><b>Any other shape.</b> Order the words by {@code ub} and set aside the lowest few, with
+   *       bounds summing to {@code below < θ}; an entry holding only those cannot reach θ. For the
+   *       rest, with bounds summing to {@code rest}, an entry scoring θ takes at least {@code θ -
+   *       below} from them, so for at least one of them {@code s_i >= ub_i * (θ - below) / rest}:
+   *       otherwise their contributions would sum to less than {@code θ - below}. Reading, for each
+   *       of the rest, the postings that meet its share therefore reads every entry that can score
+   *       θ. How many to set aside is chosen by an estimate of postings read; any choice is exact,
+   *       and setting none aside is the plain proportional bound.
+   * </ul>
+   *
+   * <p>Candidates are then scored exactly from their postings ({@code near_scored}) and those below
+   * θ dropped ({@code kept}); only the rest have their entry read to check the whole question.
+   * Dropping is safe for the reason above, and so is the grouping window: if more than the window
+   * score at least θ, the window is the same entries either way; if not, the window differs only in
+   * entries below θ, which are on no page. A word that is plainly negated in a conjunction without
+   * phrases cannot occur in a match and is left out of the bounds ({@code live}); recognising that
+   * reads the parsed question's text, and a word it fails to recognise is merely kept, which
+   * loosens the bound and stays exact. {@link #searchPassagesExhaustively} turns all of this off,
+   * and the tests hold the two to the same page.
+   *
+   * <p><b>What is bounded.</b> {@code truncated} is true when postings were skipped, candidates
+   * were dropped below the threshold, or matches fell outside the grouping window; in practice,
+   * whenever pruning engaged. Then {@code matched} counts groups among the entries read, which for
+   * a pruned search is little more than the page, and a group's source count and references omit
+   * copies that were not read. The page itself, its order and its ranks are exact. This is Lucene's
+   * trade: it stores frequency and length rather than a score, bounds at query time, and counts
+   * hits exactly only up to a threshold so it may skip. Lucene raises its threshold as it collects;
+   * the up-front estimate here is the published threshold-estimation variant, safe because the
+   * estimate is a true lower bound.
+   *
+   * <p><b>What still grows, and what pruning does not help.</b>
+   *
+   * <ul>
+   *   <li>The visible set. Corpus statistics, reach and the bitmap are one pass over one stored row
+   *       per visible conversation, so every search pays for the conversations its reader may see,
+   *       whether or not they hold an entry: measured at about 0.3 ms per thousand visible
+   *       conversations when PostgreSQL runs the pass with two parallel workers and 0.7 ms without
+   *       (3 ms at five conversations, 7 to 10 ms at 10,000, 75 to 100 ms at 300,000 for a
+   *       single-word search; 200 ms at 300,000 without workers). Visibility is decided per search,
+   *       so this pass cannot be stored. Document frequency is a sum of stored counts read as one
+   *       index range per word: a row for every conversation holding the word, visible or not,
+   *       hidden ones discarded. The bitmap is as long as the highest visible conversation number,
+   *       not the count of visible ones: numbers are global, never reused and consumed by
+   *       rolled-back inserts, and building it measured about 0.65 ms per million numbers (8.5 ms
+   *       with the highest visible number at ten million, 70 ms at a hundred million).
+   *   <li>Several common words. The best entries hold several of them, and no index orders postings
+   *       by a joint score, so the sample that finds them is a fixed share of each word's postings:
+   *       an index-only read, about a tenth of a microsecond per posting, but one that grows with
+   *       the archive. With three common words OR-ed, entries strong in one word alone remain
+   *       candidates and are scored before they are dropped.
+   *   <li>Copies. Grouping is exact, so every entry that ties with the page's last group is read
+   *       and joined to its passage. A hundred thousand identical top-scoring entries took about
+   *       470 ms in review.
+   *   <li>A reader scoped to a few conversations of very many still reads the other conversations'
+   *       postings inside each range and discards them.
+   *   <li>A phrase or conjunction that few sampled entries satisfy yields no threshold and is
+   *       searched exhaustively, after paying for the sample.
+   *   <li>Three common words in a conjunction. Each word's own necessary bound is weak when the
+   *       others can supply most of the score, so most of their postings are read. The read is
+   *       index-only and was measured no slower than the exhaustive route, and no faster. With four
+   *       it was slower (242 ms against 187 ms in review), which is why a conjunction of more than
+   *       three words is not pruned.
+   *   <li>Deep windows. A pruned conjunction at offset 5,000 was measured at 479 ms against 184 ms
+   *       exhaustive before windows that deep were sent to the exhaustive route.
+   * </ul>
+   *
+   * <p><b>How the plan is held in place.</b> The planner estimates one row for most of these steps
+   * and was observed, left free, to do four different wrong things. None of the remedies changes a
+   * result.
+   *
+   * <ul>
+   *   <li>It turned each visibility test into a join driven by the visible conversations and
+   *       repeated a whole posting scan once per conversation (28 seconds at 50,000 entries). The
+   *       test is now a bit read from {@code seen.numbers}, a filter on rows read in index order
+   *       that no join can replace.
+   *   <li>It merged a lateral read of postings into its parent as a hash join on frequency, so the
+   *       length bound became a filter over every posting of the word. {@code OFFSET 0} inside each
+   *       lateral keeps it a parameterised index scan whose bound is an index condition.
+   *   <li>Once that made the row estimates honest, it read every stored passage to join a few
+   *       hundred hits. The passage of a hit, the conversation of a candidate and the entry of a
+   *       candidate are each fetched by a lateral key probe.
+   *   <li>With stale statistics it answered a probe for one entry's posting from the best-first
+   *       index, walking every posting of the word for each probe (4 to 15 seconds at 60,000
+   *       entries), and symmetrically could answer a best-first read from the primary key. No fence
+   *       chooses an index, so V278 leaves each question one index that can answer it. The
+   *       best-first index is partial ({@code WHERE tf >= 1}) and keyed on the lexeme under
+   *       collation {@code "POSIX"}: the best-first reads here say {@code t.tf>=1} and compare
+   *       under {@code "POSIX"}, the per-entry probes say neither. The best-first reads of the
+   *       multi-word route also name {@code best_position}, which only that index holds, so the
+   *       primary key is not a covering index for them. What this enforces is that no other index
+   *       can answer either read through an index condition. A sequential scan or a bitmap scan of
+   *       the postings remains legal for both; neither was observed in any planner state tested.
+   * </ul>
+   *
+   * <p>A hit's conversation number is translated back to its id by a join to the mapping table,
+   * which has statistics; the planner chooses that join's method. When it expects many hits (as a
+   * generic plan does) it hashes every conversation's row: 31 ms at 300,000 conversations. What is
+   * not made structural is the lookup of an entry by its key: {@code entries} has other indexes
+   * that begin with the conversation, and if the planner believes that table empty it may read a
+   * conversation's every entry through one of them. The legacy query has the same exposure. The
+   * plan is asserted by buffers touched and time at 60,000 entries in one conversation, with stale,
+   * absent and fresh statistics, with the new tables believed empty, as a generic plan, and with
+   * 300,000 visible conversations.
+   *
+   * <p><b>Visibility is applied twice on the pruned routes.</b> Postings are read by word, so the
+   * reads that find a threshold and the reads that find candidates each discard hidden
+   * conversations, and a sampled entry or a candidate is looked up through the visible
+   * conversations again before its entry is read. Either check alone keeps hidden entries off the
+   * page; a hidden posting that slipped past the first could only loosen a bound. On the exhaustive
+   * route a match found by the GIN index is kept only if its conversation's number has its bit,
+   * looked up by the conversation's id for each match, before it is scored.
+   *
+   * <p><b>JIT.</b> The plan's estimated cost includes the routes it does not take, and it grows
+   * with the question as well as the archive: a 16-word question on 30,000 entries, or most
+   * questions at 200,000, cross PostgreSQL's default {@code jit_above_cost}. Compiling the plan
+   * then costs about 100 ms (124 ms against 16 ms, measured in review) for a statement that
+   * executes in tens. {@code passageQuery} therefore runs it in a short read-only transaction with
+   * JIT off; the legacy {@link #search} is not changed.
+   *
+   * <p><b>Ties.</b> A multi-word score is a sum of a few doubles, and the order of a sum changes
+   * its last bit. {@code scored} therefore adds the words' contributions in word order, so that
+   * entries with the same frequencies and length get the same number whatever plan delivers the
+   * rows, and their order on the page falls to the stated keys. Without it the pruned and the
+   * exhaustive route were observed to order three tied entries differently.
+   *
+   * <p>A candidate needs positive evidence, as {@code rank>0} already demanded, so a pure negation
+   * is still empty. Intermediate steps hold keys and ranks only; entries are read again by primary
+   * key for the page, in the same snapshot, because carrying text through them was measured to
+   * exceed the two-second budget. An entry without passage rows falls back to a whole-entry excerpt
+   * in a group of its own.
+   */
+  static final String PASSAGE_SEARCH_SQL =
+      """
+      WITH params AS NOT MATERIALIZED (
+        SELECT websearch_to_tsquery('english', ?) AS query,
+               to_tsvector('english', ?) AS words, CAST(? AS bigint) AS project,
+               CAST(? AS text) AS conversation, CAST(? AS integer) AS most_grouped,
+               CAST(? AS bigint) AS wanted, CAST(? AS boolean) AS prune
+      ), seen AS MATERIALIZED (
+        SELECT coalesce(sum(b.searched),0) AS searched,coalesce(sum(b.total_length),0) AS total_length,
+               coalesce(sum(b.ejected),0) AS ejected,coalesce(sum(b.recorded_only),0) AS recorded_only,
+               coalesce(string_agg(decode(repeat('00',b.gap),'hex') || set_byte(decode('00','hex'),0,b.held),
+                                   ''::bytea ORDER BY b.at),''::bytea) AS numbers
+          FROM (SELECT g.*,g.at-1-coalesce(lag(g.at) OVER (ORDER BY g.at),-1) AS gap
+                  FROM (SELECT c.conversation_no>>3 AS at,bit_or(1<<(c.conversation_no&7)) AS held,
+                               sum(c.searched) AS searched,sum(c.total_length) AS total_length,
+                               sum(c.ejected) AS ejected,sum(c.recorded_only) AS recorded_only
+                          FROM (SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NULL AND p.project IS NULL AND c.project_id IS NULL
+                                UNION ALL
+                                SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NULL AND p.project IS NOT NULL AND c.project_id=p.project
+                                UNION ALL
+                                SELECT c.id,n.conversation_no,n.searched,n.total_length,n.ejected,n.recorded_only
+                                  FROM conversations c JOIN entry_search_conversations n ON n.conversation_id=c.id
+                                 CROSS JOIN params p
+                                 WHERE p.conversation IS NOT NULL AND c.id=p.conversation
+                                   AND c.project_id IS NOT DISTINCT FROM p.project) c
+                         WHERE c.conversation_no>=0 /*information*/
+                         GROUP BY c.conversation_no>>3) g) b
+      ), reach AS (
+        SELECT searched::integer AS searched,ejected::integer AS ejected,
+               recorded_only::integer AS recorded_only FROM seen
+      ), corpus AS MATERIALIZED (
+        SELECT searched::double precision AS n,
+               greatest(coalesce(total_length::double precision/nullif(searched,0),1),1) AS avgdl
+          FROM seen
+      ), terms AS MATERIALIZED (
+        SELECT unnest(tsvector_to_array(words)) COLLATE "C" AS term FROM params
+      ), evidence AS MATERIALIZED (
+        SELECT string_agg(quote_literal(term),' | ')::tsquery AS any_word FROM terms
+      ), frequencies AS MATERIALIZED (
+        SELECT t.term, (SELECT coalesce(sum(k.entries),0) FROM entry_search_term_counts k
+                         WHERE k.lexeme=t.term
+                           AND /*seen k*/) AS df
+          FROM terms t
+      ), weights AS MATERIALIZED (
+        SELECT f.term, ln(1+(c.n-f.df+0.5)/(f.df+0.5))*2.2 AS weight, c.avgdl, f.df
+          FROM frequencies f CROSS JOIN corpus c
+      ), shape AS MATERIALIZED (
+        SELECT x.single,x.negating,x.conjunctive AND NOT x.negating AS requiring,
+               p.prune AND NOT x.single
+                 AND (NOT x.negating OR (x.conjunctive AND strpos(p.query::text,'<')=0)) AS pruning
+          FROM params p CROSS JOIN LATERAL (
+            SELECT coalesce((SELECT count(*) FROM terms)=1
+                     AND p.query=(SELECT plainto_tsquery('simple',term) FROM terms LIMIT 1),false) AS single,
+                   strpos(p.query::text,'!')>0 AS negating,
+                   strpos(p.query::text,'|')=0 AND strpos(p.query::text,'(')=0 AS conjunctive) x
+      ), lead AS MATERIALIZED (
+        SELECT w.term,w.weight,w.avgdl,w.df FROM weights w WHERE (SELECT single FROM shape)
+      ), probe AS MATERIALIZED (
+        SELECT s.conversation_no,s.ordinal,s.best_position,
+               l.weight*f.tf/(f.tf+1.2*(0.25+0.75*s.doc_length/l.avgdl)) AS rank
+          FROM lead l CROSS JOIN generate_series(1,256) AS f(tf)
+         CROSS JOIN LATERAL (
+           SELECT t.conversation_no,t.ordinal,t.doc_length,t.best_position FROM entry_search_terms t
+            WHERE t.lexeme COLLATE "POSIX"=l.term AND t.tf=f.tf AND t.tf>=1
+              AND /*seen t*/
+            ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
+            LIMIT (SELECT 2*wanted+16 FROM params)) s
+      ), threshold AS MATERIALIZED (
+        SELECT (SELECT g.score FROM (
+                  SELECT max(pr.rank) AS score FROM probe pr
+                    JOIN entry_search_conversations v ON v.conversation_no=pr.conversation_no
+                    LEFT JOIN LATERAL (
+                      SELECT q.passage_key FROM entry_search_passages q
+                       WHERE q.conversation_id=v.conversation_id AND q.ordinal=pr.ordinal
+                         AND q.position=pr.best_position
+                      OFFSET 0) ps ON true
+                   GROUP BY coalesce(ps.passage_key,'entry:' || v.conversation_id || ':' || pr.ordinal)) g
+                 WHERE (SELECT prune FROM params)
+                 ORDER BY g.score DESC OFFSET (SELECT wanted-1 FROM params) LIMIT 1) AS score
+      ), reached AS MATERIALIZED (
+        SELECT s.conversation_no,s.ordinal,s.best_position,
+               l.weight*f.tf/(f.tf+1.2*(0.25+0.75*s.doc_length/l.avgdl)) AS rank
+          FROM lead l CROSS JOIN threshold h CROSS JOIN generate_series(1,256) AS f(tf)
+         CROSS JOIN LATERAL (
+           SELECT t.conversation_no,t.ordinal,t.doc_length,t.best_position FROM entry_search_terms t
+            WHERE t.lexeme COLLATE "POSIX"=l.term AND t.tf=f.tf AND t.tf>=1
+              AND t.doc_length<=CASE WHEN h.score IS NULL THEN 2147483647 ELSE
+                    least(2147483646::double precision,greatest(0::double precision,
+                      floor((l.weight*f.tf/h.score-f.tf-0.3)*l.avgdl/0.9*(1+1e-9))))::integer+1 END
+              AND /*seen t*/
+            ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
+           OFFSET 0) s
+      ), single_hits AS MATERIALIZED (
+        SELECT v.conversation_id,s.ordinal,s.rank,ps.start_at,ps.span,
+               coalesce(ps.passage_key,'entry:' || v.conversation_id || ':' || s.ordinal) AS passage_key
+          FROM reached s JOIN entry_search_conversations v ON v.conversation_no=s.conversation_no
+          LEFT JOIN LATERAL (
+            SELECT q.start_at,q.span,q.passage_key FROM entry_search_passages q
+             WHERE q.conversation_id=v.conversation_id AND q.ordinal=s.ordinal
+               AND q.position=s.best_position
+            OFFSET 0) ps ON true
+      ), live AS MATERIALIZED (
+        SELECT w.term,w.weight,w.avgdl,w.df,
+               x.requiring AND p.query @> quote_literal(w.term)::tsquery AS required
+          FROM weights w CROSS JOIN params p CROSS JOIN shape x
+         WHERE x.pruning
+           AND NOT (x.negating AND strpos(p.query::text,'!' || quote_literal(w.term))>0)
+      ), worth AS MATERIALIZED (
+        SELECT p.wanted*4<=p.most_grouped
+               AND count(*) FILTER (WHERE l.required)<=3
+               AND coalesce(CASE WHEN NOT bool_or(l.required) THEN sum(l.df)
+                                 WHEN min(l.df) FILTER (WHERE l.required)=0 OR c.n=0 THEN 0
+                                 ELSE c.n*exp(sum(ln(greatest(l.df,1)/greatest(c.n,1)))
+                                                FILTER (WHERE l.required)) END,0)
+                   >greatest(p.most_grouped,16*p.wanted) AS pruning
+          FROM live l CROSS JOIN corpus c CROSS JOIN params p
+         GROUP BY c.n,p.wanted,p.most_grouped
+      ), sampled AS MATERIALIZED (
+        SELECT l.term,s.conversation_no,s.ordinal,
+               l.weight*f.tf/(f.tf+1.2*(0.25+0.75*s.doc_length/l.avgdl)) AS part
+          FROM live l CROSS JOIN generate_series(1,256) AS f(tf)
+         CROSS JOIN LATERAL (
+           SELECT t.conversation_no,t.ordinal,t.doc_length FROM entry_search_terms t
+            WHERE t.lexeme COLLATE "POSIX"=l.term AND t.tf=f.tf AND t.tf>=1
+              AND (t.best_position IS NULL OR t.best_position>=0)
+              AND /*seen t*/
+            ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
+            LIMIT least(16384,greatest(256,l.df/32))) s
+         WHERE (SELECT pruning FROM worth)
+      ), sample_best AS MATERIALIZED (
+        SELECT conversation_no,ordinal,sum(part) AS seen FROM sampled
+         GROUP BY conversation_no,ordinal
+         ORDER BY seen DESC,conversation_no,ordinal
+         LIMIT (SELECT 8*wanted+128 FROM params)
+      ), sample_scored AS MATERIALIZED (
+        SELECT c.conversation_no,c.ordinal,
+               sum(l.weight*s.tf/(s.tf+1.2*(0.25+0.75*s.doc_length/l.avgdl))) AS rank
+          FROM sample_best c CROSS JOIN live l
+         CROSS JOIN LATERAL (
+           SELECT t.tf,t.doc_length FROM entry_search_terms t
+            WHERE t.conversation_no=c.conversation_no AND t.ordinal=c.ordinal AND t.lexeme=l.term
+           OFFSET 0) s
+         GROUP BY c.conversation_no,c.ordinal
+      ), sample_matched AS MATERIALIZED (
+        SELECT v.conversation_id,s.ordinal,s.rank
+          FROM (SELECT * FROM sample_scored ORDER BY rank DESC,conversation_no,ordinal OFFSET 0) s
+         CROSS JOIN LATERAL (
+           SELECT k.conversation_id FROM entry_search_conversations k
+            WHERE k.conversation_no=s.conversation_no
+              AND /*seen k*/
+           OFFSET 0) v
+         CROSS JOIN LATERAL (
+           SELECT 1 FROM entries e CROSS JOIN params p
+            WHERE e.conversation_id=v.conversation_id AND e.ordinal=s.ordinal
+              AND e.role IS NOT NULL AND e.content IS NOT NULL
+              AND coalesce(e.evidence_text_search,e.text_search) @@ p.query
+           OFFSET 0) m
+         ORDER BY s.rank DESC,s.conversation_no,s.ordinal
+         LIMIT (SELECT 2*wanted+16 FROM params)
+      ), sample_hits AS MATERIALIZED (
+        SELECT s.rank,coalesce(b.passage_key,'entry:' || s.conversation_id || ':' || s.ordinal) AS passage_key
+          FROM sample_matched s CROSS JOIN params p CROSS JOIN evidence v
+          LEFT JOIN LATERAL (/*chosen passage*/) b ON true
+      ), floor AS MATERIALIZED (
+        SELECT (SELECT g.score*(1-1e-9) FROM (
+                  SELECT max(rank) AS score FROM sample_hits GROUP BY passage_key) g
+                 ORDER BY g.score DESC OFFSET (SELECT wanted-1 FROM params) LIMIT 1) AS score
+      ), ranked AS MATERIALIZED (
+        SELECT b.term,b.ub,l.weight,l.avgdl,l.df,l.required,
+               row_number() OVER (ORDER BY b.ub,b.term) AS nth,
+               coalesce(sum(b.ub) OVER (ORDER BY b.ub,b.term
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS below,
+               sum(b.ub) OVER () AS total,
+               sum(l.df) OVER (ORDER BY b.ub,b.term
+                 ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)::double precision AS listed
+          FROM (SELECT term,max(part) AS ub FROM sampled GROUP BY term) b
+          JOIN live l ON l.term=b.term
+      ), choice AS MATERIALIZED (
+        SELECT o.every,o.first,o.share FROM (
+          SELECT true AS every,NULL::bigint AS first,NULL::double precision AS share
+            FROM floor h
+           WHERE h.score IS NOT NULL AND (SELECT count(*) FROM live WHERE required)>0
+             AND (SELECT count(*) FROM live WHERE required)=(SELECT count(*) FROM ranked WHERE required)
+          UNION ALL
+          (SELECT false,r.nth,(h.score-r.below)/(r.total-r.below)
+             FROM ranked r CROSS JOIN floor h
+            WHERE h.score>r.below AND r.total>r.below
+            ORDER BY r.listed*(1-least((h.score-r.below)/(r.total-r.below),1)),r.nth
+            LIMIT 1)
+        ) o ORDER BY o.every DESC LIMIT 1
+      ), near AS MATERIALIZED (
+        SELECT r.term,s.conversation_no,s.ordinal
+          FROM choice x CROSS JOIN floor h
+          JOIN ranked r ON (x.every AND r.required) OR (NOT x.every AND r.nth>=x.first)
+         CROSS JOIN LATERAL (
+           SELECT CASE WHEN x.every THEN h.score-(r.total-r.ub) ELSE x.share*r.ub END AS bar) b
+         CROSS JOIN generate_series(1,256) AS f(tf)
+         CROSS JOIN LATERAL (
+           SELECT t.conversation_no,t.ordinal FROM entry_search_terms t
+            WHERE t.lexeme COLLATE "POSIX"=r.term AND t.tf=f.tf AND t.tf>=1
+              AND (t.best_position IS NULL OR t.best_position>=0)
+              AND t.doc_length<=CASE WHEN b.bar>0 THEN
+                    least(2147483646::double precision,greatest(0::double precision,
+                      floor((r.weight*f.tf/b.bar-f.tf-0.3)*r.avgdl/0.9*(1+1e-9))))::integer+1
+                    ELSE 2147483647 END
+              AND /*seen t*/
+            ORDER BY t.lexeme COLLATE "POSIX",t.tf,t.doc_length,t.conversation_no,t.ordinal
+           OFFSET 0) s
+      ), candidates AS MATERIALIZED (
+        SELECT n.conversation_no,n.ordinal
+          FROM near n CROSS JOIN choice x
+         GROUP BY n.conversation_no,n.ordinal,x.every
+        HAVING NOT x.every OR count(*)=(SELECT count(*) FROM ranked WHERE required)
+      ), near_scored AS MATERIALIZED (
+        SELECT c.conversation_no,c.ordinal,
+               sum(r.weight*s.tf/(s.tf+1.2*(0.25+0.75*s.doc_length/r.avgdl))) AS rank
+          FROM candidates c CROSS JOIN ranked r
+         CROSS JOIN LATERAL (
+           SELECT t.tf,t.doc_length FROM entry_search_terms t
+            WHERE t.conversation_no=c.conversation_no AND t.ordinal=c.ordinal AND t.lexeme=r.term
+           OFFSET 0) s
+         GROUP BY c.conversation_no,c.ordinal
+      ), kept AS MATERIALIZED (
+        SELECT n.conversation_no,n.ordinal FROM near_scored n CROSS JOIN floor h
+         WHERE n.rank>=h.score
+      ), matches AS MATERIALIZED (
+        SELECT e.conversation_id,v.conversation_no,e.ordinal
+          FROM entries e CROSS JOIN params p CROSS JOIN evidence w
+         CROSS JOIN LATERAL (
+           SELECT k.conversation_no FROM entry_search_conversations k
+            WHERE k.conversation_id=e.conversation_id
+              AND /*seen k*/
+           OFFSET 0) v
+         WHERE NOT (SELECT single FROM shape) AND NOT EXISTS (SELECT 1 FROM choice)
+           AND e.role IS NOT NULL AND e.content IS NOT NULL
+           AND coalesce(e.evidence_text_search,e.text_search) @@ p.query
+           AND coalesce(e.evidence_text_search,e.text_search) @@ w.any_word
+        UNION ALL
+        SELECT v.conversation_id,c.conversation_no,c.ordinal
+          FROM kept c
+         CROSS JOIN LATERAL (
+           SELECT k.conversation_id FROM entry_search_conversations k
+            WHERE k.conversation_no=c.conversation_no
+              AND /*seen k*/
+           OFFSET 0) v
+         CROSS JOIN LATERAL (
+           SELECT 1 FROM entries e CROSS JOIN params p
+            WHERE e.conversation_id=v.conversation_id AND e.ordinal=c.ordinal
+              AND e.role IS NOT NULL AND e.content IS NOT NULL
+              AND coalesce(e.evidence_text_search,e.text_search) @@ p.query
+           OFFSET 0) m
+      ), scored AS MATERIALIZED (
+        SELECT m.conversation_id,m.ordinal,
+               sum(w.weight*s.tf/(s.tf+1.2*(0.25+0.75*s.doc_length/w.avgdl)) ORDER BY w.term) AS rank
+          FROM matches m CROSS JOIN weights w
+         CROSS JOIN LATERAL (
+           SELECT t.tf,t.doc_length FROM entry_search_terms t
+            WHERE t.conversation_no=m.conversation_no AND t.ordinal=m.ordinal AND t.lexeme=w.term
+           OFFSET 0) s
+         GROUP BY m.conversation_id,m.ordinal
+      ), windowed AS MATERIALIZED (
+        SELECT * FROM scored ORDER BY rank DESC,conversation_id,ordinal
+         LIMIT (SELECT most_grouped FROM params)
+      ), general_hits AS MATERIALIZED (
+        SELECT s.conversation_id,s.ordinal,s.rank,b.start_at,b.span,
+               coalesce(b.passage_key,'entry:' || s.conversation_id || ':' || s.ordinal) AS passage_key
+          FROM windowed s CROSS JOIN params p CROSS JOIN evidence v
+          LEFT JOIN LATERAL (/*chosen passage*/) b ON true
+      ), hits AS MATERIALIZED (
+        SELECT * FROM single_hits UNION ALL SELECT * FROM general_hits
+      ), grouped AS MATERIALIZED (
+        SELECT DISTINCT ON (passage_key) passage_key,rank AS score,conversation_id,ordinal,start_at,span,
+               count(*) OVER (PARTITION BY passage_key)::integer AS source_count
+          FROM hits ORDER BY passage_key,rank DESC,conversation_id,ordinal
+      ), needed AS MATERIALIZED (
+        SELECT (SELECT score FROM grouped ORDER BY score DESC
+                 OFFSET (SELECT wanted-1 FROM params) LIMIT 1) AS score
+      ), page AS MATERIALIZED (
+        SELECT g.passage_key,g.score,g.source_count,g.conversation_id,g.ordinal,e.turn_ordinal,g.start_at,g.span
+          FROM grouped g JOIN entries e ON e.conversation_id=g.conversation_id AND e.ordinal=g.ordinal
+         WHERE g.score>=coalesce((SELECT score FROM needed),'-infinity'::double precision)
+         ORDER BY g.score DESC,g.conversation_id,e.turn_ordinal,g.ordinal OFFSET ? LIMIT ?
+      ), members AS MATERIALIZED (
+        SELECT h.passage_key,h.conversation_id,h.ordinal,h.rank,
+               row_number() OVER (PARTITION BY h.passage_key ORDER BY h.rank DESC,h.conversation_id,h.ordinal) AS nth
+          FROM hits h WHERE h.passage_key IN (SELECT passage_key FROM page)
+      ), cited AS MATERIALIZED (
+        SELECT m.passage_key, to_jsonb(array_agg(jsonb_build_object(
+            'conversationId',e.conversation_id,'ordinal',e.ordinal,'turnOrdinal',e.turn_ordinal,
+            'kind',e.kind,'handle',e.handle,'recordedAt',e.recorded_at,
+            'sourceRevision',conversation_source_revision(e.content,e.input_provenance),
+            'length',length(e.content),'supersededBy',e.superseded_by,
+            'inputProvenance',conversation_input_provenance_view(e.input_provenance))
+            ORDER BY m.nth))::text AS sources
+          FROM members m JOIN entries e ON e.conversation_id=m.conversation_id AND e.ordinal=m.ordinal
+         WHERE m.nth<=20 GROUP BY m.passage_key
+      )
+      SELECT reach.*, (SELECT count(*)::integer FROM grouped) AS matched,
+             CASE WHEN (SELECT single FROM shape)
+                  THEN (SELECT count(*) FROM single_hits)<(SELECT df FROM lead)
+                  ELSE (SELECT count(*) FROM scored)>p.most_grouped
+                       OR (EXISTS (SELECT 1 FROM choice)
+                           AND ((SELECT count(*) FROM near)<(SELECT sum(df) FROM ranked)
+                                OR (SELECT count(*) FROM kept)
+                                   <(SELECT count(DISTINCT (conversation_no,ordinal)) FROM near)))
+                  END AS truncated,
+             e.conversation_id,e.ordinal,e.turn_ordinal,e.kind,page.score AS rank,
+             left(ts_headline('english',
+               CASE WHEN page.start_at IS NULL THEN coalesce(e.evidence_content,e.content)
+                    ELSE substr(coalesce(e.evidence_content,e.content),page.start_at,page.span) END,p.query,
+          'StartSel="[", StopSel="]", MaxWords=60, MinWords=25, MaxFragments=2'),4000) AS snippet,
+             length(e.content) AS length,e.superseded_by,e.handle,e.recorded_at,
+             conversation_source_revision(e.content,e.input_provenance) AS source_revision,
+             cited.sources,page.source_count
+        FROM reach CROSS JOIN params p LEFT JOIN page ON true
+        LEFT JOIN entries e ON e.conversation_id=page.conversation_id AND e.ordinal=page.ordinal
+        LEFT JOIN cited ON cited.passage_key=page.passage_key
+       ORDER BY page.score DESC,page.conversation_id,page.turn_ordinal,page.ordinal
+      """
+          .replace(
+              "/*chosen passage*/",
+              """
+              SELECT ps.start_at,ps.span,ps.passage_key FROM entry_search_passages ps
+               WHERE ps.conversation_id=s.conversation_id AND ps.ordinal=s.ordinal
+               ORDER BY (ps.text_search @@ p.query) DESC,(ps.text_search @@ v.any_word) DESC,
+                        ts_rank_cd(ps.text_search,v.any_word) DESC,ps.position
+               LIMIT 1""")
+          .replace("/*seen k*/", seen("k.conversation_no"))
+          .replace("/*seen t*/", seen("t.conversation_no"));
+
+  /**
+   * The test that a conversation number is one the reader may see: its bit in {@code seen.numbers}.
+   *
+   * <p>A number beyond the last visible one has no bit and is hidden. {@code get_bit} refuses a
+   * position outside the value, and {@code CASE} is what guarantees the range is tested first. The
+   * bit count is a bigint: eight times the length of a bitmap reaching the last conversation
+   * numbers an integer identity can issue does not fit an integer.
+   *
+   * @param number the SQL expression holding the conversation number, never a caller's value
+   */
+  private static String seen(String number) {
+    return ("CASE WHEN %1$s>=0 AND %1$s<(SELECT 8*length(numbers)::bigint FROM seen)"
+            + " THEN get_bit((SELECT numbers FROM seen),%1$s)=1 ELSE false END")
+        .formatted(number);
+  }
+
   /*
    * ordinal < ? excludes the summary entry itself, which carries the reach as
    * its own turn_ordinal and would otherwise fold itself away the moment it
@@ -1106,6 +1719,29 @@ public final class EntryStore implements ConversationSearchRepository {
         : searchQuery(sql, mapper, null, args);
   }
 
+  /**
+   * A search statement with its information marker resolved for this reader.
+   *
+   * <p>The marker is the SQL comment that says {@code information}, and it stands where the
+   * statement selects conversations as {@code c}. Without facts the store is not information-scoped
+   * and the marker is removed. With them it becomes the log predicate over {@code c.id}, and that
+   * predicate's arguments are inserted into {@code bound} at the marker's place among the
+   * statement's parameters.
+   *
+   * @param sql a statement holding the marker exactly once
+   * @param facts the reader's visibility facts, or null when the store is not information-scoped
+   * @param bound the statement's arguments in order; the predicate's are added in place
+   * @return the statement to prepare
+   */
+  private String visibleTo(String sql, InformationLogVisibility.Facts facts, List<Object> bound) {
+    if (facts == null) return sql.replace("/*information*/", "");
+    int at = sql.indexOf("/*information*/");
+    int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
+    var filter = InformationLogSql.visible("c.id", informationAccount, facts);
+    bound.addAll(before, filter.arguments());
+    return sql.replace("/*information*/", " AND " + filter.sql());
+  }
+
   private <T> T searchQuery(
       String sql,
       ResultSetExtractor<T> mapper,
@@ -1114,18 +1750,12 @@ public final class EntryStore implements ConversationSearchRepository {
     long queryDeadline =
         JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(searchBudget));
     var bound = new ArrayList<>(Arrays.asList(args));
-    if (facts != null) {
-      int at = sql.indexOf("/*information*/");
-      int before = (int) sql.substring(0, at).chars().filter(c -> c == '?').count();
-      var filter = InformationLogSql.visible("c.id", informationAccount, facts);
-      bound.addAll(before, filter.arguments());
-      sql = sql.replace("/*information*/", " AND " + filter.sql());
-    } else sql = sql.replace("/*information*/", "");
+    String selected = visibleTo(sql, facts, bound);
     var setter = new ArgumentPreparedStatementSetter(bound.toArray());
     try {
       T result =
           jdbc.query(
-              sql,
+              selected,
               statement -> {
                 setter.setValues(statement);
                 JdbcReadDeadline.apply(statement, queryDeadline);
@@ -1184,7 +1814,11 @@ public final class EntryStore implements ConversationSearchRepository {
       String conversation,
       boolean includeInputs) {
     validateConversation(conversation);
-    if (mode == null && snapshot == null)
+    // A default request is lexical retrieval and goes through the same service as an explicit
+    // mode, so the configured lexical engine, its truncation disclosure and the cancellation
+    // translation apply to it. Only a store composed without retrieval (not production wiring)
+    // answers from the legacy query directly, which needs no engine choice.
+    if (mode == null && snapshot == null && retrieval == null)
       return LogSearchView.of(
           search(home, question, skip, most, conversation, includeInputs), skip, most);
     ConversationSearch.mode(mode);
@@ -1234,6 +1868,9 @@ public final class EntryStore implements ConversationSearchRepository {
     copy.visibility = visibility;
     copy.informationAccount = account;
     copy.transcriptCache = transcriptCache;
+    // Callers take a copy per request, so the copy shares this store's manager, not its own.
+    DataSource source = jdbc.getDataSource();
+    if (source != null) copy.passageTransactions = passageTransactions(source);
     if (retrieval != null) copy.retrieval = () -> retrieval.get().forAccount(account);
     return copy;
   }
@@ -2617,6 +3254,237 @@ public final class EntryStore implements ConversationSearchRepository {
                 skip,
                 most));
   }
+
+  /**
+   * The served bounded lexical search: the passage search under the repository contract's name.
+   * Project selection ({@link #withinSearchScope}) and account scoping ({@link #forAccount}) are
+   * those of {@link #search}.
+   *
+   * <p>Counting every match is the passage search with pruning off: every posting and match is
+   * read. A question that parses to one plain lexeme ({@code shape.single}) is always exact. Any
+   * other question, which includes one word written twice and a token stored as several lexemes
+   * such as {@code up-to-date}, is exact unless more than {@link #MOST_GROUPED_ENTRIES} entries
+   * match. Then it is marked truncated and its total is the number of groups among the best-scoring
+   * {@link #MOST_GROUPED_ENTRIES} entries: a window chosen by rank alone, so the total and the
+   * pages inside it do not depend on the offset asked for.
+   */
+  @Override
+  public BoundedLogSearch searchBounded(
+      Home home,
+      String question,
+      int skip,
+      int most,
+      String conversation,
+      boolean countEveryMatch) {
+    return searchPassages(home, question, skip, most, conversation, !countEveryMatch);
+  }
+
+  /**
+   * Lexical search that ranks and groups stored passages before highlighting.
+   *
+   * <p>This is the pruned form, served through {@link #searchBounded} only when {@code
+   * plowshare.retrieval.lexical-engine} is {@code passages-pruned}. The default {@code passages}
+   * engine serves the same statement with pruning off, and {@link #search} remains the {@code
+   * legacy} engine and the only full-input search. It applies the same home resolution, visibility
+   * facts and per-query SQL budget as {@link #search}, and returns no partial result when that
+   * budget expires. Full-input search is not offered; the stored passages are cut from evidence
+   * text.
+   *
+   * @param home the tier to search; never widened by a missing or foreign conversation
+   * @param question web-search syntax, parsed by PostgreSQL
+   * @param skip groups to pass over, from 0
+   * @param most groups to return, 1 to 200
+   * @param conversation an optional conversation that narrows the home
+   * @return the page, the number of groups among the entries read, reach, and whether matching
+   *     entries were left unread (see {@link #PASSAGE_SEARCH_SQL} for what that bounds)
+   * @throws IllegalArgumentException if the window is outside those bounds
+   */
+  public BoundedLogSearch searchPassages(
+      Home home, String question, int skip, int most, String conversation) {
+    return searchPassages(home, question, skip, most, conversation, true);
+  }
+
+  /**
+   * The same search with every posting and every match read: what {@link #searchPassages} must
+   * agree with on the page it returns. The default engine serves this same form through {@link
+   * #searchBounded}; this entry point exists for the comparison.
+   */
+  BoundedLogSearch searchPassagesExhaustively(
+      Home home, String question, int skip, int most, String conversation) {
+    return searchPassages(home, question, skip, most, conversation, false);
+  }
+
+  private BoundedLogSearch searchPassages(
+      Home home, String question, int skip, int most, String conversation, boolean prune) {
+    Objects.requireNonNull(home, "home");
+    Objects.requireNonNull(question, "question");
+    if (skip < 0 || most < 1 || most > 200)
+      throw new IllegalArgumentException("Invalid search window");
+    validateConversation(conversation);
+    return withinSearchScope(
+        home,
+        () ->
+            ArchiveUnavailableException.translating(
+                "search conversation evidence passages",
+                () ->
+                    passageQuery(
+                        PASSAGE_SEARCH_SQL,
+                        rs -> {
+                          if (!rs.next()) return BoundedLogSearch.NONE;
+                          var reach =
+                              new LogSearch.Reach(
+                                  rs.getInt("searched"),
+                                  rs.getInt("ejected"),
+                                  rs.getInt("recorded_only"));
+                          int total = rs.getInt("matched");
+                          boolean truncated = rs.getBoolean("truncated");
+                          List<LogSearch.Hit> hits = new ArrayList<>();
+                          do {
+                            if (rs.getString("conversation_id") != null) hits.add(searchHit(rs));
+                          } while (rs.next());
+                          return new BoundedLogSearch(new LogSearch(hits, total, reach), truncated);
+                        },
+                        passageArguments(home, question, skip, most, conversation, prune))));
+  }
+
+  /**
+   * The executed plan of {@link #searchPassages}, as PostgreSQL reports it in JSON, run through the
+   * same statement runner with the same visibility and budget. The plan tests read it; nothing else
+   * calls it.
+   */
+  String explainPassages(Home home, String question, int skip, int most, String conversation) {
+    return withinSearchScope(
+        home,
+        () ->
+            ArchiveUnavailableException.translating(
+                "explain conversation evidence passage search",
+                () ->
+                    passageQuery(
+                        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + PASSAGE_SEARCH_SQL,
+                        rs -> {
+                          rs.next();
+                          return rs.getString(1);
+                        },
+                        passageArguments(home, question, skip, most, conversation, true))));
+  }
+
+  /** The window's end is sent as a 64-bit number: a far page is an empty page, not an overflow. */
+  private Object[] passageArguments(
+      Home home, String question, int skip, int most, String conversation, boolean prune) {
+    return new Object[] {
+      question,
+      question,
+      ProjectIds.toRead(jdbc, home),
+      conversation,
+      MOST_GROUPED_ENTRIES,
+      (long) skip + most,
+      prune,
+      skip,
+      most
+    };
+  }
+
+  /**
+   * {@link #searchQuery} for the passage search, with JIT compilation off for this one statement.
+   *
+   * <p>The plan of {@link #PASSAGE_SEARCH_SQL} is priced including the routes it does not take, and
+   * with a longer question or a larger archive that price crosses PostgreSQL's {@code
+   * jit_above_cost}. Compiling it then costs about a hundred milliseconds for a statement that
+   * executes in tens. A statement cannot switch JIT off for itself, so it runs in a short read-only
+   * transaction that says {@code SET LOCAL jit = off} first. The setting ends with the transaction,
+   * committed or rolled back, and cannot follow the connection back to the pool.
+   *
+   * <p>The completion deadline is taken once, before the transaction, and bounds both statements
+   * and the result; cancellation and failures surface as they do from {@link #searchQuery}, through
+   * the caller's {@link ArchiveUnavailableException#translating}.
+   *
+   * <p><b>Inside a caller's transaction the statement runs as it is, without the JIT setting.</b> A
+   * {@code SET LOCAL} there would last until the caller's transaction ended and change the plans of
+   * statements this method does not own, so such a search may be compiled and pay for it. "The
+   * caller's transaction" means one on this store's connection: a transaction is active on the
+   * thread and a connection of this store's {@code DataSource} is bound to it. A transaction on
+   * another {@code DataSource} alone is not one this statement would join, and the search then
+   * takes its own short transaction as usual. A connection of this {@code DataSource} that is bound
+   * only for synchronisation with another resource's transaction counts as the caller's: the
+   * statement runs on it unchanged, which is the cautious reading.
+   *
+   * <p>The short transaction is always a new one. Should the test above miss a caller's transaction
+   * (a store built over a proxy of the {@code DataSource} the transaction manager unwraps would be
+   * one way), the search takes a second connection instead of setting anything in the caller's.
+   */
+  private <T> T passageQuery(String sql, ResultSetExtractor<T> mapper, Object... args) {
+    return informationScoped
+        ? visibility.read(informationAccount, facts -> passageQuery(sql, mapper, facts, args))
+        : passageQuery(sql, mapper, null, args);
+  }
+
+  private <T> T passageQuery(
+      String sql,
+      ResultSetExtractor<T> mapper,
+      InformationLogVisibility.Facts facts,
+      Object... args) {
+    long queryDeadline =
+        JdbcReadDeadline.completionDeadline(ReadDeadline.deadlineNanos(searchBudget));
+    var bound = new ArrayList<>(Arrays.asList(args));
+    String selected = visibleTo(sql, facts, bound);
+    var setter = new ArgumentPreparedStatementSetter(bound.toArray());
+    Supplier<T> search =
+        () ->
+            jdbc.query(
+                selected,
+                statement -> {
+                  setter.setValues(statement);
+                  JdbcReadDeadline.apply(statement, queryDeadline);
+                },
+                mapper);
+    try {
+      T result;
+      DataSource source = Objects.requireNonNull(jdbc.getDataSource(), "dataSource");
+      if (TransactionSynchronizationManager.isActualTransactionActive()
+          && TransactionSynchronizationManager.hasResource(source)) {
+        result = search.get();
+      } else {
+        var transaction = new TransactionTemplate(passageTransactions(source));
+        // Never an existing transaction: SET LOCAL must end with a transaction this method opened.
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setReadOnly(true);
+        result =
+            transaction.execute(
+                status -> {
+                  jdbc.execute(
+                      (StatementCallback<Void>)
+                          statement -> {
+                            JdbcReadDeadline.apply(statement, queryDeadline);
+                            statement.execute("SET LOCAL jit = off");
+                            return null;
+                          });
+                  return search.get();
+                });
+      }
+      if (System.nanoTime() - queryDeadline >= 0) throw ReadFailedException.deadlineExceeded();
+      return result;
+    } finally {
+      setter.cleanupParameters();
+    }
+  }
+
+  /**
+   * The transaction manager {@link #passageQuery} opens its short transactions with, made on first
+   * use and kept: it holds nothing but the {@code DataSource}. It is not made in the constructor
+   * because a store built over a template without a {@code DataSource}, as unit tests build it,
+   * must still be constructible; only a passage search needs one. Two threads racing here each make
+   * an equivalent manager and one is kept.
+   */
+  private PlatformTransactionManager passageTransactions(DataSource source) {
+    PlatformTransactionManager held = passageTransactions;
+    if (held == null) {
+      held = new DataSourceTransactionManager(source);
+      passageTransactions = held;
+    }
+    return held;
+  }
+
+  private volatile PlatformTransactionManager passageTransactions;
 
   /** Fresh coverage for replayed snapshots, without reranking or fetching content. */
   public LogSearch.Reach searchReach(Home home, String conversation) {

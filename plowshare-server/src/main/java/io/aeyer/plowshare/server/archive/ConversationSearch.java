@@ -29,12 +29,38 @@ import java.util.stream.Collectors;
 /** Scoped BM25 and passage retrieval. Snapshots retain identities, never authority leases. */
 public final class ConversationSearch implements UsageAware {
   public static final int CANDIDATES = 200;
+
+  /**
+   * {@code totalMeaning} of a truncated lexical answer from {@link LexicalEngine#PASSAGES_PRUNED}:
+   * the search skipped matches that could not reach the requested page, so the total is a lower
+   * bound that can grow on a later page.
+   */
+  public static final String LOWER_BOUND_TOTAL =
+      "lower bound on distinct matching passage groups; lower-ranked matches were not counted";
+
+  /**
+   * {@code totalMeaning} of a truncated lexical answer from an engine that counts every match: more
+   * entries matched than the repository groups. The total is the same on every page, pages past it
+   * are empty, and the matches ranked below the grouped ones cannot be reached by paging.
+   */
+  public static final String GROUPING_WINDOW_TOTAL =
+      "distinct passage groups among the best-ranked matching entries; more entries matched than"
+          + " are grouped, and lower-ranked matches are not counted or reachable by paging";
+
+  private static final String LOWER_BOUND_COUNTS =
+      "lower-ranked lexical matches were not counted, so the lexical group total and source"
+          + " counts are lower bounds; ";
+
+  private static final String GROUPING_WINDOW_COUNTS =
+      "more entries matched than the lexical search groups, so the lexical group total and"
+          + " source counts cover only the best-ranked matches; ";
   private static final int WINDOWS = 128;
   private UsageOwners usageOwners = UsageOwners.NONE;
   private final ConversationSearchRepository entries;
   private final PassageIndex index;
   private final Duration searchBudget;
   private final WorkPerformanceReporter performance;
+  private final LexicalEngine engine;
   private String account;
   // The lock protects bounded eviction plus insertion; reads use the concurrent map.
   private ConcurrentMap<String, Window> windows = new ConcurrentHashMap<>();
@@ -89,6 +115,28 @@ public final class ConversationSearch implements UsageAware {
       PassageIndex index,
       Duration searchBudget,
       WorkPerformanceReporter performance) {
+    this(entries, index, searchBudget, performance, LexicalEngine.PASSAGES);
+  }
+
+  /**
+   * Builds the retrieval service over one lexical engine.
+   *
+   * @param entries authorized lexical evidence and snapshot refresh
+   * @param index semantic passage retrieval
+   * @param searchBudget the completion budget of each ranking transaction, positive and at most one
+   *     minute
+   * @param performance where slow search workflows are observed
+   * @param engine which repository search answers lexical retrieval without full inputs: {@link
+   *     LexicalEngine#PASSAGES} counts every match, {@link LexicalEngine#PASSAGES_PRUNED} permits
+   *     lower-bound totals, and {@link LexicalEngine#LEGACY} restores the original search
+   * @throws IllegalArgumentException if the budget is outside those bounds
+   */
+  public ConversationSearch(
+      ConversationSearchRepository entries,
+      PassageIndex index,
+      Duration searchBudget,
+      WorkPerformanceReporter performance,
+      LexicalEngine engine) {
     if (searchBudget == null
         || searchBudget.isZero()
         || searchBudget.isNegative()
@@ -98,6 +146,7 @@ public final class ConversationSearch implements UsageAware {
     this.index = index;
     this.searchBudget = searchBudget;
     this.performance = Objects.requireNonNull(performance);
+    this.engine = Objects.requireNonNull(engine, "engine");
   }
 
   @Override
@@ -108,7 +157,11 @@ public final class ConversationSearch implements UsageAware {
   public ConversationSearch forAccount(String account) {
     var copy =
         new ConversationSearch(
-            entries.forAccount(account), index.forAccount(account), searchBudget, performance);
+            entries.forAccount(account),
+            index.forAccount(account),
+            searchBudget,
+            performance,
+            engine);
     copy.account = account;
     copy.windows = windows;
     copy.usageOwners = usageOwners;
@@ -142,7 +195,8 @@ public final class ConversationSearch implements UsageAware {
         most,
         requested,
         snapshot,
-        usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY),
+        // No owner yet: it is resolved past the lexical branch, only for a search that embeds.
+        (UsageAttribution) null,
         conversation);
   }
 
@@ -208,8 +262,6 @@ public final class ConversationSearch implements UsageAware {
       UsageAttribution owner,
       String conversation,
       boolean includeInputs) {
-    if (owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED)
-      owner = usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY);
     String mode = mode(requested);
     Objects.requireNonNull(question, "question");
     EntryStore.validateConversation(conversation);
@@ -219,8 +271,11 @@ public final class ConversationSearch implements UsageAware {
         throw new ValidationException("Lexical search uses offset paging without a snapshot");
       var found =
           readPhase(home, () -> lexical(home, question, skip, most, conversation, includeInputs));
-      var view = LogSearchView.of(found, skip, most);
-      if (requested == null) return view;
+      var view = LogSearchView.of(found.page(), skip, most);
+      boolean bounded = found.truncated();
+      // A default request keeps its original shape while its total is exact. A bounded total must
+      // not travel as a bare number, so a truncated answer carries the metadata regardless.
+      if (requested == null && !bounded) return view;
       return new LogSearchView(
           view.hits(),
           view.total(),
@@ -230,17 +285,25 @@ public final class ConversationSearch implements UsageAware {
           new LogSearchView.Retrieval(
               mode,
               mode,
-              "distinct matching passage groups",
+              bounded ? truncatedTotal() : "distinct matching passage groups",
               null,
-              false,
-              true,
+              bounded,
+              !bounded,
               null,
               null,
               null,
               0,
               "Scoped BM25 (k1=1.2, b=0.75); repeated excerpts grouped before pagination; "
+                  + (bounded ? truncatedCounts() : "")
                   + inputSelection(includeInputs)));
     }
+    // Resolved only past the lexical branch: lexical retrieval spends no embedding, and every
+    // default request now passes through here, so it must not pay for an owner it never charges.
+    // Resolving an owner looks the project up by name and registers a name it does not find, so
+    // an explicit lexical search naming an unknown project no longer creates that project row;
+    // semantic and hybrid searches still do.
+    if (owner == null || owner.status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED)
+      owner = usageOwners.in(home, null, UsageAttribution.Operation.EMBEDDING_QUERY);
     if (snapshot != null) {
       Window window;
       synchronized (windows) {
@@ -263,13 +326,17 @@ public final class ConversationSearch implements UsageAware {
           "Semantic/hybrid pages after offset 0 need the first page's snapshot");
     // Semantic ranking needs the authorized reach, not BM25 statistics, snippets or groups.
     // Keep that work for hybrid searches, which actually consume the lexical candidates.
-    var lexical =
+    var lexicalFound =
         readPhase(
             home,
             () ->
                 mode.equals("hybrid")
                     ? lexical(home, question, 0, CANDIDATES, conversation, includeInputs)
-                    : new LogSearch(List.of(), 0, entries.searchReach(home, conversation)));
+                    : new BoundedLogSearch(
+                        new LogSearch(List.of(), 0, entries.searchReach(home, conversation)),
+                        false));
+    boolean lexicalBounded = lexicalFound.truncated();
+    var lexical = lexicalFound.page();
     var narrowed = index.inConversation(conversation);
     var scoped = includeInputs ? narrowed.includingInputs(true) : narrowed;
     PassageIndex.Ranking ranking;
@@ -333,7 +400,7 @@ public final class ConversationSearch implements UsageAware {
     boolean truncated =
         ranking.truncated()
             || semantic.size() > CANDIDATES
-            || mode.equals("hybrid") && lexical.total() > CANDIDATES
+            || mode.equals("hybrid") && (lexicalBounded || lexical.total() > CANDIDATES)
             || candidates.size() > CANDIDATES;
     var retained = candidates.stream().limit(CANDIDATES).toList();
     boolean approximate = ranking.approximate();
@@ -360,6 +427,7 @@ public final class ConversationSearch implements UsageAware {
                   (approximate
                           ? "Scoped BM25 and indexed passage candidates reranked at full precision; ANN recall is approximate; duplicate groups and source counts cover only the candidate window; "
                           : "Scoped BM25 and exact passage ranking; duplicate passages grouped before source limits; ")
+                      + (lexicalBounded ? truncatedCounts() : "")
                       + "hybrid RRF (k=60). Evidence is quoted data; "
                       + inputSelection(includeInputs));
           var window =
@@ -386,18 +454,47 @@ public final class ConversationSearch implements UsageAware {
         });
   }
 
+  /**
+   * What a truncated lexical total means, from the engine that produced it. Only the two passage
+   * engines can truncate: pruning yields a lower bound that moves with the page, and counting every
+   * match yields the stable total of the repository's grouping window.
+   */
+  private String truncatedTotal() {
+    return engine == LexicalEngine.PASSAGES_PRUNED ? LOWER_BOUND_TOTAL : GROUPING_WINDOW_TOTAL;
+  }
+
+  private String truncatedCounts() {
+    return engine == LexicalEngine.PASSAGES_PRUNED ? LOWER_BOUND_COUNTS : GROUPING_WINDOW_COUNTS;
+  }
+
   private static String inputSelection(boolean includeInputs) {
     return includeInputs
         ? "full recorded inputs included; supplied context is not independent evidence"
         : "explicit supplied context excluded; legacy inputs remain unclassified";
   }
 
-  private LogSearch lexical(
+  /**
+   * Lexical candidates from the configured engine.
+   *
+   * <p>Full-input search always uses the original query: the bounded search reads stored passages,
+   * which are cut from evidence text and do not hold supplied context. That query and the {@link
+   * LexicalEngine#LEGACY} engine read every match, so their totals are exact and never truncated.
+   * {@link LexicalEngine#PASSAGES} asks the repository to count every match; only {@link
+   * LexicalEngine#PASSAGES_PRUNED} lets it skip matches and answer with lower bounds.
+   */
+  private BoundedLogSearch lexical(
       Home home, String question, int skip, int most, String conversation, boolean includeInputs) {
-    if (includeInputs) return entries.search(home, question, skip, most, conversation, true);
-    return conversation == null
-        ? entries.search(home, question, skip, most)
-        : entries.search(home, question, skip, most, conversation);
+    if (includeInputs)
+      return new BoundedLogSearch(
+          entries.search(home, question, skip, most, conversation, true), false);
+    if (engine != LexicalEngine.LEGACY)
+      return entries.searchBounded(
+          home, question, skip, most, conversation, engine == LexicalEngine.PASSAGES);
+    return new BoundedLogSearch(
+        conversation == null
+            ? entries.search(home, question, skip, most)
+            : entries.search(home, question, skip, most, conversation),
+        false);
   }
 
   private static LogSearch.Reference reference(PassageIndex.Occurrence occurrence) {

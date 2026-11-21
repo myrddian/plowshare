@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -104,11 +105,11 @@ class ConversationSearchDeadlineTest {
         Duration.ofMillis(500),
         () -> {
           long enclosing = ReadDeadline.deadlineNanos(Duration.ofSeconds(2));
-          when(entries.search(any(), anyString(), anyInt(), anyInt()))
+          when(entries.searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean()))
               .thenAnswer(
                   call -> {
                     assertEquals(enclosing, ReadDeadline.deadlineNanos(Duration.ofSeconds(2)));
-                    return LogSearch.NONE;
+                    return BoundedLogSearch.NONE;
                   });
           assertEquals(0, search.search(Home.global(), "failure", 0, 10, "lexical", null).total());
           return null;
@@ -240,7 +241,8 @@ class ConversationSearchDeadlineTest {
               Supplier<Object> read = call.getArgument(1);
               return read.get();
             });
-    when(entries.search(any(), anyString(), anyInt(), anyInt())).thenReturn(LogSearch.NONE);
+    when(entries.searchBounded(any(), anyString(), anyInt(), anyInt(), any(), anyBoolean()))
+        .thenReturn(BoundedLogSearch.NONE);
     var search = new ConversationSearch(entries, index, Duration.ofSeconds(2), performance);
     search.search(Home.global(), "question", 0, 10, "lexical", null);
     var cancelled =

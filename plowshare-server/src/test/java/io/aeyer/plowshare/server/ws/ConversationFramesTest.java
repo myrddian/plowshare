@@ -38,6 +38,7 @@ import io.aeyer.plowshare.server.api.ContextView;
 import io.aeyer.plowshare.server.api.ConversationController;
 import io.aeyer.plowshare.server.api.ConversationView;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
+import io.aeyer.plowshare.server.api.LogSearchView;
 import io.aeyer.plowshare.server.archive.ArchiveRefusedException;
 import io.aeyer.plowshare.server.archive.CompactionRecord;
 import io.aeyer.plowshare.server.archive.CompactionStore;
@@ -1282,8 +1283,17 @@ class ConversationFramesTest {
   /** Both surfaces search one tier's log the same way. */
   @Test
   void both_surfaces_search_the_same_tier() throws Exception {
-    when(entries.search(PAYMENTS, "budget", 0, ConversationController.MOST_ENTRIES_A_PAGE))
-        .thenReturn(aHit());
+    when(entries.searchView(
+            PAYMENTS,
+            "budget",
+            0,
+            ConversationController.MOST_ENTRIES_A_PAGE,
+            null,
+            null,
+            null,
+            null,
+            false))
+        .thenReturn(LogSearchView.of(aHit(), 0, ConversationController.MOST_ENTRIES_A_PAGE));
 
     MockHttpServletResponse http =
         mvc.perform(get("/v1/entries/search").param("q", "budget").param("project", "payments"))
@@ -1298,7 +1308,16 @@ class ConversationFramesTest {
     assertEquals(Code.OK, outcome.code());
     FrameParity.assertSameAnswer(http, outcome);
     verify(entries, times(2))
-        .search(PAYMENTS, "budget", 0, ConversationController.MOST_ENTRIES_A_PAGE);
+        .searchView(
+            PAYMENTS,
+            "budget",
+            0,
+            ConversationController.MOST_ENTRIES_A_PAGE,
+            null,
+            null,
+            null,
+            null,
+            false);
   }
 
   /**
@@ -1314,7 +1333,8 @@ class ConversationFramesTest {
    */
   @Test
   void both_surfaces_search_through_the_same_window() throws Exception {
-    when(entries.search(PAYMENTS, "budget", 4, 2)).thenReturn(aHit());
+    when(entries.searchView(PAYMENTS, "budget", 4, 2, null, null, null, null, false))
+        .thenReturn(LogSearchView.of(aHit(), 4, 2));
 
     MockHttpServletResponse http =
         mvc.perform(
@@ -1333,7 +1353,7 @@ class ConversationFramesTest {
 
     assertEquals(Code.OK, outcome.code());
     FrameParity.assertSameAnswer(http, outcome);
-    verify(entries, times(2)).search(PAYMENTS, "budget", 4, 2);
+    verify(entries, times(2)).searchView(PAYMENTS, "budget", 4, 2, null, null, null, null, false);
   }
 
   /**
@@ -1356,7 +1376,8 @@ class ConversationFramesTest {
     assertEquals(Code.BAD_REQUEST, outcome.code());
     FrameParity.assertSameRefusal(http, outcome);
     assertTrue(outcome.said().contains("'q'"), "and names the field: " + outcome.said());
-    verify(entries, never()).search(any(), any(), anyInt(), anyInt());
+    verify(entries, never())
+        .searchView(any(), any(), anyInt(), anyInt(), any(), any(), any(), any(), anyBoolean());
   }
 
   /**
