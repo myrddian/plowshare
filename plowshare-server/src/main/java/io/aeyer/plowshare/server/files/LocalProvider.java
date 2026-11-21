@@ -7,6 +7,7 @@ import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.FileRequest;
 import io.aeyer.plowshare.protocol.FileResult;
 import io.aeyer.plowshare.protocol.FileSearch;
+import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Found;
 import io.aeyer.plowshare.protocol.GlobSpellings;
 import io.aeyer.plowshare.protocol.Home;
@@ -294,14 +295,13 @@ public final class LocalProvider implements FileProvider {
   }
 
   @Override
-  public io.aeyer.plowshare.protocol.FileSource fingerprint(Path path) {
-    byte[] bytes = codeBytes(path, io.aeyer.plowshare.protocol.FileSource.MAX_BYTES);
-    return new io.aeyer.plowshare.protocol.FileSource(
-        bytes.length, FileContents.sha256(bytes), null, null);
+  public FileSource fingerprint(Path path) {
+    byte[] bytes = codeBytes(path, FileSource.MAX_BYTES);
+    return new FileSource(bytes.length, FileContents.sha256(bytes), null, null);
   }
 
   @Override
-  public byte[] snapshot(Path path, io.aeyer.plowshare.protocol.FileSource metadata, int maxBytes) {
+  public byte[] snapshot(Path path, FileSource metadata, int maxBytes) {
     byte[] bytes = codeBytes(path, maxBytes);
     if (bytes.length != metadata.size() || !FileContents.sha256(bytes).equals(metadata.sha256()))
       throw new WorkspaceUnavailableException("code source changed during snapshot");
@@ -309,13 +309,27 @@ public final class LocalProvider implements FileProvider {
   }
 
   private byte[] codeBytes(Path path, int maxBytes) {
-    if (maxBytes < 0 || maxBytes > io.aeyer.plowshare.protocol.FileSource.MAX_BYTES)
+    return sourceBytes(path, maxBytes, false).orElseThrow();
+  }
+
+  /** Read a bounded source using the workspace fence, allowing absence at initial lookup. */
+  public Optional<byte[]> readOptionalSource(Path path, int maxBytes) {
+    return sourceBytes(path, maxBytes, true);
+  }
+
+  private Optional<byte[]> sourceBytes(Path path, int maxBytes, boolean allowMissing) {
+    if (maxBytes < 0 || maxBytes > FileSource.MAX_BYTES)
       throw new IllegalArgumentException("invalid source byte bound");
     try {
       Leash leash = reachable(leash());
       Path target = permitted(leash, path, "read");
-      BasicFileAttributes before =
-          Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      BasicFileAttributes before;
+      try {
+        before = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      } catch (NoSuchFileException absent) {
+        if (allowMissing) return Optional.empty();
+        throw absent;
+      }
       if (!before.isRegularFile())
         throw refused(FileResult.refused(FileRequest.READ, notRegular(before), path.toString()));
       if (before.size() > maxBytes)
@@ -331,10 +345,10 @@ public final class LocalProvider implements FileProvider {
           || bytes.length != before.size()
           || before.size() != after.size()
           || !before.lastModifiedTime().equals(after.lastModifiedTime())
-          || !java.util.Objects.equals(before.fileKey(), after.fileKey())
+          || !Objects.equals(before.fileKey(), after.fileKey())
           || !target.equals(permitted(reachable(leash()), path, "read")))
         throw new WorkspaceUnavailableException("code source changed during snapshot");
-      return bytes;
+      return Optional.of(bytes);
     } catch (IOException failed) {
       throw new WorkspaceUnavailableException("code source could not be read: " + path, failed);
     }

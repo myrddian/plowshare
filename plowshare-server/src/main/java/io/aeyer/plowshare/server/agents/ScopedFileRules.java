@@ -1,9 +1,12 @@
 package io.aeyer.plowshare.server.agents;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.files.ProviderRouter;
-import io.aeyer.plowshare.server.files.RemoteProvider;
+import io.aeyer.plowshare.server.files.ProviderRouter.Target;
 import io.aeyer.plowshare.server.files.RunProviders;
+import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -34,17 +37,11 @@ public final class ScopedFileRules implements JobRuntime.FileRules {
     if (tool.equals("file_roots")) {
       List<AgentRules.Rule> roots = new ArrayList<>();
       for (var provider : router.providersFor(home))
-        for (Path root : provider.roots()) {
-          roots.addAll(
-              rules.forFile(
-                  root,
-                  root.resolve("__agent_rules_scope__"),
-                  provider instanceof RemoteProvider ? session : null));
-        }
+        for (Path root : provider.roots()) roots.addAll(rules.forFile(root, root, provider));
       return roots.stream().distinct().toList();
     }
     if (!TOOLS.contains(tool)) return List.of();
-    com.fasterxml.jackson.databind.JsonNode arguments;
+    JsonNode arguments;
     try {
       arguments = ToolArguments.parse(json, tool, "{\"path\":\"/workspace/file\"}");
     } catch (ToolArguments.BadArguments invalid) {
@@ -55,27 +52,22 @@ public final class ScopedFileRules implements JobRuntime.FileRules {
       var argument = arguments.get(key);
       if (argument == null || !argument.isTextual())
         continue; // The file tool owns argument validation.
-      Path path;
+      Target target;
       try {
-        path = io.aeyer.plowshare.protocol.FileAccess.canonical(Path.of(argument.asText()));
-      } catch (java.nio.file.InvalidPathException invalid) {
+        target = router.targetFor(home, Path.of(argument.asText().strip()));
+      } catch (InvalidPathException | WorkspaceRefusedException refused) {
         continue;
       }
-      io.aeyer.plowshare.server.files.FileProvider provider;
-      try {
-        provider = router.providerFor(home, path);
-      } catch (io.aeyer.plowshare.server.files.WorkspaceRefusedException refused) {
-        continue;
-      }
+      Path path = target.scopePath();
       Path root =
-          provider.roots().stream()
+          target.roots().stream()
               .filter(path::startsWith)
               .max(Comparator.comparingInt(Path::getNameCount))
               .orElseThrow(
                   () ->
                       new IllegalArgumentException(
                           "No filesystem root covers the agent rules path."));
-      found.addAll(rules.forFile(root, path, provider instanceof RemoteProvider ? session : null));
+      found.addAll(rules.forFile(root, path, target.provider()));
     }
     return found.stream().distinct().toList();
   }

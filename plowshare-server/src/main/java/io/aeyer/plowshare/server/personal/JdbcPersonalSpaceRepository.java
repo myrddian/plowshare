@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.personal;
 
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -79,7 +80,7 @@ public class JdbcPersonalSpaceRepository implements PersonalSpaceRepository {
   public void initialized(long project, String handle) {
     if (jdbc.update(
             "UPDATE projects SET workspace = ?, union_since = COALESCE(union_since, now()) WHERE id = ? AND personal_owner=?",
-            "/personal",
+            PersonalWorkspace.LOGICAL_ROOT.toString(),
             project,
             handle)
         != 1) throw new IllegalStateException("Personal identity changed during initialization");

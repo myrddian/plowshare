@@ -14,6 +14,7 @@ import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.SecurityReviewer;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.files.ProviderRouter.Target;
 import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.hooks.HookContext;
@@ -24,8 +25,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,7 +48,8 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
       String side,
       OperationApprovalReview.Request request,
       FileApproval file,
-      FileProvider provider) {}
+      FileProvider provider,
+      Map<Path, Target> targets) {}
 
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final String RETAINED = "__plowshare_file_consent";
@@ -249,22 +253,32 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
         };
     var read = kind == ApprovalPolicy.Kind.FILE_READ ? router.readTarget(home, path) : null;
     var mutation = read == null ? router.mutationTarget(home, path) : null;
-    FileProvider provider = read == null ? mutation.provider() : read.provider();
+    Target source = read == null ? mutation.target() : read.target();
+    FileProvider provider = source.provider();
     boolean securityFileMutation = mutation != null && mutation.securityFile();
-    List<String> paths = List.of(from);
+    var targets = new HashMap<Path, Target>();
+    targets.put(path, source);
+    // Record the resolved target in the approval. The input digest still binds the original
+    // arguments, and a remounted alias cannot reuse consent for a different physical path.
+    String sourceName = source.path().equals(path) ? from : source.path().toString();
+    List<String> paths = List.of(sourceName);
     if (kind == ApprovalPolicy.Kind.FILE_MOVE) {
       String to = ToolArguments.requireText(args, "to", schema().name(), "an absolute destination");
       Path destination = Path.of(to);
       if (!destination.isAbsolute())
         throw new WorkspaceRefusedException("File moves require an absolute destination");
       var destinationTarget = router.mutationTarget(home, destination);
-      if (!provider.identity().equals(destinationTarget.provider().identity()))
+      Target resolved = destinationTarget.target();
+      if (!provider.identity().equals(resolved.provider().identity()))
         throw new WorkspaceRefusedException(
             "File moves require one current provider for both targets");
       securityFileMutation |= destinationTarget.securityFile();
-      paths = List.of(from, to);
+      targets.put(destination, resolved);
+      paths =
+          List.of(
+              sourceName, resolved.path().equals(destination) ? to : resolved.path().toString());
     }
-    String cwd = path.getParent().toString();
+    String cwd = source.path().getParent().toString();
     String digest = digest(arguments);
     var request =
         new OperationApprovalReview.Request(
@@ -292,10 +306,11 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
         RemoteProvider.NAME.equals(provider.name()) ? "local" : "server",
         request,
         file,
-        provider);
+        provider,
+        Map.copyOf(targets));
   }
 
-  private FileProvider require(String arguments, Home home) {
+  private Prepared require(String arguments, Home home) {
     Prepared grant = permitted;
     permitted = null;
     if (grant == null || !grant.arguments().equals(arguments))
@@ -310,7 +325,7 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
     // A refreshed route may name the same logical client after its connection was replaced.
     // The review belongs to the original provider binding until an exact retained call resumes.
     grant.provider().requireReviewBinding();
-    return now.provider();
+    return now;
   }
 
   @Override
@@ -321,9 +336,9 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   @Override
   public String run(String arguments, Home home, UsageAttribution usage) {
     try {
-      FileProvider provider = require(arguments, home);
+      Prepared current = require(arguments, home);
       if (delegate instanceof FileTools.Routed routed)
-        return routed.runFrom(arguments, home, provider);
+        return routed.runFrom(arguments, home, current.targets()::get);
       return delegate.run(arguments, home, usage);
     } catch (WorkspaceRefusedException refused) {
       return refused.getMessage();
@@ -338,9 +353,9 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   @Override
   public AgentTool.Result runResult(String arguments, Home home, UsageAttribution usage) {
     try {
-      FileProvider provider = require(arguments, home);
+      Prepared current = require(arguments, home);
       if (delegate instanceof FileTools.Routed routed)
-        return new AgentTool.Result(routed.runFrom(arguments, home, provider), null);
+        return new AgentTool.Result(routed.runFrom(arguments, home, current.targets()::get), null);
       return delegate instanceof AgentTool.ContentTool content
           ? content.runResult(arguments, home, usage)
           : new AgentTool.Result(delegate.run(arguments, home, usage), null);

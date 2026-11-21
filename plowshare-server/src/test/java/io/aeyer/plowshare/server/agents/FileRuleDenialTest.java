@@ -16,6 +16,7 @@ import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionChannel;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,15 +42,17 @@ class FileRuleDenialTest {
 
   @ParameterizedTest
   @CsvSource({
-    "file_read,false",
-    "file_stat,false",
-    "file_edit,false",
-    "file_delete,false",
-    "file_move,false",
-    "file_move,true"
+    "file_read,false,false",
+    "file_stat,false,false",
+    "file_edit,false,false",
+    "file_delete,false,false",
+    "file_move,false,false",
+    "file_move,true,false",
+    "file_edit,false,true",
+    "file_move,true,true"
   })
   void hiddenRulesDenyOnlyTheirOperationAndTheModelCanContinue(
-      String name, boolean hiddenDestination) throws Exception {
+      String name, boolean hiddenDestination, boolean personalAlias) throws Exception {
     Path root = temporary.toRealPath();
     Path hidden = root.resolve(".githooks");
     String refusedPath = hidden.resolve("AGENTS.md").toString();
@@ -66,6 +70,10 @@ class FileRuleDenialTest {
                 : files.ask(session, request);
     var remote = mock(RemoteProvider.class);
     when(remote.roots()).thenReturn(List.of(root));
+    when(remote.session()).thenReturn("session");
+    if (personalAlias)
+      when(remote.personalWorkspace())
+          .thenReturn(Optional.of(new PersonalWorkspace("owner", root)));
     var providers = mock(RunProviders.class);
     when(providers.forRun(any(), any(), any(), any())).thenReturn(List.of(remote));
     var rules =
@@ -79,10 +87,14 @@ class FileRuleDenialTest {
     when(sibling.schema())
         .thenReturn(ToolSchema.from("probe", "fixture", Map.of("type", "object")));
     when(sibling.run(any(), any())).thenReturn("Independent operation completed");
+    Path namedRoot = personalAlias ? PersonalWorkspace.LOGICAL_ROOT : root;
+    Path namedHidden = namedRoot.resolve(hidden.getFileName());
     String deniedArguments =
         arguments(
-            hiddenDestination ? root.resolve("source.txt") : hidden.resolve("source.txt"),
-            hiddenDestination ? hidden.resolve("target.txt") : root.resolve("target.txt"));
+            hiddenDestination ? namedRoot.resolve("source.txt") : namedHidden.resolve("source.txt"),
+            hiddenDestination
+                ? namedHidden.resolve("target.txt")
+                : namedRoot.resolve("target.txt"));
     String allowedArguments = arguments(root.resolve("source.txt"), root.resolve("target.txt"));
     List<List<ChatMessage>> contexts = new ArrayList<>();
     var step = new AtomicInteger();

@@ -111,6 +111,9 @@ public interface FileProvider {
 
   /** The owner and exact workspace root established by server-side Personal routing. */
   record PersonalWorkspace(String owner, Path root) {
+    /** The logical project root persisted for Personal and used by its server mirror. */
+    public static final Path LOGICAL_ROOT = Path.of("/personal");
+
     public PersonalWorkspace {
       Objects.requireNonNull(owner);
       if (!root.isAbsolute())
@@ -122,6 +125,15 @@ public interface FileProvider {
   /** Evidence of Personal ownership for this provider, independent of the path being requested. */
   default Optional<PersonalWorkspace> personalWorkspace() {
     return Optional.empty();
+  }
+
+  /** Instruction reads for providers whose advertised root has its own path namespace. */
+  interface ScopedRuleSource {
+    /**
+     * Read exact bytes at a provider path using its workspace fence and the supplied byte limit. An
+     * empty result means the rule was absent at lookup. Refusals and outages propagate.
+     */
+    Optional<byte[]> readScopedRule(Path path, int maxBytes);
   }
 
   /** Capture the provider binding used to check roots and execute a reviewed read. */
