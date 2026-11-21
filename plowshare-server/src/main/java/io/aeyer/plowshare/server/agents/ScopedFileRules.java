@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.ProviderRouter.Target;
-import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import java.nio.file.InvalidPathException;
@@ -38,13 +37,7 @@ public final class ScopedFileRules implements JobRuntime.FileRules {
     if (tool.equals("file_roots")) {
       List<AgentRules.Rule> roots = new ArrayList<>();
       for (var provider : router.providersFor(home))
-        for (Path root : provider.roots()) {
-          roots.addAll(
-              rules.forFile(
-                  root,
-                  root.resolve("__agent_rules_scope__"),
-                  provider instanceof RemoteProvider remote ? remote.session() : null));
-        }
+        for (Path root : provider.roots()) roots.addAll(rules.forFile(root, root, provider));
       return roots.stream().distinct().toList();
     }
     if (!TOOLS.contains(tool)) return List.of();
@@ -74,11 +67,7 @@ public final class ScopedFileRules implements JobRuntime.FileRules {
                   () ->
                       new IllegalArgumentException(
                           "No filesystem root covers the agent rules path."));
-      found.addAll(
-          rules.forFile(
-              root,
-              path,
-              target.provider() instanceof RemoteProvider remote ? remote.session() : null));
+      found.addAll(rules.forFile(root, path, target.provider()));
     }
     return found.stream().distinct().toList();
   }

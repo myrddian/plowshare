@@ -2,8 +2,14 @@ package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.server.agents.DefinitionResolver.Caller;
 import io.aeyer.plowshare.server.data.DataLayout;
+import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.ScopedRuleSource;
+import io.aeyer.plowshare.server.files.RemoteProvider;
 import io.aeyer.plowshare.server.files.SessionChannel;
+import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,8 +140,15 @@ public final class AgentRules {
   }
 
   /** Instructions along a selected filesystem root, never above that root. */
-  public List<Rule> forFile(Path root, Path file, String remoteSession) {
-    Path relative = root.relativize(file.normalize());
+  public List<Rule> forFile(Path root, Path file, FileProvider provider) {
+    Path scopePath = file.normalize();
+    if (provider instanceof ScopedRuleSource) {
+      // Canonicalize through the mirror so linked paths receive the actual destination's rules.
+      scopePath = provider.reviewPath(scopePath);
+      if (!scopePath.startsWith(root))
+        throw new Refused("agent rules path escapes the selected root: " + file);
+    }
+    Path relative = root.relativize(scopePath);
     if (relative.startsWith(".."))
       throw new IllegalArgumentException("agent rules path escapes the selected root");
     List<Rule> rules = new ArrayList<>();
@@ -150,11 +163,23 @@ public final class AgentRules {
         if (directories.size() > 64) throw new Refused("agent rules exceed 64 directory scopes");
       }
     ChannelDefinitions remote =
-        remoteSession == null ? null : ChannelDefinitions.skills(channel, remoteSession);
+        provider instanceof RemoteProvider client
+            ? ChannelDefinitions.skills(channel, client.session())
+            : null;
     for (Path directory : directories) {
       String scope = root.relativize(directory).toString();
-      if (remote == null) addDisk(rules, directory, scope);
-      else addChannel(rules, remote, directory.toString(), scope);
+      if (provider instanceof ScopedRuleSource source) {
+        add(
+            rules,
+            directory.toString(),
+            scope,
+            readScopedRule(source, directory.resolve("AGENTS.md")),
+            readScopedRule(source, directory.resolve("AGENT.md")));
+      } else if (remote != null) {
+        addChannel(rules, remote, directory.toString(), scope);
+      } else {
+        addDisk(rules, directory, scope);
+      }
     }
     long bytes =
         rules.stream().mapToLong(rule -> rule.text().getBytes(StandardCharsets.UTF_8).length).sum();
@@ -162,6 +187,18 @@ public final class AgentRules {
       throw new Refused("agent rules exceed source limit");
     if (remote != null) remote.requireCurrent();
     return List.copyOf(rules);
+  }
+
+  private static String readScopedRule(ScopedRuleSource source, Path path) {
+    try {
+      var bytes = source.readScopedRule(path, (int) ChannelDefinitions.MAX_DEFINITION_BYTES);
+      if (bytes.isEmpty()) return null;
+      return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes.get())).toString();
+    } catch (CharacterCodingException invalid) {
+      throw new Refused("cannot read agent rules " + path + ": file is not UTF-8");
+    } catch (WorkspaceRefusedException refused) {
+      throw new Refused("cannot read agent rules " + path + ": " + refused.getMessage());
+    }
   }
 
   private static void addDisk(List<Rule> rules, Path directory, String scope) {

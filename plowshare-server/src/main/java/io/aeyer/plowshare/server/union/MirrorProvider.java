@@ -9,6 +9,7 @@ import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.files.Changed;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileProvider.ScopedRuleSource;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.LocalProvider;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
@@ -41,7 +42,7 @@ import java.util.function.Supplier;
  * client's, and folding them in would exclude a directory under {@code tree/} that happens to share
  * their spelling by accident rather than by the row's own declaration.
  */
-public final class MirrorProvider implements FileProvider {
+public final class MirrorProvider implements FileProvider, ScopedRuleSource {
 
   public static final String NAME = "mirror";
 
@@ -106,6 +107,13 @@ public final class MirrorProvider implements FileProvider {
   @Override
   public Path reviewPath(Path path) {
     return toWorkspace(inner.reviewPath(toTree(path)));
+  }
+
+  @Override
+  public Optional<byte[]> readScopedRule(Path path, int maxBytes) {
+    if (!path.normalize().startsWith(workspace))
+      throw new WorkspaceRefusedException("Agent rules path leaves the mirror workspace: " + path);
+    return translated(() -> inner.readOptionalSource(toTree(path), maxBytes));
   }
 
   @Override

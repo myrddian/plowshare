@@ -359,6 +359,8 @@ drivers remain programs, so Markdown is not appended to their source.
 
 Before `file_read`, `file_stat`, `file_edit`, `file_delete` and `file_move`, the
 server resolves parent-to-child instructions within the selected filesystem root.
+When a server mirror serves the workspace, it reads instructions through the same
+workspace fence and reports their logical paths.
 Moves check both source and destination scopes. New or changed rules are returned
 to the model before any operation runs; every affected call in the current batch
 is refused until the next model step has received those instructions. Conflicting

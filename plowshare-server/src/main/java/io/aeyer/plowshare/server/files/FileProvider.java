@@ -127,6 +127,15 @@ public interface FileProvider {
     return Optional.empty();
   }
 
+  /** Instruction reads for providers whose advertised root has its own path namespace. */
+  interface ScopedRuleSource {
+    /**
+     * Read exact bytes at a provider path using its workspace fence and the supplied byte limit. An
+     * empty result means the rule was absent at lookup. Refusals and outages propagate.
+     */
+    Optional<byte[]> readScopedRule(Path path, int maxBytes);
+  }
+
   /** Capture the provider binding used to check roots and execute a reviewed read. */
   default FileProvider forReviewedRead() {
     return this;
