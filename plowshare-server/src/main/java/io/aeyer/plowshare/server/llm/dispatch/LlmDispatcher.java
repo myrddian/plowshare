@@ -4,6 +4,7 @@ import io.aeyer.plowshare.server.llm.MediaRequirements;
 import io.aeyer.plowshare.server.llm.ModelMediaCapabilities;
 import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
 import io.aeyer.plowshare.server.llm.dispatch.CallAuthorization.Disclosure;
+import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException.TimeoutOperation;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -458,12 +459,12 @@ public final class LlmDispatcher implements AutoCloseable {
    * TokenLedger is retained for compatibility constructors.
    */
   public Completion stream(ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
-    return stream(request, sink, abandoned, false);
+    return stream(request, sink, abandoned, TimeoutOperation.PROMPT);
   }
 
   /** One tool-free SECURITY call over quoted evidence with ordinary routing and accounting. */
   public Completion streamReview(ChatRequest request, BooleanSupplier abandoned) {
-    return stream(request, Deltas.DISCARDING, abandoned, false, true);
+    return stream(request, Deltas.DISCARDING, abandoned, TimeoutOperation.REVIEW);
   }
 
   /**
@@ -471,12 +472,17 @@ public final class LlmDispatcher implements AutoCloseable {
    * internal, model-only service path: it cannot offer tools or relax request authorization.
    */
   public Completion streamFold(ChatRequest request, Deltas sink) {
-    return stream(request, sink, () -> false, true);
+    return streamFold(request, sink, () -> false);
   }
 
-  /** A foreground skill summary uses the same fold limits and observes its tree's cancellation. */
+  /** A history fold that can be cancelled by its owner. */
   public Completion streamFold(ChatRequest request, Deltas sink, BooleanSupplier abandoned) {
-    return stream(request, sink, abandoned, true);
+    return stream(request, sink, abandoned, TimeoutOperation.FOLD);
+  }
+
+  /** A foreground skill summary shares the fold budget and has its own diagnostic identity. */
+  public Completion streamSkillSummary(ChatRequest request, BooleanSupplier abandoned) {
+    return stream(request, Deltas.DISCARDING, abandoned, TimeoutOperation.SKILL_SUMMARY);
   }
 
   private Duration foldTimeoutFor(LlmPool pool) {
@@ -488,19 +494,15 @@ public final class LlmDispatcher implements AutoCloseable {
   }
 
   private Completion stream(
-      ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold) {
-    return stream(request, sink, abandoned, fold, false);
-  }
-
-  private Completion stream(
-      ChatRequest request, Deltas sink, BooleanSupplier abandoned, boolean fold, boolean review) {
+      ChatRequest request, Deltas sink, BooleanSupplier abandoned, TimeoutOperation operation) {
     request.authorization().requireRequest(request);
     boundary.submitted(request.authorization());
-    if ((fold || review) && !request.tools().isEmpty())
+    boolean historicalInput = operation != TimeoutOperation.PROMPT;
+    if (historicalInput && !request.tools().isEmpty())
       throw new IllegalArgumentException(
           "Historical summary and review requests cannot carry tools");
     ChatRequest input =
-        fold || review
+        historicalInput
             ? filtering.historyInput(request, abandoned)
             : filtering.input(request, abandoned);
     boundary.require(input.authorization());
@@ -532,25 +534,52 @@ public final class LlmDispatcher implements AutoCloseable {
     boolean buffered = guard.isPresent() || disclosureBuffer;
     var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =
-        routing.pool().stream(
-            routing.wireModel(),
-            filtered.messages(),
+        streamOnPool(
+            routing,
+            filtered,
             sampling,
-            filtered.tools(),
             Deltas.observing(
                 deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink.previews(),
                 sink.diagnostics()),
             abandoned,
-            filtered.toolChoice(),
-            filtered.submitTimeout(),
             observer,
-            fold ? foldTimeoutFor(routing.pool()) : promptTimeout);
+            operation);
     Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
     if (buffered && !abandoned.getAsBoolean()) {
       if (deferred != null) deferred.deliverTo(sink.previews());
       if (!approved.content().isEmpty()) sink.previews().answered(approved.content());
     }
     return approved;
+  }
+
+  private Completion streamOnPool(
+      Routing routing,
+      ChatRequest request,
+      Sampling sampling,
+      Deltas sink,
+      BooleanSupplier abandoned,
+      InferenceObserver observer,
+      TimeoutOperation operation) {
+    Duration timeout =
+        switch (operation) {
+          case FOLD, SKILL_SUMMARY -> foldTimeoutFor(routing.pool());
+          case PROMPT, REVIEW -> promptTimeout;
+        };
+    try {
+      return routing.pool().stream(
+          routing.wireModel(),
+          request.messages(),
+          sampling,
+          request.tools(),
+          sink,
+          abandoned,
+          request.toolChoice(),
+          request.submitTimeout(),
+          observer,
+          timeout);
+    } catch (LlmTransportException failure) {
+      throw failure.forTimeoutOperation(operation);
+    }
   }
 
   /**
@@ -1109,19 +1138,16 @@ public final class LlmDispatcher implements AutoCloseable {
     boolean buffered = guard.isPresent() || disclosureBuffer;
     var deferred = guard.isPresent() && !disclosureBuffer ? new DeferredReasoning() : null;
     Completion completion =
-        named.stream(
-            wireModel,
-            filtered.messages(),
+        streamOnPool(
+            routing,
+            filtered,
             sampling,
-            filtered.tools(),
             Deltas.observing(
                 deferred != null ? deferred : buffered ? Deltas.DISCARDING : sink.previews(),
                 sink.diagnostics()),
             abandoned,
-            filtered.toolChoice(),
-            filtered.submitTimeout(),
             observer,
-            promptTimeout);
+            TimeoutOperation.PROMPT);
     Completion approved = approved(routing, filtered, completion, observer.capture(), guard);
     if (buffered && !abandoned.getAsBoolean()) {
       if (deferred != null) deferred.deliverTo(sink.previews());

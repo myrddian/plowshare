@@ -773,7 +773,7 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
       Duration timeout,
       ReasoningPolicy policy) {
     Duration budget = timeout == null ? props.getMaxStreamDuration() : timeout;
-    String budgetKey = timeout == null ? "max-stream-duration" : "prompt-timeout/fold-timeout";
+    String budgetKey = timeout == null ? "max-stream-duration" : "configured completion deadline";
     long deadline = System.nanoTime() + budget.toNanos();
     if (policy != null && policy.deadlineNanos() - deadline < 0) deadline = policy.deadlineNanos();
     LlmTransportException first = null;

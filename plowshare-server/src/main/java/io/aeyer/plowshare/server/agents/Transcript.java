@@ -6,6 +6,7 @@ import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.Redemption;
 import io.aeyer.plowshare.server.archive.StoredResults;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
@@ -276,6 +277,15 @@ public interface Transcript {
   }
 
   default InputProvenance inputProvenance() {
+    return null;
+  }
+
+  /** Host-supplied schedule instruction for this turn's web intent. */
+  default void prepareScheduledTask(ScheduledTask task) {
+    throw new UnsupportedOperationException("A scheduled task requires a turn transcript");
+  }
+
+  default ScheduledTask scheduledTask() {
     return null;
   }
 

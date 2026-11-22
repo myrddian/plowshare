@@ -35,6 +35,10 @@ writes desired state before reconciliation; unavailable/incomplete source scans
 must not become deletion. Mutable-source control and deployed application runtime
 overrides have different ownership. Preserve occurrence identity and current
 execution/control authority independently of historical registration.
+For web intent, a scheduled agent turn carries the saved instruction separately
+from its event payload and harness speaker. A workflow it starts can pin that
+instruction under the same execution owner. Manually fired events do not carry
+scheduled task evidence.
 
 Native scripts emit bounded typed commands through their owning runtime. They do
 not acquire arbitrary host IO or model-selected authority. Keep stage checkpoints,

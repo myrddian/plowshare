@@ -8,6 +8,7 @@ import io.aeyer.plowshare.server.access.ProjectAuthorization;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
 import io.aeyer.plowshare.server.archive.JobLog;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.information.InformationContext;
@@ -558,6 +559,58 @@ public final class JobStore
       Speaker speaker,
       BiConsumer<String, Outcome> ended,
       RelayCausation causation) {
+    return submitEvent(
+        definition,
+        utterance,
+        home,
+        session,
+        maxModelCalls,
+        cap,
+        callerHandle,
+        speaker,
+        ended,
+        causation,
+        null);
+  }
+
+  @Override
+  public EventRun submitTriggeredEvent(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      String session,
+      Integer maxModelCalls,
+      TurnCap cap,
+      String callerHandle,
+      Speaker speaker,
+      BiConsumer<String, Outcome> ended,
+      ScheduledTask scheduled) {
+    return submitEvent(
+        definition,
+        utterance,
+        home,
+        session,
+        maxModelCalls,
+        cap,
+        callerHandle,
+        speaker,
+        ended,
+        null,
+        scheduled);
+  }
+
+  private EventRun submitEvent(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      String session,
+      Integer maxModelCalls,
+      TurnCap cap,
+      String callerHandle,
+      Speaker speaker,
+      BiConsumer<String, Outcome> ended,
+      RelayCausation causation,
+      ScheduledTask scheduled) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(ended, "ended");
@@ -569,6 +622,7 @@ public final class JobStore
         logs == null
             ? Transcript.NONE
             : logs.logFor(Origin.EVENT, home, definition, session, budget, speaker, callerHandle);
+    if (scheduled != null && log != Transcript.NONE) log.prepareScheduledTask(scheduled);
     String conversation = log.conversationId();
     String id =
         submit(

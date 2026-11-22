@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.archive.Redemption;
 import io.aeyer.plowshare.server.archive.StoredResults;
 import io.aeyer.plowshare.server.archive.TurnJournal;
 import io.aeyer.plowshare.server.archive.TurnRecord;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
 import io.aeyer.plowshare.server.hooks.Summarised;
 import io.aeyer.plowshare.server.llm.FoldThresholds;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
@@ -2118,6 +2119,17 @@ public final class Compaction implements SkillSummaries {
   /** One turn's transcript, and the one number the conversation takes back from it. */
   public final class TurnTranscript implements Transcript {
     private InputProvenance inputProvenance;
+    private ScheduledTask scheduledTask;
+
+    @Override
+    public void prepareScheduledTask(ScheduledTask task) {
+      scheduledTask = Objects.requireNonNull(task);
+    }
+
+    @Override
+    public ScheduledTask scheduledTask() {
+      return scheduledTask;
+    }
 
     @Override
     public void prepareInput(InputProvenance provenance) {
@@ -4825,7 +4837,7 @@ public final class Compaction implements SkillSummaries {
             folding,
             asked,
             cancelled);
-    Completion completion = models.streamFold(asked, Deltas.DISCARDING, cancelled);
+    Completion completion = models.streamSkillSummary(asked, cancelled);
     String text = completion.content() == null ? "" : completion.content().strip();
     if (text.isEmpty())
       throw new IllegalStateException("The skill context summary came back empty");

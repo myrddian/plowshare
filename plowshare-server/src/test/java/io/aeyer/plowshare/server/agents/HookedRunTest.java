@@ -12,6 +12,10 @@ import io.aeyer.plowshare.protocol.fetch.FetchWindow;
 import io.aeyer.plowshare.protocol.search.SearchPage;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.events.AgentRunner;
+import io.aeyer.plowshare.server.events.EventPayload;
+import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.TriggerRecord;
 import io.aeyer.plowshare.server.fetch.FetchService;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.hooks.Addition;
@@ -111,6 +115,7 @@ class HookedRunTest {
 
     String opening = "";
     Speaker speaker;
+    AgentRunner.ScheduledTask scheduledTask;
     Origin origin = Origin.TURN;
 
     @Override
@@ -131,6 +136,11 @@ class HookedRunTest {
     @Override
     public Speaker speaker() {
       return speaker;
+    }
+
+    @Override
+    public AgentRunner.ScheduledTask scheduledTask() {
+      return scheduledTask;
     }
 
     @Override
@@ -1025,6 +1035,103 @@ class HookedRunTest {
         TurnCap.none(),
         List.of(),
         "alice");
+  }
+
+  @Test
+  void only_a_scheduled_firing_carries_its_saved_task_to_web_review_and_orchestration_start()
+      throws Exception {
+    String task = "Find and review public legal reporting";
+    String rendered = task + "\n\nEvent data must remain separate from authority";
+    var definition = agent("contrarian").withTools(List.of(SearchTool.NAME));
+    var trigger =
+        new TriggerRecord(
+            "daily",
+            "daily",
+            "fixture",
+            null,
+            definition.name(),
+            task,
+            null,
+            null,
+            1,
+            false,
+            "alice");
+    for (var event :
+        List.of(
+            new EventPayload.Scheduled("daily", Instant.EPOCH),
+            new EventPayload.Text("Manually supplied event data"))) {
+      boolean scheduled = event instanceof EventPayload.Scheduled;
+      var log = new Recorded();
+      log.origin = Origin.EVENT;
+      log.speaker = Speaker.event("daily");
+      var firing = mock(FiringRecord.class);
+      when(firing.data()).thenReturn(event);
+      var callers = mock(Callers.class);
+      when(callers.requireAgent(eq(definition.name()), isNull())).thenReturn(definition);
+      var jobs = mock(JobStore.class);
+      when(jobs.submitTriggeredEvent(
+              eq(definition),
+              eq(rendered),
+              eq(Home.of("fixture")),
+              isNull(),
+              isNull(),
+              any(),
+              eq("alice"),
+              eq(log.speaker),
+              any(),
+              nullable(AgentRunner.ScheduledTask.class)))
+          .thenAnswer(
+              call -> {
+                log.scheduledTask = call.getArgument(9);
+                return new JobStore.EventRun("job", log.conversationId());
+              });
+      new AgentRunner(callers, jobs, mock(Turn.class))
+          .start(trigger, firing, rendered, (id, outcome) -> {});
+
+      var service = mock(SearchService.class);
+      when(service.search(eq("scope"), eq(10), eq(30), eq(1), any()))
+          .thenReturn(new SearchPage(List.of(), 1, 10, 0, false, null));
+      var reviews = webReviews(WebToolReviews.Gate.ALLOW);
+      var model =
+          new Scripted()
+              .then(() -> asking(new ToolCall("s1", SearchTool.NAME, "{\"query\":\"scope\"}")));
+      var runtime = webRuntime(model, reviews, new SearchTool(service));
+      var launch = new AtomicReference<RunExtras.Context>();
+      runtime.useRunExtras(
+          context -> {
+            launch.set(context);
+            return RunExtras.Extras.NONE;
+          });
+      assertEquals(
+          Outcome.Ending.ANSWERED,
+          runtime
+              .run(
+                  definition,
+                  rendered,
+                  Home.of("fixture"),
+                  Budget.of(20),
+                  () -> false,
+                  null,
+                  JobWatch.UNWATCHED,
+                  log,
+                  TurnCap.none(),
+                  List.of(),
+                  "alice")
+              .ending());
+      assertEquals(scheduled ? task : null, launch.get().authenticatedWebTask());
+      if (scheduled) {
+        verify(reviews).gate(argThat(context -> task.equals(context.task())), any(), any(), any());
+        verify(service).search(eq("scope"), eq(10), eq(30), eq(1), any());
+      } else {
+        verifyNoInteractions(reviews, service);
+        assertTrue(
+            log.entries.stream()
+                .anyMatch(
+                    e ->
+                        e.kind() == EntryKind.DIAGNOSTIC
+                            && e.content().contains("task_context_missing")));
+      }
+    }
   }
 
   @Test

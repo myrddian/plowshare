@@ -10,6 +10,7 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnHistoryRepository;
 import io.aeyer.plowshare.server.archive.TurnRecord;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.Content;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
@@ -511,6 +512,21 @@ public final class Turn {
       Speaker speaker,
       Consumer<Outcome> ended,
       String executor) {
+    return speakForExecutor(
+        conversation, definition, utterance, sessionId, turnCap, speaker, ended, executor, null);
+  }
+
+  /** The schedule's own instruction is supplied separately from the rendered event message. */
+  public String speakForExecutor(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Speaker speaker,
+      Consumer<Outcome> ended,
+      String executor,
+      ScheduledTask scheduled) {
     if (executor == null || executor.isBlank()) throw new Refused("An event executor is required");
     Objects.requireNonNull(definition);
     Objects.requireNonNull(speaker);
@@ -528,7 +544,9 @@ public final class Turn {
         speaker,
         null,
         null,
-        executor);
+        executor,
+        null,
+        scheduled);
   }
 
   /**
@@ -1415,6 +1433,40 @@ public final class Turn {
       RunAdmission admission,
       String executor,
       RelayCausation causation) {
+    return speak(
+        conversation,
+        definition,
+        utterance,
+        sessionId,
+        turnCap,
+        maxModelCalls,
+        alsoEnded,
+        admissible,
+        incoming,
+        speaker,
+        given,
+        admission,
+        executor,
+        causation,
+        null);
+  }
+
+  private String speak(
+      String conversation,
+      AgentDefinition definition,
+      String utterance,
+      String sessionId,
+      TurnCap turnCap,
+      Integer maxModelCalls,
+      Consumer<Outcome> alsoEnded,
+      Consumer<ConversationRecord> admissible,
+      boolean incoming,
+      Speaker speaker,
+      Budget given,
+      RunAdmission admission,
+      String executor,
+      RelayCausation causation,
+      ScheduledTask scheduled) {
     ConversationRecord record =
         conversations
             .find(conversation)
@@ -1522,6 +1574,7 @@ public final class Turn {
           causation == null
               ? compaction.transcriptFor(id, definition, speaker)
               : compaction.transcriptFor(id, definition, speaker, causation);
+      if (scheduled != null) transcript.prepareScheduledTask(scheduled);
       var budgetContinuation = continuation(id).restoring(id);
       if (budgetContinuation.isPresent()) {
         var frame = budgetContinuation.get();

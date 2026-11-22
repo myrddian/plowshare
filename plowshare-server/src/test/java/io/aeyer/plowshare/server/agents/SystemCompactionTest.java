@@ -396,7 +396,7 @@ class SystemCompactionTest {
       when(conversations.lifecycleOf("conversation"))
           .thenReturn(Optional.of(ConversationLifecycle.ACTIVE));
       when(parent.conversationId()).thenReturn("conversation");
-      when(models.streamFold(any(), any(), any())).thenAnswer(call -> answer(call.getArgument(0)));
+      when(models.streamSkillSummary(any(), any())).thenAnswer(call -> answer(call.getArgument(0)));
       when(models.streamFold(any(), any())).thenAnswer(call -> answer(call.getArgument(0)));
       compaction =
           new Compaction(

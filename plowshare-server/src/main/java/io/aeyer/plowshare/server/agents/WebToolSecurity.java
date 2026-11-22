@@ -140,8 +140,19 @@ final class WebToolSecurity {
       Gate gate;
       try {
         requireActive(work);
-        if (context.conversation() == null || context.task() == null || context.task().isBlank())
-          throw new IllegalStateException("Authenticated web task is unavailable");
+        if (context.conversation() == null || context.task() == null || context.task().isBlank()) {
+          note(
+              tool,
+              auditId,
+              requestDigest,
+              null,
+              "DENY",
+              "task_context_missing",
+              null,
+              List.of(),
+              null);
+          return Plan.refusal("Web request denied. The run has no authenticated web task.");
+        }
         policy = reviews.policy(context, intent.operation().verb(), work);
         if (request.challenge() != null) {
           Challenge challenge = pending.remove(request.challenge());
