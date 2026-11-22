@@ -566,7 +566,8 @@ export async function protocolFixture(options = {}) {
         }
         case 'conversation.trajectory': {
           const log = entries.get(payload.conversation) ?? [];
-          const rows = payload.before !== undefined ? log.filter(row => row.ordinal < payload.before) : payload.after !== undefined ? log.filter(row => row.ordinal > payload.after) : log;
+          const matching = payload.kinds?.length ? log.filter(row => payload.kinds.includes(row.kind)) : log;
+          const rows = payload.before !== undefined ? matching.filter(row => row.ordinal < payload.before) : payload.after !== undefined ? matching.filter(row => row.ordinal > payload.after) : matching;
           const offset = payload.offset ?? 0; const limit = payload.limit ?? 100;
           const selected = payload.tail || payload.before !== undefined ? rows.slice(-limit).reverse() : rows.slice(offset, offset + limit);
           result.payload = entryPageWire(selected.map(row => entryWire(row.ordinal, row.kind, row.excerpt ?? '', row)), log.at(-1)?.ordinal ?? 0, { total: rows.length, offset, limit, more: payload.tail || payload.before !== undefined ? rows.length > limit : null }); break;
@@ -852,7 +853,7 @@ export async function protocolFixture(options = {}) {
     failLatest(text) {
       const job = [...jobs.values()].at(-1);
       const log = entries.get(job.conversation);
-      log.push({ordinal:(log.at(-1)?.ordinal ?? 0)+1,turnOrdinal:job.turnOrdinal,kind:'attempt_failed',state:'stands',excerpt:text});
+      log.push({ordinal:(log.at(-1)?.ordinal ?? 0)+1,turnOrdinal:job.turnOrdinal,kind:'attempt_failed',state:'stands',job:job.id,excerpt:`UNAVAILABLE: ${text}`});
       finish(job, 'UNAVAILABLE', text, null, true);
       grew(job.conversation);
     },

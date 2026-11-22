@@ -103,6 +103,7 @@ import {
   followingLogs,
   readingTrace,
   measuring,
+  LOG_PAGE,
   readingLogTail,
   readingLogBefore,
   listingMyApprovals,
@@ -115,12 +116,14 @@ import {
   agents,
   opened,
   backPageOf,
+  entriesOf,
   streamed,
   approvalsOf,
   answeredOf,
   appendedOf,
   logThrough,
 } from 'plowshare-client-ts/operations/views';
+import type { Entry } from 'plowshare-client-ts/operations/views';
 import { loadOf, reached } from 'plowshare-client-ts/operations/inspection';
 import { BoardClient } from './board.ts';
 import { emptyBoard } from './board-shared.ts';
@@ -2592,6 +2595,9 @@ export class DesktopClient {
               : { through: previous.through }
             : { through }),
         };
+        for (const job of this.state.jobs)
+          if (job.conversation === id)
+            this.recordMissingJobEnding(job, held.values());
         if (before === undefined && latest > (through ?? 0))
           this.dirtyHistories.add(id);
         this.emit();
@@ -3009,6 +3015,55 @@ export class DesktopClient {
     clearInterval(this.timers.get(id));
     this.timers.delete(id);
   }
+  private recordMissingJobEnding(job: Job, entries: Iterable<Entry>): boolean {
+    if (job.status !== 'unavailable') return false;
+    for (const entry of entries) {
+      if (entry.kind !== 'attempt_failed' || entry.job !== job.id) continue;
+      // The harness writes this entry with the exact Ending enum as its prefix.
+      // A closing entry establishes the outcome, but carries no retry offer.
+      const match =
+        /^(TURN_CAP|CALL_BUDGET|CANCELLED|STUCK|UNAVAILABLE|SUB_AGENT_FAILED|SESSION_GONE|CALL_FAILURES): (.*)/s.exec(
+          entry.text ?? '',
+        );
+      const ending = match?.[1];
+      if (!ending) continue;
+      job.status = 'finished';
+      job.answered = false;
+      job.resumable = false;
+      job.ending = ending;
+      job.text = match[2] ?? '';
+      delete job.detail;
+      return true;
+    }
+    return false;
+  }
+  private async reconcileMissingJob(job: Job, generation: number) {
+    await this.catchUp(job.conversation);
+    if (
+      generation !== this.generation ||
+      job.status !== 'unavailable' ||
+      !this.state.history[job.conversation]?.more
+    )
+      return;
+    // Later turns can push the receipt out of the normal log tail. Read a
+    // bounded page of closing records only, without changing the chat cursor.
+    const answer = ok(
+      await this.send(
+        request('conversation.trajectory', {
+          conversation: job.conversation,
+          kinds: ['attempt_failed'],
+          tail: true,
+          limit: LOG_PAGE,
+        }),
+        { timeoutMs: 2000 },
+      ),
+    );
+    if (
+      generation === this.generation &&
+      this.recordMissingJobEnding(job, entriesOf(answer))
+    )
+      this.emit();
+  }
   private async readJob(id: string) {
     const generation = this.generation;
     const job = this.state.jobs.find((row) => row.id === id);
@@ -3032,8 +3087,13 @@ export class DesktopClient {
       job.detail = 'The server no longer has live status for this job.';
       delete job.thinking;
       delete job.thinkingTruncated;
+      this.recordMissingJobEnding(
+        job,
+        this.state.history[job.conversation]?.entries ?? [],
+      );
       this.emit();
-      if (job.conversation) this.background(this.catchUp(job.conversation));
+      if (job.conversation)
+        this.background(this.reconcileMissingJob(job, generation));
       return;
     }
     ok(answer);

@@ -3692,7 +3692,9 @@
         }
       ],
       "desktopConsumer": true,
-      "desktopSourceReferences": [],
+      "desktopSourceReferences": [
+        "plowshare-desktop/src/client.ts"
+      ],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
