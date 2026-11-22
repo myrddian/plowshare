@@ -2,9 +2,11 @@ package io.aeyer.plowshare.server.llm.dispatch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException.TimeoutOperation;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 /** Routing: a specifier in, a pool and a wire model out. */
 class LlmDispatcherTest {
@@ -66,6 +69,68 @@ class LlmDispatcherTest {
       dispatcher.streamFold(ChatRequest.of("model", null, "hello"), Deltas.DISCARDING);
       assertEquals(Duration.ofMinutes(10), transport.lastTimeout);
     }
+  }
+
+  @Test
+  void stream_timeouts_report_the_dispatch_operation_and_preserve_transport_details() {
+    FakeTransport transport = FakeTransport.free("one");
+    var expired =
+        LlmTransportException.timedOut("stream deadline (HTTP phase: response_headers)", null);
+    transport.failWith = expired;
+    try (LlmDispatcher dispatcher =
+        new LlmDispatcher(
+            List.of(pool("one", List.of("model"), Map.of(), FIVE_SECONDS, transport)),
+            new NoOpTokenLedger(),
+            ignored -> "",
+            InferenceAccounting.NONE,
+            Duration.ofSeconds(60),
+            Duration.ofSeconds(160))) {
+      ChatRequest request = ChatRequest.of("model", null, "hello");
+      assertTimeout(
+          TimeoutOperation.PROMPT,
+          "Prompt",
+          expired,
+          () -> dispatcher.stream(request, Deltas.DISCARDING));
+      assertTimeout(
+          TimeoutOperation.PROMPT,
+          "Prompt",
+          expired,
+          () -> dispatcher.streamOn("one", request, Deltas.DISCARDING, () -> false));
+      assertTimeout(
+          TimeoutOperation.REVIEW,
+          "Security review",
+          expired,
+          () -> dispatcher.streamReview(request, () -> false));
+      assertEquals(Duration.ofSeconds(60), transport.lastTimeout);
+      assertTimeout(
+          TimeoutOperation.FOLD,
+          "Conversation fold",
+          expired,
+          () -> dispatcher.streamFold(request, Deltas.DISCARDING));
+      assertTimeout(
+          TimeoutOperation.SKILL_SUMMARY,
+          "Skill summary",
+          expired,
+          () -> dispatcher.streamSkillSummary(request, () -> false));
+      assertEquals(Duration.ofSeconds(160), transport.lastTimeout);
+
+      var disconnected = new LlmTransportException("connection reset");
+      transport.failWith = disconnected;
+      assertSame(
+          disconnected,
+          assertThrows(
+              LlmTransportException.class,
+              () -> dispatcher.streamFold(request, Deltas.DISCARDING)));
+    }
+  }
+
+  private static void assertTimeout(
+      TimeoutOperation operation, String label, LlmTransportException original, Executable call) {
+    var failure = assertThrows(LlmTransportException.class, call);
+    assertTrue(failure.timedOut());
+    assertEquals(operation, failure.timeoutOperation().orElseThrow());
+    assertEquals(label + " timed out: " + original.getMessage(), failure.getMessage());
+    assertSame(original, failure.getCause());
   }
 
   @Test

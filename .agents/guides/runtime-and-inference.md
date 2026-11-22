@@ -93,6 +93,10 @@ Unconfigured providers/profiles keep their behavior; unsupported reasoning limit
 See [model profiles](../../docs/model-profiles.md#vllm-thinking-budgets-and-reasoning-recovery)
 and [ADR 0075](../../docs/decisions/0075-bounded-reasoning-recovery.md).
 
+The dispatcher labels streamed completion timeouts by their operation. Skill
+summaries share the fold budget and report a skill-summary timeout. Conversation
+folds, prompts, and SECURITY reviews have their own timeout descriptions.
+
 ## Model-output recovery
 
 `ModelOutputRecovery` and its sandbox `modelOutput.recover` bridge implement the

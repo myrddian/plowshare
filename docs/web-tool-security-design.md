@@ -278,7 +278,11 @@ state into a continuation of the same run.
 
 Orchestrations pin authenticated task intent when they start. Nested launches carry
 that intent into the child for the same execution account. Agent-generated handoffs
-stay separate from the task that can authorize a request. The script journal
+stay separate from the task that can authorize a request. For an admitted scheduled
+agent run, the runtime supplies the saved instruction under its execution owner.
+The event payload remains data. SECURITY receives the already-granted tool name
+and evaluates the specific outbound request against that task and policy.
+The script journal
 records held web output with its review receipt in the same write. Before a resumed
 script invokes `tool.post`, the runtime checks the receipt, policy and expiry again.
 The hook's final output is inspected before reaching the script. Release notifications

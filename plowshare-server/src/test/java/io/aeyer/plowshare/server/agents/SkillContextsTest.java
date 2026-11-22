@@ -11,7 +11,6 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
-import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.util.List;
@@ -98,12 +97,12 @@ class SkillContextsTest {
                 1L);
     when(parent.usage()).thenReturn(owner);
     java.util.function.BooleanSupplier cancel = () -> false;
-    when(models.streamFold(any(), eq(Deltas.DISCARDING), same(cancel)))
+    when(models.streamSkillSummary(any(), same(cancel)))
         .thenReturn(new Completion("Parent summary", "stop", TokenUsage.UNKNOWN, List.of()));
     assertEquals(
         "Parent summary", compaction.summaryForSkill("Historical log data", parent, cancel));
     var request = ArgumentCaptor.forClass(ChatRequest.class);
-    verify(models).streamFold(request.capture(), eq(Deltas.DISCARDING), same(cancel));
+    verify(models).streamSkillSummary(request.capture(), same(cancel));
     assertEquals(
         owner.forOperation(UsageAttribution.Operation.FOLD, folder.name()),
         request.getValue().attribution());

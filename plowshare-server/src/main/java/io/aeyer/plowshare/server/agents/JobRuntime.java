@@ -809,6 +809,9 @@ public final class JobRuntime {
     String authenticated =
         authenticatedApprovalTask(
             transcript.speaker(), owner, utterance, transcript.inputProvenance());
+    var scheduled = transcript.scheduledTask();
+    if (scheduled != null && scheduled.owner().equals(owner))
+      authenticated = scheduled.instruction();
     if (transcript.origin() == Origin.ORCHESTRATION) {
       authenticated = retainedWebTask(owner, transcript, scripted, authenticated);
     }

@@ -3,7 +3,7 @@ package io.aeyer.plowshare.server.events;
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Callers;
-import io.aeyer.plowshare.server.agents.JobStore;
+import io.aeyer.plowshare.server.agents.EventRuns;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.Turn;
@@ -22,11 +22,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 /** The production Runner: the same doors a person's run goes through, with no session. */
 public final class AgentRunner implements Dispatcher.Runner {
 
+  /** Instruction from a saved schedule, minted only on the server's scheduled firing path. */
+  public sealed interface ScheduledTask permits SavedTask {
+    String owner();
+
+    String instruction();
+  }
+
+  private record SavedTask(String owner, String instruction) implements ScheduledTask {}
+
   private final Callers callers;
-  private final JobStore jobs;
+  private final EventRuns jobs;
   private final Turn turns;
 
-  public AgentRunner(Callers callers, JobStore jobs, Turn turns) {
+  public AgentRunner(Callers callers, EventRuns jobs, Turn turns) {
     this.callers = Objects.requireNonNull(callers, "callers");
     this.jobs = Objects.requireNonNull(jobs, "jobs");
     this.turns = Objects.requireNonNull(turns, "turns");
@@ -67,7 +76,8 @@ public final class AgentRunner implements Dispatcher.Runner {
     if (managed.isEmpty()) {
       if (configured != null && configured.requiresDefinition(trigger.name(), trigger.definedBy()))
         throw new IllegalStateException("The registered schedule source is missing");
-      return new Dispatcher.Started.Job(start(trigger, utterance, ended));
+      return new Dispatcher.Started.Job(
+          start(trigger, utterance, null, ended, scheduledTask(trigger, firing, trigger.task())));
     }
     var file = managed.get();
     if (!file.status().equals("active") || file.definition() == null || file.definition().paused())
@@ -102,14 +112,20 @@ public final class AgentRunner implements Dispatcher.Runner {
       return new Dispatcher.Started.Message(task.message());
     }
     // Explicit command inputs are pinned as written; event metadata never becomes skill arguments.
+    var action = file.definition().action();
+    String task = action.utterance();
+    boolean agentAction = action.kind().equals("agent");
     return new Dispatcher.Started.Job(
         start(
             trigger,
-            file.definition().action().kind().equals("agent")
-                ? utterance
-                : file.definition().action().utterance(),
+            agentAction ? utterance : task,
             configured.executionSession(source),
-            ended));
+            ended,
+            // An agent's rendered input came from the trigger snapshot. Do not vouch for it
+            // if the registered definition changed in the meantime.
+            agentAction && !task.equals(trigger.task())
+                ? null
+                : scheduledTask(trigger, firing, task)));
   }
 
   @Override
@@ -123,11 +139,22 @@ public final class AgentRunner implements Dispatcher.Runner {
 
   @Override
   public String start(TriggerRecord trigger, String utterance, BiConsumer<String, Outcome> ended) {
-    return start(trigger, utterance, null, ended);
+    return start(trigger, utterance, null, ended, null);
+  }
+
+  private static ScheduledTask scheduledTask(
+      TriggerRecord trigger, FiringRecord firing, String task) {
+    return firing.data() instanceof EventPayload.Scheduled && trigger.definedBy() != null
+        ? new SavedTask(trigger.definedBy(), task)
+        : null;
   }
 
   private String start(
-      TriggerRecord trigger, String utterance, String session, BiConsumer<String, Outcome> ended) {
+      TriggerRecord trigger,
+      String utterance,
+      String session,
+      BiConsumer<String, Outcome> ended,
+      ScheduledTask scheduled) {
     if (trigger.conversation() == null) {
       TurnCap cap = RequestedTurnCap.in(trigger.maxTurns(), null, "this trigger's run");
       var home =
@@ -138,7 +165,7 @@ public final class AgentRunner implements Dispatcher.Runner {
       AgentDefinition definition =
           callers.requireAgent(
               trigger.agent(), callers.callerFor(home.project(), session, trigger.definedBy()));
-      return jobs.submitEvent(
+      return jobs.submitTriggeredEvent(
               definition,
               utterance,
               home,
@@ -147,7 +174,8 @@ public final class AgentRunner implements Dispatcher.Runner {
               cap,
               trigger.definedBy(),
               Speaker.event(trigger.name()),
-              ended)
+              ended,
+              scheduled)
           .id();
     }
     String conversation = trigger.conversation();
@@ -168,6 +196,7 @@ public final class AgentRunner implements Dispatcher.Runner {
         null,
         Speaker.event(trigger.name()),
         outcome -> ended.accept(conversation, outcome),
-        trigger.definedBy());
+        trigger.definedBy(),
+        scheduled);
   }
 }

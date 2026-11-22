@@ -21,9 +21,11 @@ import io.aeyer.plowshare.server.agents.TurnCap;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.messaging.MessageIngress;
 import io.aeyer.plowshare.server.messaging.MessageService;
+import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 class AgentRunnerTest {
@@ -36,7 +38,7 @@ class AgentRunnerTest {
     DefinitionResolver.Caller caller = mock(DefinitionResolver.Caller.class);
     when(callers.callerFor("payments", null, "enzo")).thenReturn(caller);
     when(callers.requireAgent("coder", caller)).thenReturn(definition);
-    when(jobs.submitEvent(
+    when(jobs.submitTriggeredEvent(
             eq(definition),
             eq("go"),
             eq(Home.of("payments")),
@@ -45,7 +47,8 @@ class AgentRunnerTest {
             any(TurnCap.class),
             eq("enzo"),
             eq(Speaker.event("daily")),
-            any()))
+            any(),
+            isNull()))
         .thenReturn(new JobStore.EventRun("job_1", "cnv_event"));
 
     new AgentRunner(callers, jobs, mock(Turn.class))
@@ -56,7 +59,7 @@ class AgentRunnerTest {
             (conversation, outcome) -> {});
 
     verify(jobs)
-        .submitEvent(
+        .submitTriggeredEvent(
             eq(definition),
             eq("go"),
             eq(Home.of("payments")),
@@ -65,7 +68,8 @@ class AgentRunnerTest {
             any(TurnCap.class),
             eq("enzo"),
             eq(Speaker.event("daily")),
-            any());
+            any(),
+            isNull());
   }
 
   /**
@@ -92,7 +96,8 @@ class AgentRunnerTest {
             isNull(),
             eq(Speaker.event("aimed")),
             any(),
-            eq("enzo"));
+            eq("enzo"),
+            isNull());
     verify(callers).requireConversationWork("cnv_talk", "enzo");
   }
 
@@ -159,7 +164,7 @@ class AgentRunnerTest {
     var agent = mock(AgentDefinition.class);
     when(callers.callerFor("project", "live-session", "owner")).thenReturn(caller);
     when(callers.requireAgent("worker", caller)).thenReturn(agent);
-    when(jobs.submitEvent(
+    when(jobs.submitTriggeredEvent(
             eq(agent),
             eq("/skill:review --mode=NEW exact\narguments"),
             eq(Home.of("project")),
@@ -168,10 +173,13 @@ class AgentRunnerTest {
             any(),
             eq("owner"),
             any(),
+            any(),
             any()))
         .thenReturn(new JobStore.EventRun("job", "conversation"));
     var runner = new AgentRunner(callers, jobs, mock(Turn.class));
     runner.useSchedules(() -> definitions, () -> authority, () -> null);
+    var firing = mock(FiringRecord.class);
+    when(firing.data()).thenReturn(new EventPayload.Scheduled("daily", Instant.EPOCH));
     runner.start(
         new TriggerRecord(
             "daily",
@@ -185,12 +193,13 @@ class AgentRunnerTest {
             1,
             false,
             "owner"),
-        mock(FiringRecord.class),
+        firing,
         "event metadata must not become command input",
         (c, o) -> {});
     verify(authority).validate(source, work);
+    var task = ArgumentCaptor.forClass(AgentRunner.ScheduledTask.class);
     verify(jobs)
-        .submitEvent(
+        .submitTriggeredEvent(
             eq(agent),
             eq("/skill:review --mode=NEW exact\narguments"),
             eq(Home.of("project")),
@@ -199,7 +208,10 @@ class AgentRunnerTest {
             any(),
             eq("owner"),
             any(),
-            any());
+            any(),
+            task.capture());
+    Assertions.assertEquals("owner", task.getValue().owner());
+    Assertions.assertEquals(work.action().utterance(), task.getValue().instruction());
   }
 
   @Test
