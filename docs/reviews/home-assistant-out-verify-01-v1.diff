@@ -1,0 +1,2359 @@
+diff --git a/integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java b/integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java
+new file mode 100644
+index 00000000..af4f00b0
+--- /dev/null
++++ b/integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java
+@@ -0,0 +1,550 @@
++package io.aeyer.plowshare.integrations.ha;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++import com.fasterxml.jackson.core.type.TypeReference;
++import com.fasterxml.jackson.databind.JsonNode;
++import com.fasterxml.jackson.databind.node.ObjectNode;
++import io.aeyer.plowshare.integrations.Json;
++import io.aeyer.plowshare.protocol.RelayLog;
++import io.aeyer.plowshare.protocol.RelayPort;
++import io.aeyer.plowshare.protocol.SchemaCodec;
++import io.aeyer.plowshare.protocol.transport.MessageSegment;
++import io.aeyer.plowshare.protocol.transport.PacketBudget;
++import io.aeyer.plowshare.protocol.transport.PacketWire;
++import io.aeyer.plowshare.protocol.transport.SegmentCredit;
++import io.aeyer.plowshare.protocol.transport.SegmentedMessages;
++import io.aeyer.plowshare.sdk.RelayTools;
++import java.io.IOException;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.time.Instant;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.UUID;
++import java.util.concurrent.ArrayBlockingQueue;
++import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.concurrent.atomic.AtomicReference;
++import java.util.stream.Collectors;
++import okhttp3.Response;
++import okhttp3.WebSocket;
++import okhttp3.WebSocketListener;
++import okhttp3.mockwebserver.Dispatcher;
++import okhttp3.mockwebserver.MockResponse;
++import okhttp3.mockwebserver.MockWebServer;
++import okhttp3.mockwebserver.RecordedRequest;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.Timeout;
++import org.junit.jupiter.api.io.TempDir;
++
++/**
++ * Actual operator composition, default segmented/concurrent SDK and native HA sockets. The local
++ * broker deliberately supplies scripted outcomes; it proves wire/recovery contracts, not live
++ * server authorization, model execution or device behavior.
++ */
++@Timeout(20)
++class OutboundProviderSdkValidationTest {
++  private static final String PRINCIPAL = "fixture-execution";
++  @TempDir Path directory;
++
++  @Test
++  void bothCataloguesUseOneDefaultSdkConnectionAndTheirDistinctLogicalBindings() throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.EMPTY)) {
++      var configuration = configuration(ha, broker);
++      try (var host = HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        host.cycle();
++        assertEquals(1, broker.connections.get());
++        assertEquals(1, ha.connections.get());
++        assertEquals(1, broker.count("transport.dispatch"));
++        assertEquals(2, broker.catalogues().size());
++        assertEquals(
++            Set.of("tool.ha-read.catalog", "tool.ha-control.catalog"),
++            broker.catalogues().stream()
++                .map(value -> value.path("topic").textValue())
++                .collect(Collectors.toSet()));
++        for (JsonNode publication : broker.catalogues()) {
++          assertEquals(configuration.read().project(), publication.path("project").textValue());
++          var catalogue = Json.parse(publication.path("text").textValue());
++          boolean read = publication.path("topic").textValue().equals("tool.ha-read.catalog");
++          Set<String> names = new HashSet<>();
++          catalogue.path("tools").forEach(tool -> names.add(tool.path("name").textValue()));
++          assertEquals(
++              read
++                  ? Set.of(
++                      "ha_read_search", "ha_read_describe", "ha_read_read", "ha_read_list_actions")
++                  : Set.of("ha_control_describe_action", "ha_control_execute_action"),
++              names);
++        }
++        assertEquals(6, broker.count("relay.consume"));
++        assertEquals(0, ha.count("call_service"));
++      }
++      // Normal shutdown withdraws each catalogue under a fresh logical publication identity.
++      assertEquals(4, broker.catalogues().size());
++      assertEquals(
++          4,
++          broker.catalogues().stream()
++              .map(value -> value.path("requestId").textValue())
++              .distinct()
++              .count());
++      List<JsonNode> withdrawals = broker.catalogues().subList(2, 4);
++      assertEquals(
++          Set.of("tool.ha-read.catalog", "tool.ha-control.catalog"),
++          withdrawals.stream()
++              .map(value -> value.path("topic").textValue())
++              .collect(Collectors.toSet()));
++      for (JsonNode withdrawal : withdrawals) {
++        JsonNode tools = Json.parse(withdrawal.path("text").textValue()).path("tools");
++        assertTrue(tools.isArray());
++        assertEquals(0, tools.size());
++      }
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  @Test
++  void lostCatalogueAcknowledgementRetainsOriginalIntentWithoutPollActionOrReconnect()
++      throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.LOSE_CATALOGUE)) {
++      var configuration = configuration(ha, broker);
++      try (var host = HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, host::cycle);
++        assertThrows(IOException.class, host::cycle);
++        assertEquals(1, broker.connections.get());
++        assertEquals(1, broker.catalogues().size());
++        assertEquals(0, broker.count("relay.consume"));
++        assertEquals(0, ha.count("call_service"));
++      }
++      JsonNode retained =
++          Json.parse(Files.readString(configuration.read().journal().resolve("tools.json")));
++      String original = broker.catalogues().getFirst().path("requestId").textValue();
++      assertEquals(
++          original, retained.path("publishing").path("request").path("requestId").textValue());
++      assertTrue(retained.path("confirmed").isNull());
++
++      // This second host is an explicit operator restart, not automatic connection recovery.
++      // The broker cannot confirm the original event; absence must not authorize a replacement.
++      try (var restarted =
++          HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, restarted::cycle);
++      }
++      assertEquals(2, broker.connections.get());
++      assertEquals(1, broker.count("relay.log"));
++      assertEquals(1, broker.catalogues().size());
++      assertEquals(0, broker.count("relay.consume"));
++      assertEquals(0, ha.count("call_service"));
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  @Test
++  void readHandlerCrossesBothRealProtocolsAndLostResultAckNeverRepeatsCollection()
++      throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.LOSE_READ_RESULT)) {
++      var configuration = configuration(ha, broker);
++      try (var host = HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, host::cycle);
++        assertEquals(1, broker.results().size());
++        JsonNode publication = broker.results().getFirst();
++        assertEquals(broker.invocation, publication.path("correlationId").textValue());
++        assertEquals(broker.invocation, publication.path("parentEventId").textValue());
++        JsonNode result = Json.parse(publication.path("text").textValue());
++        assertEquals("COMPLETED", result.path("state").textValue());
++        assertTrue(result.path("text").textValue().contains("lamp"));
++        assertEquals(1, ha.count("config/entity_registry/list"));
++        assertEquals(0, ha.count("call_service"));
++        assertThrows(IOException.class, host::cycle);
++      }
++      long collected = ha.count("config/entity_registry/list");
++      String original = broker.results().getFirst().path("requestId").textValue();
++      try (var restarted =
++          HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, restarted::cycle);
++      }
++      assertEquals(2, broker.connections.get());
++      assertTrue(broker.count("relay.log") > 0);
++      assertEquals(1, broker.results().size());
++      assertEquals(original, broker.results().getFirst().path("requestId").textValue());
++      assertEquals(collected, ha.count("config/entity_registry/list"));
++      assertEquals(0, ha.count("call_service"));
++      JsonNode retained =
++          Json.parse(Files.readString(configuration.read().journal().resolve("tools.json")));
++      assertEquals("PUBLISHING", retained.path("receipts").get(0).path("phase").textValue());
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  private HomeAssistantProviderConfiguration configuration(HaPeer ha, BrokerPeer broker)
++      throws IOException {
++    Path examples = Path.of(System.getProperty("integration.examples"));
++    ObjectNode value =
++        (ObjectNode)
++            Json.parse(Files.readString(examples.resolve("outbound/control/provider.json")));
++    value.put("plowshare", broker.server.url("/").toString());
++    ((ObjectNode) value.path("homeAssistant")).put("endpoint", ha.server.url("/").toString());
++    ((ObjectNode) value.path("read")).put("account", PRINCIPAL);
++    ((ObjectNode) value.path("control")).put("account", PRINCIPAL);
++    ((ObjectNode) value.path("timing")).put("connectTimeoutMillis", 2000);
++    Path config = directory.toRealPath().resolve("provider.json");
++    Files.writeString(config, value.toString());
++    return HomeAssistantProviderConfiguration.read(config);
++  }
++
++  private enum Mode {
++    EMPTY,
++    LOSE_CATALOGUE,
++    LOSE_READ_RESULT
++  }
++
++  /** Native fixture accepts only the explicit startup/resource protocol used by this test. */
++  private static final class HaPeer extends WebSocketListener implements AutoCloseable {
++    final MockWebServer server = new MockWebServer();
++    final AtomicInteger connections = new AtomicInteger();
++    final List<JsonNode> requests = new CopyOnWriteArrayList<>();
++    final AtomicReference<Throwable> failure = new AtomicReference<>();
++
++    HaPeer() throws IOException {
++      server.setDispatcher(
++          new Dispatcher() {
++            @Override
++            public MockResponse dispatch(RecordedRequest request) {
++              assertEquals("/api/websocket", request.getPath());
++              return new MockResponse().withWebSocketUpgrade(HaPeer.this);
++            }
++          });
++      server.start();
++    }
++
++    @Override
++    public void onOpen(WebSocket socket, Response response) {
++      connections.incrementAndGet();
++      socket.send("{\"type\":\"auth_required\"}");
++    }
++
++    @Override
++    public void onMessage(WebSocket socket, String text) {
++      try {
++        JsonNode request = Json.parse(text);
++        requests.add(request);
++        String type = request.path("type").textValue();
++        if (type.equals("auth")) {
++          assertEquals("fixture-token", request.path("access_token").textValue());
++          socket.send("{\"type\":\"auth_ok\"}");
++          return;
++        }
++        JsonNode payload =
++            switch (type) {
++              case "subscribe_events" -> Json.object();
++              case "get_states" ->
++                  Json.parse(
++                      """
++            [{"entity_id":"light.example_lamp","state":"off","attributes":{"brightness":0},
++              "last_changed":"2026-11-22T00:00:00Z","last_updated":"2026-11-22T00:00:00Z"}]
++            """);
++              case "config/entity_registry/list" ->
++                  Json.parse(
++                      """
++            [{"entity_id":"light.example_lamp","name":"Fixture lamp","device_id":null,"area_id":null}]
++            """);
++              case "config/device_registry/list", "config/area_registry/list" ->
++                  Json.MAPPER.createArrayNode();
++              case "get_services" -> Json.parse("{\"light\":{\"turn_on\":{\"fields\":{}}}}");
++              default -> throw new AssertionError("Unexpected HA fixture operation: " + type);
++            };
++        ObjectNode reply = Json.object().put("type", "result").put("success", true);
++        reply.set("id", request.get("id"));
++        reply.set("result", payload);
++        socket.send(reply.toString());
++      } catch (Throwable invalid) {
++        failure.compareAndSet(null, invalid);
++        socket.close(1011, "fixture failed");
++      }
++    }
++
++    long count(String type) {
++      return requests.stream().filter(v -> type.equals(v.path("type").textValue())).count();
++    }
++
++    void healthy() {
++      assertTrue(failure.get() == null, () -> String.valueOf(failure.get()));
++    }
++
++    @Override
++    public void close() throws IOException {
++      server.close();
++    }
++  }
++
++  /** Actual segmented protocol, with scripted Relay outcomes and bounded fixture send ownership. */
++  private static final class BrokerPeer implements AutoCloseable {
++    final MockWebServer server = new MockWebServer();
++    final AtomicInteger connections = new AtomicInteger();
++    final List<JsonNode> requests = new CopyOnWriteArrayList<>();
++    final List<JsonNode> publications = new CopyOnWriteArrayList<>();
++    final List<SegmentedMessages> channels = new CopyOnWriteArrayList<>();
++    final AtomicReference<Throwable> failure = new AtomicReference<>();
++    final AtomicBoolean closing = new AtomicBoolean();
++    final AtomicBoolean offered = new AtomicBoolean();
++    final String invocation = UUID.randomUUID().toString();
++    final String generation = UUID.randomUUID().toString();
++    final ThreadPoolExecutor replies =
++        new ThreadPoolExecutor(
++            1,
++            1,
++            0,
++            TimeUnit.MILLISECONDS,
++            new ArrayBlockingQueue<>(16),
++            Thread.ofPlatform().daemon().name("outbound-sdk-fixture-", 0).factory());
++    final Mode mode;
++
++    BrokerPeer(Mode mode) throws IOException {
++      this.mode = mode;
++      server.setDispatcher(
++          new Dispatcher() {
++            @Override
++            public MockResponse dispatch(RecordedRequest request) {
++              assertTrue(request.getPath().startsWith("/v1/events?session="));
++              assertEquals("Bearer fixture-token", request.getHeader("Authorization"));
++              assertEquals(
++                  SegmentedMessages.SUBPROTOCOL, request.getHeader("Sec-WebSocket-Protocol"));
++              return new MockResponse()
++                  .setHeader("Sec-WebSocket-Protocol", SegmentedMessages.SUBPROTOCOL)
++                  .withWebSocketUpgrade(new Channel());
++            }
++          });
++      server.start();
++    }
++
++    private final class Channel extends WebSocketListener {
++      private SegmentedMessages packets;
++
++      @Override
++      public void onOpen(WebSocket socket, Response response) {
++        connections.incrementAndGet();
++        packets =
++            new SegmentedMessages(
++                new PacketWire() {
++                  @Override
++                  public void segment(MessageSegment packet) throws IOException {
++                    send(socket, packet);
++                  }
++
++                  @Override
++                  public void credit(SegmentCredit packet) throws IOException {
++                    send(socket, packet);
++                  }
++                },
++                new PacketBudget(1024 * 1024),
++                socket::cancel);
++        channels.add(packets);
++      }
++
++      @Override
++      public void onMessage(WebSocket socket, String text) {
++        try {
++          JsonNode packet = Json.parse(text);
++          switch (packet.path("kind").textValue()) {
++            case "transport.credit" ->
++                packets.credit(Json.MAPPER.treeToValue(packet, SegmentCredit.class));
++            case "transport.segment" -> {
++              var complete = packets.receive(Json.MAPPER.treeToValue(packet, MessageSegment.class));
++              if (complete.isPresent()) {
++                JsonNode request = Json.parse(complete.orElseThrow());
++                replies.execute(() -> respond(request));
++              }
++            }
++            default -> throw new AssertionError("Expected negotiated transport packet");
++          }
++        } catch (Throwable invalid) {
++          fail(socket, invalid);
++        }
++      }
++
++      private void respond(JsonNode request) {
++        try {
++          requests.add(request);
++          String type = request.path("type").textValue();
++          JsonNode value = request.path("payload");
++          Object payload =
++              switch (type) {
++                case "transport.dispatch" -> {
++                  assertEquals("concurrent-v1", value.path("mode").textValue());
++                  yield Json.object()
++                      .put("mode", "concurrent-v1")
++                      .put("maxPending", 64)
++                      .put("maxIdBytes", 128);
++                }
++                case "relay.publish" -> publication(value);
++                case "relay.consume" -> batch(value);
++                case "relay.ack" ->
++                    new RelayPort.Acknowledged(
++                        value.path("project").textValue(),
++                        value.path("topic").textValue(),
++                        value.path("group").textValue(),
++                        value.path("batchId").textValue(),
++                        "1",
++                        false);
++                case "relay.log" ->
++                    new RelayLog.Page(
++                        new RelayLog.Scope(value.path("project").textValue(), false),
++                        new RelayLog.Topic(
++                            value.path("topic").textValue(), "TEXT", "300", null, "0", "0"),
++                        "0",
++                        "0",
++                        null,
++                        List.of(),
++                        List.of(),
++                        List.of());
++                default -> throw new AssertionError("Unexpected SDK operation: " + type);
++              };
++          if (payload == null)
++            return; // Deliberately lost application reply; transport credit already succeeded.
++          ObjectNode reply =
++              Json.object().put("type", type).put("protocol_version", "plowshare-v1");
++          reply.set("id", request.get("id"));
++          reply.set(
++              "payload",
++              Json.object().put("code", "OK").set("payload", Json.MAPPER.valueToTree(payload)));
++          packets.send(reply.toString());
++        } catch (Throwable invalid) {
++          if (!closing.get()) failure.compareAndSet(null, invalid);
++        }
++      }
++    }
++
++    private Object publication(JsonNode value) {
++      publications.add(value.deepCopy());
++      boolean catalogue = value.path("topic").textValue().endsWith(".catalog");
++      if (mode == Mode.LOSE_CATALOGUE && catalogue || mode == Mode.LOSE_READ_RESULT && !catalogue)
++        return null;
++      return new RelayPort.Published(
++          value.path("requestId").textValue(),
++          value.path("project").textValue(),
++          value.path("topic").textValue(),
++          Long.toString(publications.size()),
++          Instant.now());
++    }
++
++    private RelayPort.Batch batch(JsonNode value) throws IOException {
++      String project = value.path("project").textValue(), topic = value.path("topic").textValue();
++      String group = value.path("group").textValue(),
++          consumer = value.path("consumerId").textValue();
++      if (mode != Mode.LOSE_READ_RESULT
++          || !topic.equals("tool.ha-read.ha_read_search.request")
++          || !offered.compareAndSet(false, true))
++        return new RelayPort.Batch(
++            project,
++            topic,
++            group,
++            consumer,
++            RelayPort.Status.EMPTY,
++            null,
++            null,
++            "0",
++            null,
++            null,
++            List.of());
++      JsonNode declaration =
++          Json.parse(catalogues().getFirst().path("text").textValue()).path("tools").get(0);
++      assertEquals("ha_read_search", declaration.path("name").textValue());
++      var schema =
++          SchemaCodec.decode(
++              Json.MAPPER.convertValue(
++                  declaration.path("inputSchema"), new TypeReference<Map<String, Object>>() {}));
++      var call =
++          new RelayTools.Call(
++              "plowshare-tool/2",
++              invocation,
++              project,
++              "ha-read",
++              "ha_read_search",
++              PRINCIPAL,
++              "fixture-job",
++              "fixture-call",
++              Instant.now().plusSeconds(30).toString(),
++              Map.of(),
++              SchemaCodec.fingerprint(schema));
++      var event =
++          new RelayLog.Event(
++              "1",
++              invocation,
++              "tool-runtime",
++              Instant.now(),
++              Instant.now(),
++              invocation,
++              "fixture-source",
++              new RelayLog.Payload("TEXT", Json.MAPPER.writeValueAsString(call), null, null, null));
++      return new RelayPort.Batch(
++          project,
++          topic,
++          group,
++          consumer,
++          RelayPort.Status.DATA,
++          UUID.randomUUID().toString(),
++          "1",
++          "1",
++          Instant.now().plusSeconds(30),
++          null,
++          List.of(event),
++          generation);
++    }
++
++    private static void send(WebSocket socket, Object packet) throws IOException {
++      if (!socket.send(Json.MAPPER.writeValueAsString(packet)))
++        throw new IOException("Fixture socket refused packet");
++    }
++
++    private void fail(WebSocket socket, Throwable invalid) {
++      if (!closing.get()) failure.compareAndSet(null, invalid);
++      socket.close(1011, "fixture failed");
++    }
++
++    long count(String type) {
++      return requests.stream().filter(v -> type.equals(v.path("type").textValue())).count();
++    }
++
++    List<JsonNode> catalogues() {
++      return publications.stream()
++          .filter(v -> v.path("topic").textValue().endsWith(".catalog"))
++          .toList();
++    }
++
++    List<JsonNode> results() {
++      return publications.stream()
++          .filter(v -> v.path("topic").textValue().endsWith(".result"))
++          .toList();
++    }
++
++    void healthy() {
++      assertTrue(failure.get() == null, () -> String.valueOf(failure.get()));
++    }
++
++    @Override
++    public void close() throws IOException {
++      closing.set(true);
++      channels.forEach(SegmentedMessages::close);
++      replies.shutdownNow();
++      try {
++        assertTrue(
++            replies.awaitTermination(2, TimeUnit.SECONDS), "Fixture response owner did not settle");
++      } catch (InterruptedException interrupted) {
++        Thread.currentThread().interrupt();
++        throw new IOException("Fixture cleanup interrupted", interrupted);
++      }
++      server.close();
++    }
++  }
++}
+diff --git a/integrations/home-assistant/scripts/check-outbound-package.py b/integrations/home-assistant/scripts/check-outbound-package.py
+new file mode 100644
+index 00000000..133efcee
+--- /dev/null
++++ b/integrations/home-assistant/scripts/check-outbound-package.py
+@@ -0,0 +1,380 @@
++"""Validate a fresh installed POSIX HA distribution without live endpoints or credentials.
++
++Run after installDist, with an explicit Java 21+ JAVA_HOME. The JVM subprocesses
++use only a copied installed launcher/jars and installed examples, outside the
++repository. Local listening sockets detect accidental network work; no fixture
++accepts a device action. The JSON report contains relative artifact hashes and
++bounded check names, never environment values or configuration dumps.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++import re
++import shutil
++import socket
++import subprocess
++import tempfile
++import zipfile
++from contextlib import ExitStack
++from pathlib import Path
++from urllib.parse import unquote, urlsplit
++
++LAUNCHER = "plowshare-integration-home-assistant"
++MAX_FILES = 5000
++MAX_JAR_ENTRIES = 50000
++MAX_FILE_BYTES = 256 * 1024 * 1024
++MAX_PAYLOAD_BYTES = 512 * 1024 * 1024
++FORBIDDEN_PACKAGES = (
++    "io/aeyer/plowshare/server/",
++    "org/junit/",
++    "org/mockito/",
++    "org/testcontainers/",
++    "okhttp3/mockwebserver/",
++    "custom_components/",
++)
++
++
++def require(condition: bool, description: str) -> None:
++    if not condition:
++        raise AssertionError(description)
++
++
++def snapshot(root: Path) -> dict[str, str]:
++    paths = sorted(root.rglob("*"))
++    require(len(paths) <= MAX_FILES, "installed payload exceeds fixture file limit")
++    require(
++        not any(path.is_symlink() for path in paths),
++        "unexpected installed symbolic link",
++    )
++    files = [path for path in paths if path.is_file()]
++    require(
++        sum(path.stat().st_size for path in files) <= MAX_PAYLOAD_BYTES,
++        "installed payload exceeds fixture byte limit",
++    )
++    result = {}
++    for path in files:
++        require(
++            path.stat().st_size <= MAX_FILE_BYTES,
++            "installed file exceeds fixture byte limit",
++        )
++        digest = hashlib.sha256()
++        with path.open("rb") as source:
++            for block in iter(lambda: source.read(1024 * 1024), b""):
++                digest.update(block)
++        result[path.relative_to(root).as_posix()] = digest.hexdigest()
++    return result
++
++
++def directory_snapshot(root: Path) -> tuple[str, ...]:
++    paths = sorted(root.rglob("*"))
++    require(len(paths) <= MAX_FILES, "fixture directory topology exceeds its bound")
++    return tuple(path.relative_to(root).as_posix() for path in paths if path.is_dir())
++
++
++def require_tree_unchanged(
++    root: Path, files: dict[str, str], directories: tuple[str, ...], description: str
++) -> None:
++    require(snapshot(root) == files, description)
++    require(directory_snapshot(root) == directories, description)
++
++
++def inspect_payload(root: Path) -> dict[str, int]:
++    require((root / "bin" / LAUNCHER).is_file(), "installed POSIX launcher missing")
++    require(
++        os.access(root / "bin" / LAUNCHER, os.X_OK),
++        "installed launcher is not executable",
++    )
++    require((root / "PROVIDER-HOST.md").is_file(), "installed operator guide missing")
++    jars = sorted((root / "lib").glob("*.jar"))
++    require(bool(jars), "installed runtime jars missing")
++    found_main = False
++    for jar in jars:
++        with zipfile.ZipFile(jar) as archive:
++            names = archive.namelist()
++            require(
++                len(names) <= MAX_JAR_ENTRIES,
++                "installed jar exceeds fixture entry limit",
++            )
++            for name in names:
++                require(
++                    not any(
++                        name.startswith(prefix) or f"/{prefix}" in name
++                        for prefix in FORBIDDEN_PACKAGES
++                    ),
++                    f"forbidden server/test/Assist package in {jar.name}",
++                )
++            found_main |= (
++                "io/aeyer/plowshare/integrations/ha/HomeAssistantMain.class" in names
++            )
++    require(found_main, "installed HA operator entry point missing")
++
++    # Repository-relative links are valid in source but fail in a standalone distribution.
++    # Every local destination must resolve inside this actual installed payload.
++    links = 0
++    for document in sorted(root.rglob("*.md")):
++        for target in re.findall(
++            r"\[[^\]]+\]\(([^)]+)\)", document.read_text(encoding="utf-8")
++        ):
++            target = target.strip().removeprefix("<").removesuffix(">")
++            parsed = urlsplit(target)
++            if parsed.scheme or parsed.netloc or not parsed.path:
++                continue
++            resolved = (document.parent / unquote(parsed.path)).resolve()
++            require(
++                resolved.is_relative_to(root),
++                f"installed document link escapes payload: {document.relative_to(root)}",
++            )
++            require(
++                resolved.exists(),
++                f"installed document link is missing: {document.relative_to(root)}",
++            )
++            links += 1
++    require(links > 0, "installed documentation did not exercise local links")
++    require(
++        not any(path.name == "custom_components" for path in root.rglob("*")),
++        "Assist component was packaged",
++    )
++    return {"runtime_jars": len(jars), "local_document_links": links}
++
++
++def credential_names(value: object) -> set[str]:
++    if isinstance(value, dict):
++        result = (
++            {value["tokenEnv"]} if isinstance(value.get("tokenEnv"), str) else set()
++        )
++        for child in value.values():
++            result.update(credential_names(child))
++        return result
++    if isinstance(value, list):
++        return set().union(*(credential_names(child) for child in value))
++    return set()
++
++
++def trap(stack: ExitStack) -> socket.socket:
++    listener = stack.enter_context(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
++    listener.bind(("127.0.0.1", 0))
++    listener.listen(16)
++    listener.setblocking(False)
++    return listener
++
++
++def no_connections(listeners: list[socket.socket]) -> None:
++    for listener in listeners:
++        try:
++            connection, _ = listener.accept()
++        except BlockingIOError:
++            continue
++        connection.close()
++        raise AssertionError("offline installed command opened a network connection")
++
++
++def run_checks(distribution: Path) -> dict[str, object]:
++    java_home = os.environ.get("JAVA_HOME")
++    require(
++        bool(java_home),
++        "set an explicit Java 21+ JAVA_HOME before running this fixture",
++    )
++    java = Path(java_home) / "bin" / "java"
++    require(java.is_file(), "configured JAVA_HOME does not contain a Java executable")
++    version = subprocess.run(
++        [str(java), "-version"], capture_output=True, text=True, timeout=5, check=True
++    )
++    match = re.search(r'version "(\d+)', version.stderr + version.stdout)
++    require(
++        match is not None and int(match.group(1)) >= 21,
++        "fixture requires Java 21 or newer",
++    )
++    require(os.name == "posix", "this fixture validates the installed POSIX launcher")
++
++    source_hashes = snapshot(distribution)
++    source_directories = directory_snapshot(distribution)
++    payload = inspect_payload(distribution)
++    checks: list[str] = []
++    with (
++        tempfile.TemporaryDirectory(prefix="ha-outbound-installed-") as temporary,
++        ExitStack() as stack,
++    ):
++        scratch = Path(temporary).resolve()
++        installed = scratch / "installed"
++        shutil.copytree(distribution, installed)
++        work = scratch / "consumer"
++        work.mkdir()
++        require_tree_unchanged(
++            installed,
++            source_hashes,
++            source_directories,
++            "fresh copy differs from installed artifact",
++        )
++        listeners = [trap(stack), trap(stack)]
++        origins = [
++            f"http://127.0.0.1:{listener.getsockname()[1]}" for listener in listeners
++        ]
++        configs = {
++            "readonly": installed / "examples/outbound/readonly/provider.json",
++            "control": installed / "examples/outbound/control/provider.json",
++            "legacy": installed / "examples/config.json",
++        }
++        values: dict[str, dict[str, object]] = {}
++        environment = os.environ.copy()
++        for name in (
++            "CLASSPATH",
++            "JAVA_TOOL_OPTIONS",
++            "JDK_JAVA_OPTIONS",
++            "JAVA_OPTS",
++            "_JAVA_OPTIONS",
++        ):
++            environment.pop(name, None)
++        for profile, path in configs.items():
++            value = json.loads(path.read_text(encoding="utf-8"))
++            for name in credential_names(value):
++                environment.pop(name, None)
++            value["plowshare"] = origins[0]
++            if profile == "legacy":
++                for binding in value["bindings"].values():
++                    binding["configuration"]["endpoint"] = origins[1]
++            else:
++                value["homeAssistant"]["endpoint"] = origins[1]
++            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
++            values[profile] = value
++
++        def command(
++            name: str, arguments: list[str], expected: int, diagnostic: str = ""
++        ) -> None:
++            before = snapshot(scratch)
++            directories_before = directory_snapshot(scratch)
++            outcome = subprocess.run(
++                [str(installed / "bin" / LAUNCHER), *arguments],
++                cwd=work,
++                env=environment,
++                capture_output=True,
++                text=True,
++                timeout=10,
++                check=False,
++            )
++            require(outcome.returncode == expected, f"installed check failed: {name}")
++            require(
++                diagnostic in outcome.stdout + outcome.stderr,
++                f"installed diagnostic missing: {name}",
++            )
++            require(
++                len(outcome.stdout) + len(outcome.stderr) <= 16384,
++                "installed diagnostics exceed fixture bound",
++            )
++            require(
++                "VALIDATION_PRIVATE_MARKER" not in outcome.stdout + outcome.stderr,
++                "installed diagnostics disclosed supplied input",
++            )
++            no_connections(listeners)
++            require_tree_unchanged(
++                scratch,
++                before,
++                directories_before,
++                f"offline command changed fixture data or directories: {name}",
++            )
++            checks.append(name)
++
++        for profile in ("readonly", "control"):
++            command(
++                f"{profile}: offline provider config",
++                ["--provider", "--check", str(configs[profile])],
++                0,
++            )
++        command(
++            "legacy: offline manual-alias config",
++            ["--check", str(configs["legacy"])],
++            0,
++        )
++
++        # Corrupt or pending state is neither a reason for offline check to fail nor permission
++        # to open, migrate, reset or delete retained effect fences.
++        for profile in ("readonly", "control"):
++            value = values[profile]
++            owners = [value["read"]]
++            if "control" in value:
++                owners.append(value["control"])
++            for owner in owners:
++                journal = configs[profile].parent / owner["journal"]
++                journal.mkdir(parents=True)
++                (journal / "tools.json").write_bytes(
++                    b'{"unreadable_pending_intent":"retain-original"}\n'
++                )
++                (journal / "owner.lock").write_bytes(b"retained-owner\n")
++            command(
++                f"{profile}: retained journals untouched",
++                ["--provider", "--check", str(configs[profile])],
++                0,
++            )
++
++        invalid = scratch / "invalid-provider.json"
++        value = json.loads(json.dumps(values["readonly"]))
++        value["externalContext"] = {"systemText": "VALIDATION_PRIVATE_MARKER"}
++        invalid.write_text(json.dumps(value), encoding="utf-8")
++        command(
++            "prompt input remains refused", ["--provider", "--check", str(invalid)], 1
++        )
++        value = json.loads(json.dumps(values["control"]))
++        value["control"]["account"] = "different-principal-VALIDATION_PRIVATE_MARKER"
++        invalid.write_text(json.dumps(value), encoding="utf-8")
++        command(
++            "contradictory control principal refused",
++            ["--provider", "--check", str(invalid)],
++            1,
++        )
++        command(
++            "malformed provider CLI refused",
++            ["--provider", "--unknown", str(invalid)],
++            1,
++            "Usage:",
++        )
++
++    return {
++        "result": "PASS",
++        "scope": "fresh installed POSIX launcher and jars; no real server, HA, model or database",
++        "java_major": int(match.group(1)),
++        "platform": os.sys.platform,
++        "checks": checks,
++        "payload_checks": payload,
++        "artifacts": [
++            {
++                "path": path,
++                "sha256": digest,
++                "bytes": (distribution / path).stat().st_size,
++            }
++            for path, digest in source_hashes.items()
++        ],
++        "fixture_origin_changes": [
++            "plowshare",
++            "homeAssistant.endpoint or legacy binding endpoint",
++        ],
++        "source_distribution_unchanged": (
++            snapshot(distribution) == source_hashes
++            and directory_snapshot(distribution) == source_directories
++        ),
++        "directory_topology_checked": True,
++        "limits": "Local trap listeners prove no observed connections from offline commands. Static template policy and scripted protocol tests do not prove live grants, device effects, fleet availability or Windows installation.",
++    }
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--distribution", type=Path, required=True)
++    parser.add_argument("--report", type=Path, required=True)
++    arguments = parser.parse_args()
++    result = run_checks(arguments.distribution.resolve(strict=True))
++    require(
++        result["source_distribution_unchanged"],
++        "fixture changed the original distribution",
++    )
++    arguments.report.parent.mkdir(parents=True, exist_ok=True)
++    arguments.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
++    print(
++        f"Installed outbound package validation passed: {len(result['checks'])} checks, {len(result['artifacts'])} artifact files."
++    )
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/docs/reviews/home-assistant-outbound-validation.md b/docs/reviews/home-assistant-outbound-validation.md
+new file mode 100644
+index 00000000..3be5c5f4
+--- /dev/null
++++ b/docs/reviews/home-assistant-outbound-validation.md
+@@ -0,0 +1,156 @@
++# OUT-VERIFY-01 outbound validation
++
++Implementer: `/root/ha_outbound_validation_implementer`.
++Status: **READY FOR INDEPENDENT REVIEW; NOT ACCEPTED.** Scoped validation and
++installed-consumer checks passed, but the required full repository check fails in
++an existing unchanged SQL concurrency test. That acceptance requirement remains
++unmet and is not waived. This report is not release or live acceptance.
++
++## Candidate and ownership
++
++The validation node consumes the independently accepted outbound host/package and
++profiles. The packaging candidate is
++`ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f`.
++The current profile candidate is
++`6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10`.
++Their original authors own feature corrections; the validator authored no host,
++profile, core, SDK, Assist or delivery-ledger implementation.
++
++Authored validation outputs are:
++
++- `integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java`;
++- `integrations/home-assistant/scripts/check-outbound-package.py`;
++- this report and the final text source/artifact evidence attached by the
++  coordinator before acceptance.
++
++## Public protocol evidence
++
++Three Java cases instantiate the actual production `HomeAssistantProviderHost`
++with the validated control configuration and real native HA/Plowshare sockets.
++The SDK uses its ordinary segmented subprotocol and concurrent dispatch; a local
++broker fixture uses the shared public packet transport rather than a legacy
++fallback or mock SDK service. It scripts Relay outcomes and does not implement
++or establish actual server authentication or authorization.
++
++The normal case checks one SDK connection, separate read/control catalogue
++topics and exact declared tool sets, bounded empty polling and ordinary
++withdrawal with empty tool arrays under both original logical topics. The
++negotiation assertion checks the incoming concurrent mode as well as the reply.
++The catalogue-loss case deliberately withholds the application
++acknowledgement after accepting the publication. Its original intent remains
++journaled; a stopped owner cannot poll or publish again. A separately constructed
++host represents an explicit operator restart. A missing read-only log result
++leaves the original publication uncertain and cannot authorize replacement.
++
++The third case delivers one schema-matched search invocation through the actual
++SDK Relay consumer and executes native HA registry collection. Its result keeps
++the invocation correlation and parent identity. Losing the result acknowledgement
++retains `PUBLISHING`; explicit restart inspects the original result without
++repeating that handler collection or publishing a replacement result. Native
++startup state snapshots may legitimately occur again on an explicit restart.
++No fixture admits a `call_service` effect. These cases prove adapter composition
++and wire/recovery behavior, not device success or zero native traffic on restart.
++
++## Fresh installed consumer
++
++The standard-library package checker requires an explicit Java 21-or-newer
++`JAVA_HOME`. It copies the installed POSIX distribution into a temporary directory
++outside the repository and uses only that installed launcher, jars and examples.
++It removes configured credential references and JVM/classpath overrides from the
++child environment; only fixture origins change to local connection traps.
++
++It checks both provider configurations and the original legacy `--check` entry
++point, first with no journals and then with deliberately unreadable retained
++provider journals. File hashes and bounded directory topology are compared around each command,
++the fresh copy and original artifact to detect creation, migration, deletion or
++rewriting, including empty journal directories. Negative cases exercise
++unaccepted prompt input, contradictory control principal and malformed CLI flags.
++Every subprocess has a finite timeout, diagnostics are bounded, traps must see no
++connection and a supplied private marker must never appear in output.
++
++The payload inspection requires the actual main class and external runtime/SDK
++jars, rejects server/test/Assist namespaces and checks every relative Markdown
++destination inside the installed guide/examples. Artifact hashes identify the
++original unmodified installed distribution; report contents are relative paths
++and check names, not credentials, environment dumps or private configurations.
++The checker does not claim Windows launcher acceptance.
++
++## Findings returned to feature owners
++
++Installed-profile review found three source-only relative documentation links
++which did not resolve in the distribution. The validator and independent
++validation reviewer reported them to the coordinator. The original profile
++implementer corrected those links; an independent profile reviewer approved the
++new v2 candidate above. The packaging implementation stayed unchanged. The
++validator did not weaken link checks or edit an accepted feature source.
++
++## Verification and exact evidence
++
++The coordinator ran final `format`, then `formatCheck` with the three strengthened
++SDK/native HA cases and the entire existing `ScopedSqlWorkBudgetTest` class.
++All three validation cases and all thirty SQL-class cases passed in 8 seconds
++(72 tasks). Logs are retained privately as
++`/private/tmp/ha-outbound-validation-and-sql-final.log` and
++`/private/tmp/ha-outbound-validation-format-final.log`.
++
++The fresh installed consumer passed all eight checks against 44 artifact files:
++26 runtime jars and four valid artifact-local documentation links. Its
++[package evidence](home-assistant-outbound-validation-package-evidence.json)
++binds the exact script, local report/log and every installed file hash. The
++[source snapshot](home-assistant-outbound-validation-source.json) binds 23 current
++feature/validation files, both accepted dependency candidates and four unchanged
++Assist gate sources matching the original frozen gate correction. The original
++distribution remained unchanged by the consumer.
++
++The first consumer attempt reached its malformed-CLI case but expected internal
++helper status 2 as the OS status. The actual public entry point returns status 1
++and a usage diagnostic. The validator expectation was corrected and the entire
++consumer passed; no feature behavior was changed to fit the fixture.
++
++The initial file-only consumer snapshots missed a possible empty journal-directory
++creation. Independent review identified that P2 validation gap. The original
++validator added explicit directory-topology checks without inflating the 44-file
++artifact manifest. Both implementer and coordinator independently ran the exact
++guard against a new empty directory with identical file hashes; it rejected the
++change. The final complete eight-case installed consumer passed with that guard.
++
++The first repository invocation failed one existing non-database SQL barrier
++assertion among 8,627 server cases. An isolated-method invocation then failed
++both parameter variants at a different barrier. The complete owning SQL class
++subsequently passed all thirty cases without any core/test change.
++
++The final full repository invocation with `--max-workers=2` **failed** in 5m10s
++(140 tasks). All 166 HA cases, including these three fixtures, passed; the server
++suite had two failures among 8,627 cases. Both were
++`ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied(boolean)`
++parameter variants at `socketRead.await(1s)`. No source or test exclusions and no
++core/SDK/Assist edits were used. All relevant pass/fail log hashes are retained in
++the package evidence above. These results establish neither a root cause nor a
++harmless flake, and do not establish that this change caused or could not cause
++the failure. A green required repository check has not been obtained. Diagnosis
++or repair of core behavior is outside this integration's authorized scope.
++Independent review must retain this blocker rather than approve the node as
++complete or weaken the plan's acceptance requirement.
++
++The implementer ran Python `py_compile`, Ruff lint and Ruff format checks on the
++standalone checker. All passed after correcting import ordering. No Gradle,
++PostgreSQL, live endpoint, device, model, deployment or Git action was run by this
++implementer. The coordinator owns actual Gradle and installed-consumer execution.
++
++## Limits and preserved gates
++
++Template parsers and scripted brokers do not prove live grant issuance,
++membership, model-fleet configuration, HA target versions or physical device
++effects. Those remain separately authorized operational evidence. Existing Ex
++server tests with mocked repositories and canonical SDK-contract drift checks
++supplement the transport fixtures; they do not turn this node into original
++whole-package VERIFY-01.
++
++All eleven original awaiting-gate deliverables and four capability/operational
++gates remain unchanged. Assist setup, configuration and installation packaging
++remain disabled; no prompt is rewritten, relocated or downgraded to task text.
++The previous isolated HA Python environment is absent and was not recreated to
++make an unsupported prompt-dependent feature appear complete. No current full HA
++Python runtime-check pass or live voice pipeline is claimed. Historical frozen
++reviews retain their exact-source scope. This node prepares outbound-only source
++and local artifact evidence; it does not close PERF, RELEASE, DEPLOY or LIVE work.
+diff --git a/docs/reviews/home-assistant-outbound-validation-source.json b/docs/reviews/home-assistant-outbound-validation-source.json
+new file mode 100644
+index 00000000..a37d56e4
+--- /dev/null
++++ b/docs/reviews/home-assistant-outbound-validation-source.json
+@@ -0,0 +1,53 @@
++{
++  "node": "OUT-VERIFY-01",
++  "captured_at": "2026-11-22T00:23:38.348193+00:00",
++  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
++  "accepted_dependencies": {
++    "OUT-PACK-01": {
++      "path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++      "sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++      "candidate_id": "out-pack-01-v1"
++    },
++    "OUT-PROFILE-01": {
++      "path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++      "sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++      "candidate_id": "out-profile-01-v2"
++    }
++  },
++  "feature_and_validation_files": {
++    "integrations/home-assistant/build.gradle.kts": "f6c26532ed02fe90c764c1ed95e238025a165c67ec2c840294979648251da267",
++    "integrations/home-assistant/README.md": "3173eb536eea0a69a346ebc07ea09feff25fe5420320e6e746ce2454b25ed16e",
++    "integrations/home-assistant/TOOL-PROVIDER.md": "3ca0f018f553c0412b9ea4aeb3ccdf6a2bf1ce164319caacc53eb8446e07fbd2",
++    "integrations/home-assistant/PROVIDER-HOST.md": "1e593204fbec14ea4237e2318ea8e74807b98b231fd83fc45c80617d3d4acbcf",
++    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java": "85d8767ecf393345bf5f887b5969dd8d64866da70ef8a70e60edc93293fcead2",
++    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java": "db8983c94a3e9811f721ceee1bb34bcb92fd0e004ff92183ec5bd4aa9f8f631b",
++    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "322cd7b24a3d47fd54747192d36ee27e4784c81fee2957c11aa0c9ab303a2cc1",
++    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java": "85ce158535b4ae1b3682e22e49f6c8aa942005c4595b080e73960442b6090ca6",
++    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java": "d375a59a60cd1adf41ee9c0aa38daeeb0273901376a3e6a75b669bc9750114b8",
++    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfigurationTest.java": "135eba7cc8a02ede436128f2725f3d9e4a1ec50b3355455753d37891d12ad355",
++    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHostTest.java": "ec828a3c9bc4c161d7f385e2438b1fabd0f88466cd3ddb386267a084bc62e270",
++    "integrations/home-assistant/examples/outbound/README.md": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
++    "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
++    "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
++    "integrations/home-assistant/examples/outbound/control/application/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
++    "integrations/home-assistant/examples/outbound/control/provider.json": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
++    "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
++    "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
++    "integrations/home-assistant/examples/outbound/readonly/application/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
++    "integrations/home-assistant/examples/outbound/readonly/provider.json": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
++    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "a2d999582ae59358f5ae33a51774cc8f15ac3234d381edbe47d8e03d5379d216",
++    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "3b6ed48ede8f3c14d8447001de34162a1b761ef418bb916a067c929ced71e545",
++    "integrations/home-assistant/scripts/check-outbound-package.py": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c"
++  },
++  "unchanged_prompt_gate_sources": {
++    "integrations/home-assistant/assist/custom_components/plowshare/availability.py": "9ff0dd3d8b44d56e82382381b84713ed6ad6afa3b4dba5d2e0c3105f353dd398",
++    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "239eeb59e80b945104496ef0cc629565ba4ad74f72077b5e58e8ca17a6255bf7",
++    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "f3b46ad300b8b28a323b52c8df139c3e83032dd3e4f5266a29e9e174c2e041a9",
++    "integrations/home-assistant/assist/scripts/package.py": "9e44e4128ba7188fa568bfa61cf04ac8573dd7f9af4147342f7c65d5476db355"
++  },
++  "prompt_guard_candidate": {
++    "path": "docs/reviews/home-assistant-publication-gate-candidate.json",
++    "sha256": "aad3fe80235aafba44d59b2f8dc256e9049cf4eb25808847cb2a8f254ff83b24"
++  },
++  "limits": "Current source bytes only; mutable coordinator ledger and reports excluded to avoid self-reference. Prompt guard sources match original frozen gating candidate; this does not claim a current Python/HA runtime test."
++}
+diff --git a/docs/reviews/home-assistant-outbound-validation-package-evidence.json b/docs/reviews/home-assistant-outbound-validation-package-evidence.json
+new file mode 100644
+index 00000000..6f3fedea
+--- /dev/null
++++ b/docs/reviews/home-assistant-outbound-validation-package-evidence.json
+@@ -0,0 +1,302 @@
++{
++  "node": "OUT-VERIFY-01",
++  "captured_at": "2026-11-22T00:23:38.348193+00:00",
++  "result": "PASS",
++  "command": "JAVA_HOME=<explicit Java 21+> python3 integrations/home-assistant/scripts/check-outbound-package.py --distribution <fresh installDist> --report <private report>",
++  "validator_source": {
++    "path": "integrations/home-assistant/scripts/check-outbound-package.py",
++    "sha256": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c"
++  },
++  "consumer_report_sha256": "ec0980c62c721724d220a1b99480fccf4589a4524292d47e11a3eff7431b129a",
++  "consumer_log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++  "source_distribution_unchanged": true,
++  "checks": [
++    "readonly: offline provider config",
++    "control: offline provider config",
++    "legacy: offline manual-alias config",
++    "readonly: retained journals untouched",
++    "control: retained journals untouched",
++    "prompt input remains refused",
++    "contradictory control principal refused",
++    "malformed provider CLI refused"
++  ],
++  "payload_checks": {
++    "runtime_jars": 26,
++    "local_document_links": 4
++  },
++  "platform": "darwin",
++  "java_major": 21,
++  "artifacts": [
++    {
++      "path": "PROVIDER-HOST.md",
++      "sha256": "1e593204fbec14ea4237e2318ea8e74807b98b231fd83fc45c80617d3d4acbcf",
++      "bytes": 8183
++    },
++    {
++      "path": "bin/plowshare-integration-home-assistant",
++      "sha256": "dfcd1adf9034d2c411c3593f57d93c520739001cf142d7369fe03cd20268fbbc",
++      "bytes": 9923
++    },
++    {
++      "path": "bin/plowshare-integration-home-assistant.bat",
++      "sha256": "1ecc590a0c30da5a53ad7280dd057561188d9e853023637fd7c630b7286ab147",
++      "bytes": 4162
++    },
++    {
++      "path": "examples/application/agents/house_coordinator.md",
++      "sha256": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
++      "bytes": 2469
++    },
++    {
++      "path": "examples/application/orchestrations/investigate_office_heat.md",
++      "sha256": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
++      "bytes": 1654
++    },
++    {
++      "path": "examples/application/plowshare.json",
++      "sha256": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
++      "bytes": 301
++    },
++    {
++      "path": "examples/application/skills/house-evidence/SKILL.md",
++      "sha256": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
++      "bytes": 894
++    },
++    {
++      "path": "examples/config.json",
++      "sha256": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
++      "bytes": 2601
++    },
++    {
++      "path": "examples/office.mjs",
++      "sha256": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
++      "bytes": 821
++    },
++    {
++      "path": "examples/outbound/README.md",
++      "sha256": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
++      "bytes": 5701
++    },
++    {
++      "path": "examples/outbound/control/application/agents/house_controller.md",
++      "sha256": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
++      "bytes": 1658
++    },
++    {
++      "path": "examples/outbound/control/application/plowshare.json",
++      "sha256": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
++      "bytes": 921
++    },
++    {
++      "path": "examples/outbound/control/application/server/tools.json",
++      "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
++      "bytes": 378
++    },
++    {
++      "path": "examples/outbound/control/provider.json",
++      "sha256": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
++      "bytes": 1422
++    },
++    {
++      "path": "examples/outbound/readonly/application/agents/house_reader.md",
++      "sha256": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
++      "bytes": 1172
++    },
++    {
++      "path": "examples/outbound/readonly/application/plowshare.json",
++      "sha256": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
++      "bytes": 665
++    },
++    {
++      "path": "examples/outbound/readonly/application/server/tools.json",
++      "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
++      "bytes": 216
++    },
++    {
++      "path": "examples/outbound/readonly/provider.json",
++      "sha256": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
++      "bytes": 1037
++    },
++    {
++      "path": "lib/annotations-13.0.jar",
++      "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
++      "bytes": 17536
++    },
++    {
++      "path": "lib/collections-23.1.12.jar",
++      "sha256": "54a6c6d50be1a7f732cc294b2feb930b5771ce8afd6cd7c2b4a831f85bb25aef",
++      "bytes": 121580
++    },
++    {
++      "path": "lib/icu4j-23.1.12.jar",
++      "sha256": "2c9ab5dfd797cc145ebfb0b1320ce831aa9b76c0adc70945a580bef1a8730dd0",
++      "bytes": 39645881
++    },
++    {
++      "path": "lib/jackson-annotations-2.17.2.jar",
++      "sha256": "873a606e23507969f9bbbea939d5e19274a88775ea5a169ba7e2d795aa5156e1",
++      "bytes": 78492
++    },
++    {
++      "path": "lib/jackson-core-2.17.2.jar",
++      "sha256": "721a189241dab0525d9e858e5cb604d3ecc0ede081e2de77d6f34fa5779a5b46",
++      "bytes": 581927
++    },
++    {
++      "path": "lib/jackson-databind-2.17.2.jar",
++      "sha256": "c04993f33c0f845342653784f14f38373d005280e6359db5f808701cfae73c0c",
++      "bytes": 1649454
++    },
++    {
++      "path": "lib/jackson-datatype-jsr310-2.17.2.jar",
++      "sha256": "9b80024a9822e70b07f6bb13824c76c137c1064a1b5eb518374ab141870fdbcc",
++      "bytes": 132264
++    },
++    {
++      "path": "lib/jniutils-23.1.12.jar",
++      "sha256": "7489745b9889851d7586d89f8e2698ea7374ae78ffdebf1ed4550dd58117dc48",
++      "bytes": 275246
++    },
++    {
++      "path": "lib/js-language-23.1.12.jar",
++      "sha256": "3639558b4a776147d22acd2dc61a03a90d340064ef744916c5adf37c0d9cf2c1",
++      "bytes": 27289717
++    },
++    {
++      "path": "lib/kotlin-stdlib-1.9.10.jar",
++      "sha256": "55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504",
++      "bytes": 1708006
++    },
++    {
++      "path": "lib/kotlin-stdlib-common-1.9.10.jar",
++      "sha256": "cde3341ba18a2ba262b0b7cf6c55b20c90e8d434e42c9a13e6a3f770db965a88",
++      "bytes": 225141
++    },
++    {
++      "path": "lib/kotlin-stdlib-jdk7-1.9.10.jar",
++      "sha256": "ac6361bf9ad1ed382c2103d9712c47cdec166232b4903ed596e8876b0681c9b7",
++      "bytes": 959
++    },
++    {
++      "path": "lib/kotlin-stdlib-jdk8-1.9.10.jar",
++      "sha256": "a4c74d94d64ce1abe53760fe0389dd941f6fc558d0dab35e47c085a11ec80f28",
++      "bytes": 965
++    },
++    {
++      "path": "lib/nativeimage-23.1.12.jar",
++      "sha256": "8b7ec0f100d4eeaebbdc02be2bf4f57147f1873cbea6cf8597beb555b03134ae",
++      "bytes": 217333
++    },
++    {
++      "path": "lib/okhttp-4.12.0.jar",
++      "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
++      "bytes": 789531
++    },
++    {
++      "path": "lib/okio-jvm-3.6.0.jar",
++      "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
++      "bytes": 359580
++    },
++    {
++      "path": "lib/plowshare-integration-home-assistant-0.1.0-SNAPSHOT.jar",
++      "sha256": "29407d14143509ed64476e4158641bc70cc3c28fd359b2a149fb77f91a0121de",
++      "bytes": 255082
++    },
++    {
++      "path": "lib/plowshare-integrations-0.1.0-SNAPSHOT.jar",
++      "sha256": "9970fd9e4ce41b0c8c0a67dc6055b6d24ee87ea5973cd818d63a82728c5ace53",
++      "bytes": 162744
++    },
++    {
++      "path": "lib/plowshare-protocol-0.1.0-SNAPSHOT.jar",
++      "sha256": "4872ca948e7b24f1e4a9a53e2c8a6b0e0ce3e689fecbac2cc06280aea65d80f4",
++      "bytes": 812338
++    },
++    {
++      "path": "lib/plowshare-sdk-0.1.0-SNAPSHOT.jar",
++      "sha256": "2f05ed142a5fda6d304f3a1a18ced76f89adf14ff67b3ad71318ceb6c79b6582",
++      "bytes": 398158
++    },
++    {
++      "path": "lib/polyglot-23.1.12.jar",
++      "sha256": "677ce37f6f8cf9c155344711dc85fcea9f25629ff8b761b71400d1243626a112",
++      "bytes": 939215
++    },
++    {
++      "path": "lib/regex-23.1.12.jar",
++      "sha256": "ac00e975681325123e6b5da5610a8aebdc1629c0bc869009d469f8b614f32953",
++      "bytes": 3701640
++    },
++    {
++      "path": "lib/truffle-api-23.1.12.jar",
++      "sha256": "ab0898a4f06b01eb738823fb750aef24ac0bcbcc5856302a9efc1561c68489d6",
++      "bytes": 16738164
++    },
++    {
++      "path": "lib/truffle-compiler-23.1.12.jar",
++      "sha256": "41a25a7357092e2b47e339f8311974e16a2cb40bde1ccb36ef71cf3a314e6c7e",
++      "bytes": 61865
++    },
++    {
++      "path": "lib/truffle-runtime-23.1.12.jar",
++      "sha256": "3d0e5c1d290747b351af5b589a9801d9796af29274f184291d1a3fab62fca48e",
++      "bytes": 1053408
++    },
++    {
++      "path": "lib/word-23.1.12.jar",
++      "sha256": "8c6221a04dc1c917a75e526ffcf5f4cdd80b812b45561dc9225538b0eb97bee6",
++      "bytes": 22242
++    }
++  ],
++  "failed_initial_attempt": {
++    "log_sha256": "4b4c9261aacd7669c64007192bfa3a829e8cedb8728060667641c3154e43caa3",
++    "reason": "Fixture expected helper status 2 as OS status; actual public launcher returns status 1 and Usage diagnostic. Only validator expectation corrected; feature bytes unchanged."
++  },
++  "limits": "Local trap listeners prove no observed connections from offline commands. Static template policy and scripted protocol tests do not prove live grants, device effects, fleet availability or Windows installation. Assist Python runtime checks were not rerun because their former environment is absent. All original gates remain unchanged; no core/SDK/Assist source was modified.",
++  "source_snapshot": {
++    "path": "docs/reviews/home-assistant-outbound-validation-source.json",
++    "sha256": "da2842991041aeb7a462ff920d5c5833009df73a80ec1374bcc754a5d50c9466"
++  },
++  "scope": "Installed consumer and artifact proof PASS only. Node acceptance is blocked because required full repository check FAILS.",
++  "node_acceptance": "BLOCKED_BY_REQUIRED_REPOSITORY_CHECK",
++  "directory_topology_checked": true,
++  "empty_directory_guard_probe": "Implementer and coordinator independently verified require_tree_unchanged rejects new empty-journal directory despite identical file hashes.",
++  "review_correction": "P2: file-only snapshots missed empty directory creation. Original validator added separate bounded directory topology checks around each child, copied payload and original distribution; complete eight-case consumer rerun passed without changing features.",
++  "scoped_verification": {
++    "result": "PASS",
++    "validation_tests": 3,
++    "sql_owning_class_tests": 30,
++    "failures": 0,
++    "duration": "8s",
++    "tasks": 72,
++    "log_sha256": "105eb5c85a5063df25e0658939006fe0921ba121232538d7193869a50df74c39",
++    "format_result": "PASS",
++    "format_duration": "4s",
++    "format_log_sha256": "9ac2df6f4cf3637339c41b981a56f531cbcc79fc77212f61d553819549d512a0"
++  },
++  "repository_verification": {
++    "result": "FAIL",
++    "final_entry_point": "Full Gradle check with --max-workers=2; no exclusions or core changes",
++    "duration": "5m10s",
++    "tasks": 140,
++    "server_tests": 8627,
++    "server_failures": 2,
++    "ha_tests": 166,
++    "ha_failures": 0,
++    "failed_test": "ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied(boolean), both parameter variants, socketRead.await(1s)",
++    "final_log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++    "first_full_check": {
++      "result": "FAIL",
++      "duration": "4m36s",
++      "server_tests": 8627,
++      "server_failures": 1,
++      "log_sha256": "9b0c0235a254e072bc16c1a8b09ce5555cf0d4a2783f10da2fb6e5a4e75ef0b2"
++    },
++    "isolated_method_check": {
++      "result": "FAIL",
++      "failed_variants": 2,
++      "log_sha256": "a6ac32e5c3e174722e3282692011b9af0cc6d06216e5b5ff5332918e60e9810a"
++    },
++    "interpretation": "The existing unchanged SQL test also passed as a complete owning class. No root cause, harmless flake or causal independence from this change has been established. Required green repository verification remains unmet."
++  }
++}
+diff --git a/docs/home-assistant-delivery-state.json b/docs/home-assistant-delivery-state.json
+index be85469d..e9ecee1f 100644
+--- a/docs/home-assistant-delivery-state.json
++++ b/docs/home-assistant-delivery-state.json
+@@ -11,7 +11,7 @@
+     "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
+   },
+   "scope": {
+-    "current_request": "Commit reviewed changes and open a pull request; keep prompt-dependent features gated",
++    "current_request": "Update plan/ledger, add independent outbound-only packaging/profiles/validation and implement them; keep prompt-dependent features gated",
+     "runtime_implementation_dispatched": true,
+     "merge_authorized": false,
+     "deployment_authorized": false,
+@@ -21,11 +21,16 @@
+       "Preserve HA prompt/context as supplied; assess cache impact without rewriting it.",
+       "2026-11-17: user authorized execution with Start it; merge, deployment, live effects and backend measurements retain their explicit gates.",
+       "User explicitly chose Leave prompt-dependent features gated. No external system-context API or weaker task-text substitution authorized.",
+-      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only."
++      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only.",
++      "2026-11-22: user authorized outbound-only implementation and plan/ledger reconciliation. PR300 is already merged. No new publication/target merge/deployment/live authorization and no prompt/context extension. Prior exact-source review artifacts remain immutable."
+     ],
+     "commit_authorized": true,
+     "push_authorized": true,
+-    "pull_request_authorized": true
++    "pull_request_authorized": true,
++    "outbound_implementation_authorized": true,
++    "outbound_publication_authorized": false,
++    "outbound_target_merge_authorized": false,
++    "outbound_deployment_authorized": false
+   },
+   "status_values": [
+     "planned",
+@@ -134,11 +139,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T23:15:30.186477+00:00"
++      "updated_at": "2026-11-16T23:15:30.186477+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "AUDIT-01",
+@@ -187,11 +198,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:33:50.055430+00:00"
++      "updated_at": "2026-11-16T21:33:50.055430+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-01",
+@@ -263,11 +280,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.065667+00:00"
++      "updated_at": "2026-11-16T21:45:20.065667+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-02",
+@@ -360,11 +383,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T22:49:50.733679+00:00"
++      "updated_at": "2026-11-16T22:49:50.733679+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03A",
+@@ -460,11 +489,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:53:04.215754+00:00"
++      "updated_at": "2026-11-17T01:53:04.215754+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03",
+@@ -688,11 +723,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T04:36:25.467849+00:00"
++      "updated_at": "2026-11-17T04:36:25.467849+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-04",
+@@ -834,14 +875,20 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+       "updated_at": "2026-11-17T04:47:09.041004+00:00",
+       "implementation_collaborators": [
+         "/root/ha_sdk_implementer/native_ex"
+-      ]
++      ],
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "FIDELITY-01",
+@@ -918,11 +965,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:50:46.630922+00:00"
++      "updated_at": "2026-11-16T21:50:46.630922+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-01",
+@@ -1033,11 +1086,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T00:50:36.944378+00:00"
++      "updated_at": "2026-11-17T00:50:36.944378+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-02",
+@@ -1147,11 +1206,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:56:50.815783+00:00"
++      "updated_at": "2026-11-17T01:56:50.815783+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-03",
+@@ -1221,11 +1286,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:16:05.933445+00:00"
++      "updated_at": "2026-11-17T01:16:05.933445+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-04",
+@@ -1301,11 +1372,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:18:03.593694+00:00"
++      "updated_at": "2026-11-17T02:18:03.593694+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-05",
+@@ -1514,11 +1591,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:20:47.982417+00:00"
++      "updated_at": "2026-11-17T02:20:47.982417+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-10",
+@@ -1807,6 +1890,364 @@
+         "live_validated": false
+       },
+       "updated_at": "2026-11-16T21:45:20.262205+00:00"
++    },
++    {
++      "id": "OUT-PLAN-01",
++      "title": "Current-main reconciliation and outbound host contract",
++      "dependencies": [
++        "PLAN-00",
++        "AUDIT-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root",
++      "reviewer_role": "/root/ha_outbound_plan_reviewer",
++      "implementation_agent_id": "/root",
++      "review_agent_id": "/root/ha_outbound_plan_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-outbound-host-contract.md"
++      ],
++      "candidate_revision": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "candidate": {
++            "id": "out-plan-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++            "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++          },
++          "verdict": "CHANGES_REQUIRED",
++          "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++          "report_sha256": "6069223c639ac40b0f2db9484805cb9f5aea61d8b84ef6b24fae6d421175e16f"
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_plan_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++          "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++          "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++          "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPLAN-R1",
++          "severity": "P1",
++          "correction": "Share Application execution principal/tokenEnv/SDK connection across read and control; retain separate logical providers/prefixes/journals/exact tool policy. No core workaround.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        },
++        {
++          "id": "OUTPLAN-R2",
++          "severity": "P3",
++          "correction": "Clarify empty access.accounts vs nonempty exact toolScopes/toolGrants; declaration/placeholder does not issue live authority.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:28:54.029830+00:00"
++    },
++    {
++      "id": "OUT-PACK-01",
++      "title": "Standalone outbound provider host and package",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_pack_implementer",
++      "review_agent_id": "/root/ha_outbound_pack_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md",
++        "integrations/home-assistant/TOOL-PROVIDER.md",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "evidence": [
++        {
++          "kind": "interim_package_check",
++          "result": "PASS",
++          "duration": "38s",
++          "tasks": 93,
++          "command": "./gradlew format formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "2a72fac626811ebb7cdd7763be99b59d8ef0b90edc08d4aebed2311f289c9130",
++          "note": "Before final startup-owner guard correction; not final-source verification."
++        },
++        {
++          "kind": "interim_package_check",
++          "result": "FAIL",
++          "duration": "37s",
++          "tests": 163,
++          "failed": 1,
++          "log_sha256": "f10ad524c1888c2ac98acdf4bc0d854c7c17ec5ae07fde22ca9fd0e56d0dd7e5",
++          "finding": "New factory startup-ownership fixture used macOS temporary path with /var symbolic-link ancestor; production startup correctly refused before connections. Fixture must use canonical temporary directory; symlink protection retained."
++        },
++        {
++          "kind": "current_compiled_package_check",
++          "result": "PASS",
++          "tests": 163,
++          "duration": "33s",
++          "tasks": 72,
++          "command": "./gradlew formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "bb2a764d751c9b55746b6b2d4f213f926ea487809d9cc8afb91364c5cc1af83e",
++          "format_log_sha256": "f8dfde4ea435e7d1312b2566c16881ce3dc177d833d68ae4662d7b33b5a2065c",
++          "note": "Java/source fixed and frozen; pending final operator prerequisite prose and artifact copy refresh."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_pack_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++          "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++          "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++          "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPACK-PRE1",
++          "severity": "P1",
++          "source": "independent reviewer",
++          "correction": "Register process shutdown owner before any resource opening; hook registration failure opens nothing; partial startup keeps exact cleanup owner.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-PRE2",
++          "severity": "P2",
++          "source": "independent reviewer",
++          "correction": "Publish closed-latch completion before successful shared-cleanup future so returned close cannot race finished observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-COORD1",
++          "severity": "P1",
++          "source": "coordinator source review",
++          "correction": "Published startup owner must fence cleanup while factory still owns HA/SDK/journal opening, including slow filesystem work; shared resources cannot close before late provider acquisition settles. Use stable provider count for shutdown observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:56:58.858956+00:00"
++    },
++    {
++      "id": "OUT-PROFILE-01",
++      "title": "Read-only and explicit-control Application templates",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_profiles_implementer",
++      "review_agent_id": "/root/ha_outbound_profiles_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++          "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++          "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++          "verdict": "APPROVE"
++        },
++        {
++          "kind": "compiled_profile_validation",
++          "result": "PASS",
++          "tests": 12,
++          "log_sha256": "446d2160b3ea97e74742bffc099271e80d5a8e3fd560887f99c37bb93c502490",
++          "context": "24configurationcases also passed; later joint installed distribution validation remains OUT-VERIFY."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++          "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++          "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPROFILE-VAL1",
++          "severity": "P2",
++          "source": "independent validation implementer and reviewer",
++          "correction": "Three source-relative README links escape installed payload; use canonical repository URLs for source-only Assist/tool-scope/observation references, retaining shipped local provider-host link.",
++          "disposition": "resolved by original author in exact v2 and independently APPROVED with refreshed installed-link proof"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T00:02:16.951451+00:00"
++    },
++    {
++      "id": "OUT-VERIFY-01",
++      "title": "Integrated outbound-only validation",
++      "dependencies": [
++        "OUT-PACK-01",
++        "OUT-PROFILE-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_validation_implementer",
++      "review_agent_id": "/root/ha_outbound_validation_reviewer",
++      "status": "in_review",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ],
++      "candidate_revision": null,
++      "evidence": [
++        {
++          "kind": "independent_preflight_finding",
++          "id": "OUTPROFILE-VAL1",
++          "note": "Validation fixture authoring may continue independently; integrated proof/acceptance waits profile source amendment and independent approval. No feature byte edits by validation agents."
++        },
++        {
++          "kind": "installed_consumer",
++          "result": "PASS",
++          "checks": 8,
++          "artifacts": 44,
++          "log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "report_sha256": "4c04546f9239457de46bad071bd9d0b5839f5ccfaa705c62ae80a876c923bfad"
++        },
++        {
++          "kind": "interim_repository_check",
++          "result": "FAIL",
++          "duration": "4m36s",
++          "server_tests": 8627,
++          "failed": 1,
++          "failure": "Existing ScopedSqlWorkBudgetTest cleanupBlocked.await(1s), fetch=false; core source unchanged. Isolated investigation and final recheck pending.",
++          "log_sha256": "9b0c0235a254e072bc16c1a8b09ce5555cf0d4a2783f10da2fb6e5a4e75ef0b2"
++        },
++        {
++          "kind": "current_outbound_validation",
++          "ha_tests": 166,
++          "ha_failures": 0,
++          "sdk_wire_cases": 3,
++          "installed_checks": 8,
++          "artifact_files": 44,
++          "repository_check": "FAIL",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "consumer_log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "note": "Final validation implementation/evidence ready, acceptance explicitly blocked by OUTVERIFY-GLOBAL1. Empty-directory no-mutation assertion strengthened and independently probed."
++        }
++      ],
++      "findings": [],
++      "review": {
++        "state": "in_review",
++        "verdict": null,
++        "candidate_digest": null,
++        "report_path": null,
++        "report_sha256": null,
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T00:25:13.292097+00:00",
++      "verification_blockers": [
++        {
++          "id": "OUTVERIFY-GLOBAL1",
++          "requirement": "Required repository-wide check must pass without exclusions",
++          "result": "FAIL",
++          "command": "./gradlew check :plowshare-integration-home-assistant:installDist --max-workers=2",
++          "server_cases": 8627,
++          "failures": 2,
++          "test": "io.aeyer.plowshare.server.pool.ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied",
++          "variants": [
++            "fetch=false",
++            "fetch=true"
++          ],
++          "location": "ScopedSqlWorkBudgetTest.java:550",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "cause": "unresolved; full runs and isolated method failed, owning class passed; no causal/flake claim",
++          "next_action": "Investigate the SQL cleanup test in its owning platform scope, restore a green full repository check and independently re-review OUT-VERIFY. Do not waive acceptance or modify core to accommodate the adapter."
++        }
++      ]
+     }
+   ],
+   "history": [
+@@ -2681,6 +3122,189 @@
+         "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
+       },
+       "note": "Final source matches independent approvals; repository/SDK/package checks pass. 13 accepted and 11 awaiting_gate remain unchanged. No target merge/deployment/live authorization."
++    },
++    {
++      "at": "2026-11-21T23:23:44.569338+00:00",
++      "event": "outbound_amendment_ready_for_review",
++      "author": "/root",
++      "base": {
++        "commit": "6de685f63e060f3003cb93233d2567e004269755",
++        "date": "2026-11-22",
++        "branch": "codex/ha-outbound-delivery",
++        "working_tree_at_start": "clean",
++        "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++      },
++      "nodes_added": [
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "OUT-VERIFY-01"
++      ],
++      "previous_accepted_nodes_merged": 13,
++      "original_gated_nodes_unchanged": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "PERF-01",
++        "RELEASE-01",
++        "DEPLOY-01",
++        "LIVE-01"
++      ],
++      "note": "Current-main targeted review previously passed110 HA tests+86 selected core tests, SDK contract/boundary checks. PythonHA venv absent; no DB/live check. Source dispatch awaits independent OUT-PLAN approval."
++    },
++    {
++      "at": "2026-11-21T23:27:27.634645+00:00",
++      "event": "outbound_plan_changes_required",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++        "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++      },
++      "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++      "findings": [
++        "OUTPLAN-R1",
++        "OUTPLAN-R2"
++      ],
++      "note": "No source dispatch occurred. Common contract corrected to actual public Application provider policy."
++    },
++    {
++      "at": "2026-11-21T23:28:54.029858+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:28:54.031374+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PACK-01",
++      "implementer": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:28:54.032052+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:40:38.721983+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++        "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++        "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++        "approved_at": "2026-11-21T23:40:38.721906+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:44:52.589011+00:00",
++      "event": "outbound_ownership_refined",
++      "node": "OUT-PACK-01",
++      "note": "Narrow current read-provider intro links newhost; explicit lifecycle/Main-test paths refine reviewed packaging scope, no core/SDK/Assist changes."
++    },
++    {
++      "at": "2026-11-21T23:56:58.858987+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PACK-01",
++      "candidate": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:56:58.860522+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-VERIFY-01",
++      "implementer": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:58:46.806621+00:00",
++      "event": "outbound_profile_reopened_by_validation",
++      "node": "OUT-PROFILE-01",
++      "finding": "OUTPROFILE-VAL1",
++      "note": "Installed artifact boundary exposes three broken source-relative documentation links. Original frozen evidence retained; exact owner/reviewer amendment required."
++    },
++    {
++      "at": "2026-11-21T23:59:33.390530+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-22T00:02:16.951491+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      }
+     }
+   ],
+   "publication_guard": {
+@@ -2728,5 +3352,37 @@
+     "evidence": "docs/reviews/home-assistant-publication-verification.json",
+     "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+     "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
++  },
++  "current_baseline": {
++    "commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "working_tree_at_start": "clean",
++    "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++  },
++  "outbound_amendment": {
++    "date": "2026-11-22",
++    "host_contract": "docs/reviews/home-assistant-outbound-host-contract.md",
++    "original_gated_nodes_preserved": [
++      "HA-05",
++      "HA-06",
++      "HA-07",
++      "HA-08",
++      "HA-10",
++      "HA-11",
++      "VERIFY-01",
++      "PERF-01",
++      "RELEASE-01",
++      "DEPLOY-01",
++      "LIVE-01"
++    ],
++    "current_contract": "Actual SQL-unit two-second default, nested transaction deadline; accepted workflow duration warns without outcome replacement. Provider IO/poll/cleanup retain finite owner budgets.",
++    "independent_review_required_before_source_dispatch": true,
++    "node_ids": [
++      "OUT-PLAN-01",
++      "OUT-PACK-01",
++      "OUT-PROFILE-01",
++      "OUT-VERIFY-01"
++    ]
+   }
+ }

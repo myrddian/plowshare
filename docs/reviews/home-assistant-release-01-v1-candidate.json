@@ -1,0 +1,37 @@
+{
+  "candidate_id": "release-01-v1",
+  "node": "RELEASE-01",
+  "created_at": "2026-11-22T11:49:47.449806+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_release_readiness_implementer",
+  "reviewer_agent_id": "/root/ha_release_readiness_reviewer",
+  "files": {
+    "docs/home-assistant-delivery-plan.md": "e01369a376d773f309c2af8848c452f644b526eea6970ed56f32ab1936a19057",
+    "docs/reviews/home-assistant-release-readiness.md": "66967a9a572be7513ff0022210060154cee0cbcdbb6f3dc274565cbca4427326",
+    "integrations/home-assistant/RELEASE-RUNBOOK.md": "10763f6a2a1b68f964bcbea9ae2d54ad8a0576edb11442f69dc204bd618f8849"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-release-01-v1-state.json",
+    "sha256": "9e7b653fc9b1fe35e1530078e359fa419bb54fea4ae018c22763ba915c28bd97"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-release-01-v1.diff",
+    "sha256": "e0c253ea569b1b8a8c8be196add740dc16bfb0f928cd9687f350412289d5a8f8"
+  },
+  "dependencies": {
+    "VERIFY-01": {
+      "id": "verify-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-verify-01-v1-candidate.json",
+      "manifest_sha256": "b9f3e57fa47090bd8ad2ac876fc6a2211f173ad68ef43bec9cb20138eea9ab0c"
+    }
+  },
+  "structural_validation": {
+    "nodes": 30,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "retired_gate_consumers": 0,
+    "release_requires_cache_measurement": false
+  },
+  "limits": "Source release readiness only; no publication, merge, deployment, live HA/model/device acceptance or mandatory cache measurement."
+}

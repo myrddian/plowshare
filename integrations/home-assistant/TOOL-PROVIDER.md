@@ -4,8 +4,9 @@
 resource binding. `HomeAssistantToolProvider` hosts them through the existing
 public Java `RelayTools.Provider`; Plowshare continues to own agent execution,
 invocations, scope permissions and durable Relay messages. This is a Java
-composition API. The existing manual alias executable remains independent;
-packaging a new operator executable is a later delivery slice.
+composition API. The [outbound operator host](PROVIDER-HOST.md) packages that
+composition behind explicit `--provider` mode; legacy manual-alias arguments remain
+independent and compatible.
 
 | Suffix after the configured prefix | Input | Result |
 | --- | --- | --- |

@@ -1,0 +1,31 @@
+{
+  "kind": "profile_installed_documentation_amendment",
+  "original_package_evidence": "docs/reviews/home-assistant-out-pack-01-package-evidence.json",
+  "original_package_evidence_sha256": "cae02526993143cb906ddfef5cc554b1324df951ea965e08a714a4b11f2e8d60",
+  "changed_installed_files": [
+    "examples/outbound/README.md"
+  ],
+  "readme_sha256": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
+  "local_markdown_links": [
+    {
+      "from": "PROVIDER-HOST.md",
+      "target": "examples/outbound/README.md"
+    },
+    {
+      "from": "PROVIDER-HOST.md",
+      "target": "examples/outbound/readonly/provider.json"
+    },
+    {
+      "from": "PROVIDER-HOST.md",
+      "target": "examples/outbound/control/provider.json"
+    },
+    {
+      "from": "examples/outbound/README.md",
+      "target": "../../PROVIDER-HOST.md"
+    }
+  ],
+  "link_result": "PASS",
+  "all_other_installed_artifact_hashes_unchanged": true,
+  "build_log_sha256": "9041664aea27fc97a2435e6646984458f0d00d84f81fde663fce2efeb4e7a152",
+  "limits": "Documentation-only artifact amendment; all Java/config/source permissions unchanged, prior163test result remains scoped to same compiled bytes. Fresh integrated consumer validation still pending."
+}

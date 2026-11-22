@@ -1,4 +1,4 @@
-"""Stage a test-only fixture, then import its real SDK and HA modules."""
+"""Stage the installation component, then import its real SDK and HA modules."""
 
 import atexit
 import importlib.util
@@ -16,5 +16,5 @@ spec.loader.exec_module(packager)
 temporary = tempfile.TemporaryDirectory()
 atexit.register(temporary.cleanup)
 STAGING = Path(temporary.name)
-COMPONENT = packager.stage_test_fixture(STAGING)
+COMPONENT = packager.stage_component(STAGING)
 sys.path.insert(0, str(STAGING))

@@ -15,9 +15,10 @@ from custom_components.plowshare._vendor.plowshare import (
 )
 from custom_components.plowshare._vendor.plowshare.contracts import (
     UNSET,
-    AgentRunRequest,
+    AgentRunRequestEx,
     AskedViewDto,
-    ConversationOpenRequest,
+    ConversationOpenRequestEx,
+    ConversationStartedJobDto,
     ConversationTrajectoryRequest,
     ConversationViewDto,
     EntryPageViewDto,
@@ -25,7 +26,6 @@ from custom_components.plowshare._vendor.plowshare.contracts import (
     JobStatusRequest,
     ObservedJobDto,
     ObservedOutcomeDto,
-    ObservedStartedJobDto,
 )
 
 from custom_components.plowshare.agent import PENDING, UNCERTAIN, SdkConversationAgent
@@ -127,7 +127,7 @@ class FakeClient:
     async def request(self, request, **kwargs):
         assert kwargs["wait_for_capacity"] is False
         self.requests.append(request)
-        if isinstance(request, ConversationOpenRequest):
+        if isinstance(request, ConversationOpenRequestEx):
             value = ConversationViewDto(
                 id="conv-1",
                 project="house",
@@ -138,13 +138,13 @@ class FakeClient:
                 no_budget=False,
                 no_turn_cap=False,
             )
-        elif isinstance(request, AgentRunRequest):
+        elif isinstance(request, AgentRunRequestEx):
             self.submitted.set()
             if self.error is not None:
                 raise self.error
             if self.hold is not None:
                 await self.hold.wait()
-            value = ObservedStartedJobDto(id="job-1", conversation="conv-1")
+            value = ConversationStartedJobDto(id="job-1", conversation="conv-1")
         elif isinstance(request, JobStatusRequest):
             value = self.statuses.get(request.job) or (
                 self.status
@@ -167,7 +167,9 @@ class FakeClient:
                 )
         else:
             value = ()
-        return Reply("OK", None, value)
+        return Reply(
+            "ACCEPTED" if isinstance(request, AgentRunRequestEx) else "OK", None, value
+        )
 
     async def close(self):
         self.closed = True
@@ -187,6 +189,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             sessions,
             save,
             AsyncMock(return_value=client),
+            profile_id="fixture-entry:conversation",
         )
         return agent, client, snapshots
 
@@ -196,13 +199,15 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         second = await agent.ask(KEY, "And outside?")
         self.assertEqual(first.text, "The office is 22 degrees.")
         self.assertFalse(second.error)
-        runs = [r for r in client.requests if isinstance(r, AgentRunRequest)]
+        runs = [r for r in client.requests if isinstance(r, AgentRunRequestEx)]
         self.assertEqual(
-            [r.task for r in runs], ["What is the temperature?", "And outside?"]
+            [json.loads(r.task.split("\n", 1)[1])["input"] for r in runs],
+            ["What is the temperature?", "And outside?"],
         )
-        self.assertEqual([r.conversation for r in runs], ["conv-1", "conv-1"])
+        self.assertEqual(len({r.external_conversation for r in runs}), 1)
+        self.assertEqual(len({r.source for r in runs}), 1)
         self.assertEqual(
-            sum(isinstance(r, ConversationOpenRequest) for r in client.requests), 1
+            sum(isinstance(r, ConversationOpenRequestEx) for r in client.requests), 1
         )
         self.assertTrue(any(v[KEY]["phase"] == "sending" for v in snapshots))
         self.assertTrue(client.closed)
@@ -217,7 +222,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         answer = await agent.ask(KEY, "Turn the light on")
         self.assertEqual(answer.text, "The light is on.")
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
         reads = [
             r for r in client.requests if isinstance(r, ConversationTrajectoryRequest)
@@ -261,7 +266,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         answer = await agent.ask(KEY, "Why is the office warm?")
         self.assertEqual(answer.text, "The office is warm because the heater is on.")
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
 
     async def test_relay_wait_survives_restart_and_reuses_accepted_job(self):
@@ -272,7 +277,11 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         saved = decode_sessions(encode_sessions(agent.sessions))
         self.assertEqual(saved[KEY].phase, "waiting")
         restored = SdkConversationAgent(
-            SETTINGS, saved, AsyncMock(), AsyncMock(return_value=client)
+            SETTINGS,
+            saved,
+            AsyncMock(),
+            AsyncMock(return_value=client),
+            profile_id="fixture-entry:conversation",
         )
         client.entries = (
             *client.entries,
@@ -282,7 +291,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             (await restored.ask(KEY, "Did it work?")).text, "The light is on."
         )
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
 
     async def test_stalled_cleanup_keeps_admission_until_physical_drain(self):
@@ -304,14 +313,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await agent.ask(KEY, "Turn on the light")).text, PENDING)
         saved = decode_sessions(encode_sessions(agent.sessions))
         restored = SdkConversationAgent(
-            SETTINGS, saved, AsyncMock(), AsyncMock(return_value=client)
+            SETTINGS,
+            saved,
+            AsyncMock(),
+            AsyncMock(return_value=client),
+            profile_id="fixture-entry:conversation",
         )
         client.status = job(text="The light is on.")
         self.assertEqual(
             (await restored.ask(KEY, "Is it done?")).text, "The light is on."
         )
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
 
     async def test_lost_acknowledgment_is_retained_and_never_replayed(self):
@@ -321,16 +334,16 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         client.error = None
         self.assertEqual((await agent.ask(KEY, "Try again")).text, UNCERTAIN)
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
         self.assertEqual(
             decode_sessions(encode_sessions(agent.sessions))[KEY].phase, "uncertain"
         )
 
-    async def test_known_non_submission_and_refusal_do_not_wedge_session(self):
+    async def test_known_non_submission_and_capacity_refusal_do_not_wedge_session(self):
         for error in (
             TransportError(Delivery.NOT_SUBMITTED, "fixture"),
-            Refusal("FORBIDDEN", "private detail"),
+            Refusal("CAPACITY_EXHAUSTED", "private detail"),
         ):
             with self.subTest(error=type(error).__name__):
                 agent, client, _ = self.make()
@@ -352,7 +365,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.sessions[KEY].phase, "uncertain")
         self.assertTrue(client.closed)
         self.assertEqual(
-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
+            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
         )
 
     async def test_failure_or_budget_stop_never_speaks_partial_model_prose(self):

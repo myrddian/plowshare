@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "name": "home-assistant-control",
+  "executionAccount": "REPLACE_WITH_CONTROL_EXECUTION_PRINCIPAL",
+  "access": {
+    "accounts": []
+  },
+  "toolScopes": [
+    {
+      "scope": "ha-read",
+      "provider": "ha-read",
+      "grants": [
+        "ha_read_search",
+        "ha_read_describe",
+        "ha_read_read",
+        "ha_read_list_actions"
+      ]
+    },
+    {
+      "scope": "ha-control",
+      "provider": "ha-control",
+      "grants": [
+        "ha_control_describe_action",
+        "ha_control_execute_action"
+      ]
+    }
+  ],
+  "toolGrants": [
+    {
+      "toolScope": "ha-read",
+      "agent": "house_controller"
+    },
+    {
+      "toolScope": "ha-control",
+      "agent": "house_controller"
+    }
+  ],
+  "caps": {
+    "steps": 40,
+    "budget": 200,
+    "autoIncrease": false
+  },
+  "commands": {
+    "local": {
+      "mode": "off"
+    },
+    "server": {
+      "mode": "off"
+    }
+  }
+}

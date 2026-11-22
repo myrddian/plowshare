@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "bindings": [],
+  "providers": [
+    {
+      "provider": "ha-read",
+      "account": "REPLACE_WITH_READONLY_EXECUTION_PRINCIPAL",
+      "prefix": "ha_read_",
+      "leaseSeconds": 120
+    }
+  ]
+}

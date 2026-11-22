@@ -77,7 +77,9 @@ class Settings:
             raise ValueError("Anonymous voice access must be explicitly enabled")
 
 
-Phase = Literal["idle", "sending", "running", "waiting", "uncertain"]
+Phase = Literal[
+    "idle", "sending", "running", "waiting", "uncertain", "complete", "preparing"
+]
 
 
 @dataclass
@@ -93,6 +95,9 @@ class Session:
     job: str | None = None
     phase: Phase = "idle"
     cursor: int = 0
+    mapping: Literal["legacy", "external"] = "legacy"
+    binding: str | None = None
+    correlation: str | None = None
 
 
 def session_key(
@@ -122,6 +127,9 @@ def encode_sessions(sessions: dict[str, Session]) -> dict[str, object]:
             "job": item.job,
             "phase": item.phase,
             "cursor": item.cursor,
+            "mapping": item.mapping,
+            "binding": item.binding,
+            "correlation": item.correlation,
         }
         for key, item in sessions.items()
     }
@@ -139,7 +147,19 @@ def decode_sessions(value: object) -> dict[str, Session]:
             or len(key) != 64
             or any(c not in "0123456789abcdef" for c in key)
             or not isinstance(row, dict)
-            or set(row) != {"conversation", "job", "phase", "cursor"}
+            or set(row)
+            not in (
+                {"conversation", "job", "phase", "cursor"},
+                {
+                    "conversation",
+                    "job",
+                    "phase",
+                    "cursor",
+                    "mapping",
+                    "binding",
+                    "correlation",
+                },
+            )
         ):
             raise ValueError("Invalid Assist session")
         conversation, job, phase, cursor = (
@@ -153,15 +173,56 @@ def decode_sessions(value: object) -> dict[str, Session]:
                 required_text(identifier)
         if (
             not isinstance(phase, str)
-            or phase not in {"idle", "sending", "running", "waiting", "uncertain"}
+            or phase
+            not in {
+                "idle",
+                "sending",
+                "running",
+                "waiting",
+                "uncertain",
+                "complete",
+                "preparing",
+            }
             or type(cursor) is not int
             or not 0 <= cursor <= 2_147_483_647
-            or (phase in {"running", "waiting"} and (not job or not conversation))
+            or (
+                phase in {"running", "waiting", "complete"}
+                and (not job or not conversation)
+            )
             or (job is not None and conversation is None)
         ):
             raise ValueError("Invalid Assist lifecycle state")
-        # Restart during submission cannot establish whether the server accepted it.
+        mapping = row.get("mapping", "legacy")
+        binding, correlation = row.get("binding"), row.get("correlation")
+        if not isinstance(mapping, str) or mapping not in {"legacy", "external"}:
+            raise ValueError("Invalid Assist routing binding")
+        if mapping == "external":
+            for value in (binding, correlation):
+                if (
+                    not isinstance(value, str)
+                    or len(value) != 64
+                    or any(c not in "0123456789abcdef" for c in value)
+                ):
+                    raise ValueError("Invalid Assist routing binding")
+        elif (
+            phase not in {"idle", "sending", "running", "waiting", "uncertain"}
+            or binding is not None
+            or correlation is not None
+        ):
+            raise ValueError("Legacy correlation cannot invent routing authority")
+        # Old rows remain unbound and must not be imported into a new alias. A
+        # restart during submission cannot establish whether the server accepted it.
         result[key] = Session(
-            conversation, job, "uncertain" if phase == "sending" else phase, cursor
+            conversation,
+            job,
+            "uncertain"
+            if phase == "sending"
+            else "idle"
+            if phase == "preparing"
+            else phase,
+            cursor,
+            mapping,
+            binding,
+            correlation,
         )
     return result

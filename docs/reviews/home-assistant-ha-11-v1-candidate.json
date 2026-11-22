@@ -1,0 +1,69 @@
+{
+  "candidate_id": "ha-11-v1",
+  "node": "HA-11",
+  "created_at": "2026-11-22T11:40:14.370449+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_packaging_sdk_implementer",
+  "reviewer_agent_id": "/root/ha_packaging_sdk_reviewer",
+  "files": {
+    "integrations/home-assistant/assist/scripts/package.py": "ff10046a02786d8cc980b79328e1011ea8d7a495452f5737b2684a23f57f519e",
+    "integrations/home-assistant/assist/README.md": "d4be01129a4bf2aacb9e8f8533dcfd1f9334703a1a0d9df7b9df6af6b0a5f9df",
+    "integrations/home-assistant/assist/PACKAGE-PROFILES.md": "391815d7402eacd2e58e482b6e321186a6ccd826d14c8b9596033910044e2bf4",
+    "integrations/home-assistant/README.md": "acd72515ab9112195e63675f054ce46536a7e3c2b0953665e2bd99b36cabd1c7",
+    "integrations/home-assistant/PROVIDER-HOST.md": "fad3a553e713ba1a8fccff2f02394bf5ad7cc0f1df26fc1b67e72a892fe57666",
+    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "210b79f9782601ef6b85a72ccf0929b2521a48153873ddb541421ed31ae98fb2",
+    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "2b61f7f74181897edfef0cc8fc04a07e5e76464fab4277ecc522413ec45912e5",
+    "integrations/home-assistant/assist/custom_components/plowshare/strings.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/custom_components/plowshare/translations/en.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/tests/support.py": "f840b543eb4cda7446a8bfe6156717a2525fa881a5d4fd0f126249d665754943",
+    "integrations/home-assistant/assist/tests/test_home_assistant.py": "289e2ad6a0931eecf5d074cc00a8c13295b5c93378692268dada4b5640cef9f9",
+    "integrations/home-assistant/assist/tests/test_entry_setup.py": "ad4c17b000b24562479d40419879138eed4066c413789bf95e311b4923b5764c",
+    "integrations/home-assistant/assist/tests/test_conversation_config.py": "e2271007aeada442b8cba5fcdbf134bb0ebe1c566a5cc58facd9ff5b7d0f1f9a",
+    "integrations/home-assistant/assist/tests/test_packaging.py": "eff695f81f6087bbe852b67431dede718563221a8fc3a395f798c6f5f60fc553",
+    "integrations/home-assistant/assist/tests/test_install_lifecycle.py": "0bb33e47248391ad8c8e7ec2aaec29bb686267b461a68ee74694bee1afd1e5ab",
+    ".agents/guides/integrations.md": "3a3c684d1d5e948c34349e4326557dfa1978f6fa8bc0d5a737e160655c77553e",
+    "docs/reviews/home-assistant-ha-11-implementation.md": "0cd17375427b971743cffd3e63e86868662479e5acb1d356e2a8c50cbb556b1f"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-ha-11-v1-state.json",
+    "sha256": "d95e2977071ab68c4b4a7c60658428a6a95d846254b3221654be05c617654f3c"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-11-v1.diff",
+    "sha256": "a57dbfe2352ece9984665ba1e229536763ab421963c2c1ee94d3638d53e28b4f"
+  },
+  "dependencies": {
+    "HA-06": {
+      "id": "ha-06-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-06-v1-candidate.json",
+      "manifest_sha256": "cf7eac366e2391654667b1b204b11eafee784cfcae92f72ef43882c2897e5434"
+    },
+    "HA-07": {
+      "id": "ha-07-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-07-v1-candidate.json",
+      "manifest_sha256": "68311df2e9c62d0a0ff547f39fb3fd35ef74e8f5d94ac6ed619949366eb30aef"
+    },
+    "HA-08": {
+      "id": "ha-08-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-08-v1-candidate.json",
+      "manifest_sha256": "9685b039703ae04d9a10727ff042c1b2f922cee179a19a029b19cb56870fad88"
+    },
+    "HA-10": {
+      "id": "ha-10-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-10-v1-candidate.json",
+      "manifest_sha256": "b04aee138fa8d2cd36f88f6fee498ce723052006307b3a31b09b8667e871ea9f"
+    }
+  },
+  "structural_validation": {
+    "nodes": 30,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "retired_gate_consumers": 0,
+    "release_requires_cache_measurement": false
+  },
+  "limits": "SDK-only task/user semantics. No deployment/live/backend cache measurement or native prompt role claim.",
+  "deleted_paths": [
+    "integrations/home-assistant/assist/custom_components/plowshare/availability.py"
+  ]
+}

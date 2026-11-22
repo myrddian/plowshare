@@ -13,8 +13,15 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter:${project.property("testcontainersVersion")}")
     testImplementation("org.testcontainers:postgresql:${project.property("testcontainersVersion")}")
 }
-application { mainClass.set("io.aeyer.plowshare.integrations.Main") }
-distributions { main { contents { from("examples") { into("examples") } } } }
+application { mainClass.set("io.aeyer.plowshare.integrations.ha.HomeAssistantMain") }
+distributions {
+    main {
+        contents {
+            from("examples") { into("examples") }
+            from("PROVIDER-HOST.md")
+        }
+    }
+}
 tasks.test {
     inputs.dir("examples").withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("integration.worker.classpath", sourceSets.main.get().runtimeClasspath.asPath)

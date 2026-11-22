@@ -1,0 +1,634 @@
+--- a/integrations/home-assistant/PROVIDER-HOST.md
++++ b/integrations/home-assistant/PROVIDER-HOST.md
+@@ -115,9 +115,40 @@
+ join never creates a replacement task. The process keeps a shutdown hook for an
+ incomplete owner, including partial startup. A process stop observes/rejoins that
+ same owner within finite budgets. If it still cannot settle, the error remains
+-explicit: process termination never proves remote abort. Preserve journals and
+-inspect uncertainty before restarting; do not run a second host around an occupied
+-journal or treat a caller timeout as permission for another device action.
++explicit: process termination never proves remote abort. Preserve journals; a new
++owner must reconcile uncertainty before intake. Do not run a second host around an
++occupied journal or treat a caller timeout as permission for another device action.
++
++### Automatic recovery for a read-only container
++
++The native HA connection already reconnects through its adapter owner. A lost
++Plowshare connection stops this process; an external container restart policy can
++start a new process with the **same** configuration, credentials, image and durable
++journal mounts. For a read-only deployment with `control` absent and `actions`
++empty, Docker's [`unless-stopped` policy](https://docs.docker.com/engine/containers/start-containers-automatically/)
++provides process-failure and Docker/host-start recovery while respecting an
++operator's deliberate stop. Configure the existing container by its verified
++identity; do not create a second provider, use `--rm`, replace its journal or
++combine Docker restarts with another process manager. Docker must start at boot.
++Its restart delay backs off to one minute; the provider's finite connection,
++request and cleanup budgets still apply to every process attempt.
++
++A new process acquires the original journal exclusively and uses existing SDK
++reconciliation before intake. A retained execution intent becomes an UNKNOWN
++result rather than another HA read; a completed result is reused. An uncertain
++publication is inspected under its original identity and is never resent because
++its receipt is absent. Catalogue/result uncertainty, a broker-generation gap,
++invalid credentials or a corrupt/mismatched journal can therefore keep the
++provider unavailable while preserving its evidence. Automatic process recovery
++does not authorize automatic repair, credential fallback or work replay. Inspect
++those failures; do not delete state to make restarting succeed.
++
++Verify recovery with the provider idle: observe a fresh process in the same
++container after an application exit and after a provider-only connection outage,
++then confirm the original mounts, identity and replay fences, settled catalogue,
++and one fresh permitted read. Do not reboot the shared host or restart Docker as
++a routine check. Persisted restart policy and boot-enabled Docker establish the
++configured boot behavior; an actual host reboot is separate evidence.
+ 
+ ## Supported composition and acceptance
+ 
+--- a/integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java
++++ b/integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java
+@@ -8,9 +8,12 @@
+ import com.fasterxml.jackson.databind.JsonNode;
+ import com.fasterxml.jackson.databind.node.ObjectNode;
+ import io.aeyer.plowshare.integrations.Json;
++import io.aeyer.plowshare.integrations.ha.HomeAssistantProviderJournal.Delivery;
++import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
+ import io.aeyer.plowshare.protocol.RelayLog;
+ import io.aeyer.plowshare.protocol.RelayPort;
+ import io.aeyer.plowshare.protocol.SchemaCodec;
++import io.aeyer.plowshare.protocol.ToolValue;
+ import io.aeyer.plowshare.protocol.transport.MessageSegment;
+ import io.aeyer.plowshare.protocol.transport.PacketBudget;
+ import io.aeyer.plowshare.protocol.transport.PacketWire;
+@@ -21,12 +24,15 @@
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.time.Instant;
++import java.util.ArrayList;
+ import java.util.HashSet;
+ import java.util.List;
+ import java.util.Map;
++import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+ import java.util.concurrent.ArrayBlockingQueue;
++import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.ThreadPoolExecutor;
+ import java.util.concurrent.TimeUnit;
+@@ -44,6 +50,8 @@
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.Timeout;
+ import org.junit.jupiter.api.io.TempDir;
++import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.EnumSource;
+ 
+ /**
+  * Actual operator composition, default segmented/concurrent SDK and native HA sockets. The local
+@@ -187,6 +195,191 @@
+     }
+   }
+ 
++  @Test
++  void freshSdkOwnerConfirmsLostCatalogueBeforeRenewingWithoutReplayingItsPublication()
++      throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.RETAIN_LOST_CATALOGUE)) {
++      var configuration = readOnlyConfiguration(ha, broker);
++      try (var host = HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, host::cycle);
++      }
++      String original = broker.catalogues().getFirst().path("requestId").textValue();
++      try (var recovered =
++          HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        recovered.cycle();
++        assertEquals(2, broker.connections.get());
++        assertEquals(1, broker.count("relay.log"));
++        assertEquals(2, broker.catalogues().size());
++        assertEquals(
++            1,
++            broker.catalogues().stream()
++                .filter(value -> original.equals(value.path("requestId").textValue()))
++                .count());
++        assertEquals(4, broker.count("relay.consume"));
++        assertEquals(0, ha.count("config/entity_registry/list"));
++      }
++      assertEquals(0, ha.count("call_service"));
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  @Test
++  void freshSdkOwnerReconcilesAcceptedStateResultWithoutAnotherNativeRead() throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.RETAIN_LOST_STATE_RESULT)) {
++      var configuration = readOnlyConfiguration(ha, broker);
++      try (var host = HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        assertThrows(IOException.class, host::cycle);
++      }
++      broker.healthy();
++      ha.healthy();
++      JsonNode original = broker.stateResults().getFirst();
++      JsonNode result = Json.parse(original.path("text").textValue());
++      assertEquals("COMPLETED", result.path("state").textValue());
++      assertEquals(
++          "off",
++          Json.parse(result.path("text").textValue())
++              .path("states")
++              .get(0)
++              .path("value")
++              .textValue());
++      assertEquals(2, ha.count("get_states"), "One startup snapshot and one actual native read");
++      assertEquals(1, ha.count("config/entity_registry/list"));
++
++      try (var recovered =
++          HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++        recovered.cycle();
++        recovered.cycle();
++        assertEquals(2, broker.connections.get());
++        assertEquals(1, broker.stateResults().size());
++        assertEquals(original, broker.stateResults().getFirst());
++        assertEquals(
++            3,
++            ha.count("get_states"),
++            "The new HA connection bootstraps once; the original invocation is not collected again");
++        assertEquals(1, ha.count("config/entity_registry/list"));
++      }
++      JsonNode retained =
++          Json.parse(Files.readString(configuration.read().journal().resolve("tools.json")));
++      assertEquals(0, retained.path("receipts").size());
++      assertTrue(retained.path("publishing").isNull());
++      assertEquals(0, ha.count("call_service"));
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  @ParameterizedTest
++  @EnumSource(
++      value = RelayTools.Phase.class,
++      names = {"EXECUTING", "READY"})
++  void freshSdkOwnersNeverExecuteRetainedIntentsOrRecollectRetainedReadyResults(
++      RelayTools.Phase phase) throws Exception {
++    try (var ha = new HaPeer();
++        var broker = new BrokerPeer(Mode.EMPTY)) {
++      var configuration = readOnlyConfiguration(ha, broker);
++      seedReceipt(configuration, broker.invocation, broker.generation, phase);
++      for (int owner = 0; owner < 2; owner++) {
++        try (var recovered =
++            HomeAssistantProviderHost.open(configuration, ignored -> "fixture-token")) {
++          recovered.cycle();
++        }
++      }
++      assertEquals(2, broker.connections.get());
++      assertEquals(1, broker.results().size());
++      JsonNode publication = broker.results().getFirst();
++      assertEquals(
++          RelayTools.resultRequestId(broker.invocation), publication.path("requestId").textValue());
++      assertEquals(broker.invocation, publication.path("correlationId").textValue());
++      JsonNode result = Json.parse(publication.path("text").textValue());
++      assertEquals(
++          phase == RelayTools.Phase.EXECUTING ? "UNKNOWN" : "COMPLETED",
++          result.path("state").textValue());
++      if (phase == RelayTools.Phase.READY)
++        assertEquals("retained original observation", result.path("text").textValue());
++      assertEquals(0, ha.count("config/entity_registry/list"));
++      assertEquals(2, ha.count("get_states"), "Only the two fresh HA connection snapshots");
++      assertEquals(0, ha.count("call_service"));
++      broker.healthy();
++      ha.healthy();
++    }
++  }
++
++  private static void seedReceipt(
++      HomeAssistantProviderConfiguration configuration,
++      String invocation,
++      String generation,
++      RelayTools.Phase phase)
++      throws Exception {
++    var runtime = configuration.read().runtime(configuration.timing());
++    var resources = new HomeAssistantReadToolsTest.Resources();
++    var tools =
++        new HomeAssistantReadTools(
++            HomeAssistantReadToolsTest.SOURCE, runtime.prefix(), resources, resources);
++    String owner =
++        HomeAssistantToolProvider.ownerFingerprint(
++            configuration.plowshare(),
++            configuration.homeAssistant().endpoint(),
++            "fixture-token",
++            configuration.policyRevision(),
++            runtime.binding());
++    try (var journal =
++        new HomeAssistantToolJournal(
++            configuration.read().journal(),
++            HomeAssistantToolProvider.journalIdentity(runtime, tools),
++            HomeAssistantToolProvider.journalOwner(runtime, owner))) {
++      var call =
++          new RelayTools.Call(
++              "plowshare-tool/2",
++              invocation,
++              runtime.binding().project(),
++              runtime.binding().provider(),
++              "ha_read_search",
++              PRINCIPAL,
++              "fixture-job",
++              "fixture-call",
++              Instant.now().plusSeconds(30).toString(),
++              Map.of(),
++              SchemaCodec.fingerprint(tools.declarations().getFirst().schema()));
++      String request = Json.MAPPER.writeValueAsString(call);
++      journal.save(
++          new RelayTools.Receipt(
++              invocation, request, RelayTools.Phase.EXECUTING, Optional.empty(), Optional.empty()));
++      // Represent process loss after the original broker acknowledgement, either before a
++      // confirmed handler result or after that result was durably retained but not published.
++      var delivery =
++          new Delivery(invocation, "tool.ha-read.ha_read_search.request", generation, "1");
++      journal.captureDelivery(delivery);
++      journal.acknowledged(delivery);
++      if (phase == RelayTools.Phase.READY)
++        journal.save(
++            new RelayTools.Receipt(
++                invocation,
++                request,
++                phase,
++                Optional.of(
++                    new RelayTools.Result(
++                        RelayTools.State.COMPLETED, "retained original observation")),
++                Optional.empty()));
++    }
++  }
++
++  private HomeAssistantProviderConfiguration readOnlyConfiguration(HaPeer ha, BrokerPeer broker)
++      throws IOException {
++    configuration(ha, broker);
++    ObjectNode value =
++        (ObjectNode) Json.parse(Files.readString(directory.toRealPath().resolve("provider.json")));
++    value.remove("control");
++    ((ObjectNode) value.path("homeAssistant")).set("actions", Json.object());
++    ((ObjectNode) value.path("homeAssistant").path("entities").path("lamp"))
++        .set("attributes", Json.MAPPER.createArrayNode());
++    Path file = directory.toRealPath().resolve("readonly.json");
++    Files.writeString(file, value.toString());
++    return HomeAssistantProviderConfiguration.read(file);
++  }
++
+   private HomeAssistantProviderConfiguration configuration(HaPeer ha, BrokerPeer broker)
+       throws IOException {
+     Path examples = Path.of(System.getProperty("integration.examples"));
+@@ -206,7 +399,9 @@
+   private enum Mode {
+     EMPTY,
+     LOSE_CATALOGUE,
+-    LOSE_READ_RESULT
++    LOSE_READ_RESULT,
++    RETAIN_LOST_CATALOGUE,
++    RETAIN_LOST_STATE_RESULT
+   }
+ 
+   /** Native fixture accepts only the explicit startup/resource protocol used by this test. */
+@@ -298,8 +493,12 @@
+     final AtomicReference<Throwable> failure = new AtomicReference<>();
+     final AtomicBoolean closing = new AtomicBoolean();
+     final AtomicBoolean offered = new AtomicBoolean();
++    final AtomicBoolean stateOffered = new AtomicBoolean();
++    final AtomicBoolean lostReply = new AtomicBoolean();
+     final String invocation = UUID.randomUUID().toString();
++    final String stateInvocation = UUID.randomUUID().toString();
+     final String generation = UUID.randomUUID().toString();
++    final Map<String, Instant> publicationTimes = new ConcurrentHashMap<>();
+     final ThreadPoolExecutor replies =
+         new ThreadPoolExecutor(
+             1,
+@@ -397,17 +596,7 @@
+                         value.path("batchId").textValue(),
+                         "1",
+                         false);
+-                case "relay.log" ->
+-                    new RelayLog.Page(
+-                        new RelayLog.Scope(value.path("project").textValue(), false),
+-                        new RelayLog.Topic(
+-                            value.path("topic").textValue(), "TEXT", "300", null, "0", "0"),
+-                        "0",
+-                        "0",
+-                        null,
+-                        List.of(),
+-                        List.of(),
+-                        List.of());
++                case "relay.log" -> log(value);
+                 default -> throw new AssertionError("Unexpected SDK operation: " + type);
+               };
+           if (payload == null)
+@@ -425,26 +614,81 @@
+       }
+     }
+ 
+-    private Object publication(JsonNode value) {
++    private Object publication(JsonNode value) throws IOException {
+       publications.add(value.deepCopy());
++      Instant publishedAt = Instant.now();
++      publicationTimes.put(value.path("requestId").textValue(), publishedAt);
+       boolean catalogue = value.path("topic").textValue().endsWith(".catalog");
+       if (mode == Mode.LOSE_CATALOGUE && catalogue || mode == Mode.LOSE_READ_RESULT && !catalogue)
+         return null;
++      if ((mode == Mode.RETAIN_LOST_CATALOGUE && catalogue
++              || mode == Mode.RETAIN_LOST_STATE_RESULT
++                  && !catalogue
++                  && "ha_read_read"
++                      .equals(Json.parse(value.path("text").textValue()).path("tool").textValue()))
++          && lostReply.compareAndSet(false, true)) return null;
+       return new RelayPort.Published(
+           value.path("requestId").textValue(),
+           value.path("project").textValue(),
+           value.path("topic").textValue(),
+-          Long.toString(publications.size()),
+-          Instant.now());
++          Long.toString(
++              publications.stream()
++                  .filter(v -> v.path("topic").equals(value.path("topic")))
++                  .count()),
++          publishedAt);
++    }
++
++    private RelayLog.Page log(JsonNode query) {
++      String topic = query.path("topic").textValue();
++      String after = query.path("after").textValue();
++      List<JsonNode> retained =
++          mode == Mode.RETAIN_LOST_CATALOGUE || mode == Mode.RETAIN_LOST_STATE_RESULT
++              ? publications.stream()
++                  .filter(value -> topic.equals(value.path("topic").textValue()))
++                  .toList()
++              : List.of();
++      List<RelayLog.Event> events = new ArrayList<>();
++      for (int index = 0; index < retained.size(); index++) {
++        String position = Integer.toString(index + 1);
++        if (Long.parseLong(position) <= Long.parseLong(after)) continue;
++        JsonNode value = retained.get(index);
++        events.add(
++            new RelayLog.Event(
++                position,
++                value.path("requestId").textValue(),
++                RelayPort.publisher(PRINCIPAL),
++                Instant.parse(value.path("occurredAt").textValue()),
++                publicationTimes.get(value.path("requestId").textValue()),
++                value.path("correlationId").textValue(),
++                value.path("parentEventId").textValue(),
++                new RelayLog.Payload("TEXT", value.path("text").textValue(), null, null, null)));
++      }
++      String through = Integer.toString(retained.size());
++      return new RelayLog.Page(
++          new RelayLog.Scope(query.path("project").textValue(), false),
++          new RelayLog.Topic(topic, "TEXT", "300", null, through, "0"),
++          after,
++          events.isEmpty() ? after : events.getLast().position(),
++          null,
++          events,
++          List.of(),
++          List.of());
+     }
+ 
+     private RelayPort.Batch batch(JsonNode value) throws IOException {
+       String project = value.path("project").textValue(), topic = value.path("topic").textValue();
+       String group = value.path("group").textValue(),
+           consumer = value.path("consumerId").textValue();
+-      if (mode != Mode.LOSE_READ_RESULT
+-          || !topic.equals("tool.ha-read.ha_read_search.request")
+-          || !offered.compareAndSet(false, true))
++      boolean state =
++          mode == Mode.RETAIN_LOST_STATE_RESULT
++              && topic.equals("tool.ha-read.ha_read_read.request")
++              && !results().isEmpty()
++              && stateOffered.compareAndSet(false, true);
++      boolean search =
++          (mode == Mode.LOSE_READ_RESULT || mode == Mode.RETAIN_LOST_STATE_RESULT)
++              && topic.equals("tool.ha-read.ha_read_search.request")
++              && offered.compareAndSet(false, true);
++      if (!state && !search)
+         return new RelayPort.Batch(
+             project,
+             topic,
+@@ -457,9 +701,12 @@
+             null,
+             null,
+             List.of());
++      String tool = state ? "ha_read_read" : "ha_read_search";
+       JsonNode declaration =
+-          Json.parse(catalogues().getFirst().path("text").textValue()).path("tools").get(0);
+-      assertEquals("ha_read_search", declaration.path("name").textValue());
++          Json.parse(catalogues().getFirst().path("text").textValue())
++              .path("tools")
++              .get(state ? 2 : 0);
++      assertEquals(tool, declaration.path("name").textValue());
+       var schema =
+           SchemaCodec.decode(
+               Json.MAPPER.convertValue(
+@@ -467,24 +714,24 @@
+       var call =
+           new RelayTools.Call(
+               "plowshare-tool/2",
+-              invocation,
++              state ? stateInvocation : invocation,
+               project,
+               "ha-read",
+-              "ha_read_search",
++              tool,
+               PRINCIPAL,
+               "fixture-job",
+               "fixture-call",
+               Instant.now().plusSeconds(30).toString(),
+-              Map.of(),
++              state ? stateArguments() : Map.of(),
+               SchemaCodec.fingerprint(schema));
+       var event =
+           new RelayLog.Event(
+               "1",
+-              invocation,
++              call.invocationId(),
+               "tool-runtime",
+               Instant.now(),
+               Instant.now(),
+-              invocation,
++              call.invocationId(),
+               "fixture-source",
+               new RelayLog.Payload("TEXT", Json.MAPPER.writeValueAsString(call), null, null, null));
+       return new RelayPort.Batch(
+@@ -502,6 +749,16 @@
+           generation);
+     }
+ 
++    private Map<String, ToolValue> stateArguments() throws IOException {
++      JsonNode result = Json.parse(results().getFirst().path("text").textValue());
++      JsonNode revision = Json.parse(result.path("text").textValue()).path("revision");
++      return Map.of(
++          "aliases",
++          new ToolValue.Array(List.of(new TextParameter("lamp"))),
++          "revision",
++          Json.MAPPER.treeToValue(revision, ToolValue.class));
++    }
++
+     private static void send(WebSocket socket, Object packet) throws IOException {
+       if (!socket.send(Json.MAPPER.writeValueAsString(packet)))
+         throw new IOException("Fixture socket refused packet");
+@@ -525,6 +782,12 @@
+     List<JsonNode> results() {
+       return publications.stream()
+           .filter(v -> v.path("topic").textValue().endsWith(".result"))
++          .toList();
++    }
++
++    List<JsonNode> stateResults() {
++      return results().stream()
++          .filter(value -> stateInvocation.equals(value.path("correlationId").textValue()))
+           .toList();
+     }
+ 
+--- /dev/null
++++ b/docs/reviews/home-assistant-recover-01-test-implementation.md
+@@ -0,0 +1,65 @@
++# RECOVER-01 — Read-provider restart evidence
++
++Test implementer: `/root/ha_recovery_implementer`. Independent review and final
++operational acceptance are coordinated by `/root`; this report is not approval.
++Only the existing `OutboundProviderSdkValidationTest` was changed. Its initial
++working-tree bytes were preserved before editing; the owned diff is relative to
++that snapshot because the class already belonged to earlier uncommitted work.
++No runtime, core, SDK, protocol, shared-runtime or server implementation changed.
++
++## Recovery contract exercised
++
++The fixture uses the real Java SDK's default segmented concurrent WebSocket
++transport, real native HA WebSockets, the actual provider/host/read handlers and
++the same on-disk `HomeAssistantToolJournal` across fully closed and freshly opened
++owners. Broker outcomes are scripted; this proves public-protocol and local
++recovery behavior, not server authorization or a host reboot. Every new recovery
++case removes the control provider, clears actions and selects state-only data.
++No live endpoint or private credential was accessed.
++
++Four new cases complement the existing three cases:
++
++- A lost catalogue reply with a retained original event is confirmed through the
++  original publication ID on a fresh SDK owner. The new owner renews its lease
++  only after reconciliation; the original catalogue is never published again.
++- Discovery obtains a real source revision, followed by `ha_read_read` fetching
++  a native state. The result event is accepted but its application reply is lost.
++  A fresh SDK owner reconciles that exact event/result and polls without invoking
++  the original read again. The fixture observes one metadata collection and one
++  native invocation read. Each HA connection still performs its legitimate
++  startup snapshot: `get_states` counts are two before restart and three after.
++  Settled receipts retire into the preserved broker-position fences.
++- A durable EXECUTING receipt, including its original delivery/ack evidence,
++  becomes UNKNOWN without running a resource handler. A second fresh SDK owner
++  does not publish a replacement result or recollect state.
++- A durable READY receipt with the original delivery/ack evidence publishes the
++  retained COMPLETED result once. A second fresh SDK owner does not repeat it.
++
++Both existing absence cases remain unchanged in meaning: an unconfirmed
++catalogue/result stays fenced when read-only reconciliation finds no event.
++Absence never authorizes another publication or native collection. The existing
++normal two-catalogue test also remains green; it is not used to enable control
++for this deployment.
++
++## Actual validation
++
++The final focused command passed all seven cases with zero failures/errors:
++
++```sh
++./gradlew :plowshare-integration-home-assistant:spotlessApply \
++  :plowshare-integration-home-assistant:spotlessCheck \
++  :plowshare-integration-home-assistant:test \
++  --tests io.aeyer.plowshare.integrations.ha.OutboundProviderSdkValidationTest \
++  --max-workers=2
++```
++
++Final log: `recovery-focused-v3.log`, 10 seconds, 28 actionable tasks, five
++executed and 23 up to date. Earlier fixture-only failure and intermediate logs
++are preserved privately. The failure was corrected at the fixture's public
++`ToolValue` decoding boundary; no production coercion was added. Final source,
++XML, log and owned-diff hashes are in the private test evidence manifest.
++
++Repository-wide formatting/checks and live Docker restart/network recovery are
++separate coordinator work. These tests do not justify replaying uncertain work,
++changing credentials/policy/schema identity, resetting a journal, or forcing a
++second owner around a still-running process or occupied journal lock.
+--- /dev/null
++++ b/docs/reviews/home-assistant-read-provider-recovery.md
+@@ -0,0 +1,79 @@
++# RECOVER-01 — Automatic read-provider recovery
++
++Implementer/coordinator: `/root`. Recovery test implementer:
++`/root/ha_recovery_implementer`. Independent reviewer:
++`/root/ha_deployment_reviewer`. The user authorized provider-only automatic
++recovery while preserving journals, the existing SDK and disabled control.
++
++## Deployment and safety contract
++
++The existing Production read-provider container now has Docker's
++[`unless-stopped` restart policy](https://docs.docker.com/engine/containers/start-containers-automatically/).
++Docker is enabled at host boot. This restarts the same container after an ordinary
++process failure or Docker/host start, respecting an operator's deliberate stop.
++No second provider, process manager, container recreation, image/config/credential
++change or journal reset was introduced. Docker supplies bounded restart backoff;
++each SDK connection, request and cleanup keeps its existing finite budget.
++
++All 30 HA production source files, 4,042 protected core/protocol/SDK/shared-runtime
++source files and 28 deployed launchers/JARs are unchanged. The policy update itself
++did not restart the provider. Its original persistent journal mount, owner,
++configuration identity and replay fences remain intact. The same fixed 68-entity
++state/unit allowlist, empty actions/subscriptions and absent control block remain.
++No HA, main Plowshare server, Docker daemon or shared host restart was performed.
++The actual main-server container identity/start time/image were checked unchanged.
++
++HA already maintains its native connection. A lost Plowshare connection stops the
++provider; Docker starts a fresh process only after the previous process exits.
++That process exclusively opens the original journal and reconciles through the
++existing SDK. EXECUTING becomes UNKNOWN rather than another native invocation;
++READY reuses its retained result; uncertain catalogue/results are inspected under
++their original event identity. Missing receipts do not authorize republishing or
++handler replay. Corrupt/mismatched state, expired credentials, retained gaps and
++unconfirmed publication uncertainty still fail closed, potentially leaving the
++provider unavailable while restarts back off. Recovery is not automatic repair.
++
++## Verification
++
++Seven focused real-SDK recovery cases passed, including fresh SDK connections and
++the same disk journal for catalogue/result acknowledgement loss, positive retained
++receipt reconciliation, EXECUTING-to-UNKNOWN and READY-result publication once.
++The existing missing-receipt cases remain fenced. The genuine HA read test counts
++connection bootstrap snapshots separately from native invocation: a new HA owner
++adds its necessary initial snapshot, without repeating the accepted handler or
++its metadata query. See the [test implementation evidence](home-assistant-recover-01-test-implementation.md).
++
++Formatting, all 189 HA Java cases, the default repository check and installDist
++passed (81 seconds, 165 tasks). No database tests were enabled. The rebuilt runtime
++binaries exactly match the already deployed ones; only tests/docs changed.
++
++The independent [ops-v3 preflight](home-assistant-recover-01-ops-v3-preflight.md)
++binds the exact policy/fault scripts. An earlier precondition refused a mount-list
++ordering difference before any mutation; its receipt confirms no attempt or policy
++change. The corrected comparison requires unique destinations and exact source/RW
++values. Original candidates and reports remain immutable.
++
++Actual provider-only checks then passed:
++
++- The idle provider received its own normal SIGTERM inside its container. Docker
++  restarted the same container automatically; no Docker stop/force kill was used.
++- Only that container's bridge attachment was temporarily disconnected. It exited
++  during the outage and restarted automatically. A finally step restored the same
++  bridge attachment, and the new process reconnected successfully.
++- Each recovery required a changed catalogue request ID, a confirmation published
++  no earlier than the new process start and an unexpired lease. An old confirmed
++  lease could not satisfy readiness. Original journal identity/owner and all
++  original replay fences were preserved; no unresolved receipts remained.
++- The three original Production jobs remained byte-for-byte unchanged across the
++  faults, with no new model submission. One separately identified fresh acceptance
++  request through HA Conversation then completed DONE/ANSWERED with three model
++  calls and two tools (search/read). Its actual permitted HA result was AVAILABLE,
++  nonstale and unit-only. No control tool ran. Raw identities, readings, endpoint
++  and credential details remain private.
++
++Final runtime evidence confirms policy unless-stopped, two automatic restarts,
++restored network, fresh active catalogue, settled receipts, original mounts and
++unchanged binaries/main server. Actual host reboot was not performed: boot recovery
++is established as configured behavior from the enabled Docker service and
++persisted policy, not claimed as a live reboot test. The broader LIVE-01 voice,
++AI Task, follow-up/isolation and physical-control matrix remains open.

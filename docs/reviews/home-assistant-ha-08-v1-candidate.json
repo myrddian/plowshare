@@ -1,0 +1,39 @@
+{
+  "candidate_id": "ha-08-v1",
+  "node": "HA-08",
+  "created_at": "2026-11-22T11:24:22.139262+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_structured_sdk_implementer",
+  "reviewer_agent_id": "/root/ha_structured_sdk_reviewer",
+  "files": {
+    "integrations/home-assistant/assist/custom_components/plowshare/structured.py": "1d60788b772f7c2ec6f3c4d79acc5ee23a914be4b33fc70df8092803dcc50b5b",
+    "integrations/home-assistant/assist/custom_components/plowshare/ai_task.py": "28d806febd0a7918c1227bfbf665368789131c0e6e644bbb6baeb3d7cabf7103",
+    "integrations/home-assistant/assist/tests/test_structured.py": "304cbdb7631acc76b372fa6be42bbaf2f7c15c1f23ca4fe6a9f5281c9406ead0",
+    "integrations/home-assistant/assist/tests/test_ai_task.py": "22f89695978307fa7095408396aed8d1626c5b034d217e35a46d4b557aa64c07",
+    "docs/reviews/home-assistant-ha-08-implementation.md": "4279b7a32f038e745fe434278b63c5a3b4fc9f86acf859e6c6b95ffe92786bf9"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-ha-08-v1-state.json",
+    "sha256": "eb3f2c4ab1a7c1932eb07e78d9f1e44fc44ff9a6d425ce719e21ee1140e4be2a"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-08-v1.diff",
+    "sha256": "96c15295014cec5c97114191c9c6cd79892e05c676f5d23f679cf4db5256e766"
+  },
+  "dependencies": {
+    "HA-07": {
+      "id": "ha-07-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-07-v1-candidate.json",
+      "manifest_sha256": "68311df2e9c62d0a0ff547f39fb3fd35ef74e8f5d94ac6ed619949366eb30aef"
+    }
+  },
+  "structural_validation": {
+    "nodes": 30,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "retired_gate_consumers": 0,
+    "release_requires_cache_measurement": false
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

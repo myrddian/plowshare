@@ -1,0 +1,21 @@
+{
+  "candidate_id": "ha-fix-02-v1",
+  "node": "HA-FIX-02",
+  "created_at": "2026-11-22T20:04:20.240007+00:00",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "8f3e02ec7d33571c7b496c7470495799f135f0153fa07a56c9c906a73fceb51e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "88ee7b0bdf48ff9703230d9f092c0ca30c2fd6d33c6c539621c081fccd379877",
+    "integrations/home-assistant/PROVIDER-HOST.md": "6475a74890633087cd6d85ce2c021e619f5f225790c042557aed51b8e6760615",
+    "docs/reviews/home-assistant-ha-fix-02-implementation.md": "3a02cfd6644df38da53c42fdc89c18feda42ad40ca4386c945f6ef55c80f79f2"
+  },
+  "private_evidence": {
+    "/private/tmp/ha-read-provider-20261123/fix02-focused-v2.log": "9533f521ee00e07b48e31273f90307f1cf0900caa37d61e6dc8af767c709f4df",
+    "/private/tmp/ha-read-provider-20261123/fix02-final-check.log": "2c9401cdb50d5f8813e93e381356a8d4192a9eb37d73dba4dff5336f57d3ac99",
+    "/private/tmp/ha-read-provider-20261123/fix02-installed-v2-report.json": "20563435d616c50907f7e881db8d267e2628e5aa13f8ca8ec8d6a9438532c79a",
+    "/private/tmp/ha-read-provider-20261123/fix02-installed-v2.log": "45c412d228cda8276033e6996a406179383c57ba0eaf316cab7e0744ff940889",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/rollout-candidate.json": "0270cc89ab3ba8d51f9956e6d42006e99b8bdf3f19d2e2616a0720c7a5d1a35f"
+  },
+  "scope": "Adapterreadschemapresentationonly;strictobjectcontractpreserved. Operationalrolloutconditionalcandidateboundprivately, no liveacceptanceclaim."
+}

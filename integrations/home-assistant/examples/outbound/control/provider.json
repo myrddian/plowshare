@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "plowshare": "https://plowshare.example.invalid",
+  "binding": "house",
+  "policyRevision": "outbound-v1",
+  "homeAssistant": {
+    "endpoint": "https://home-assistant.example.invalid",
+    "tokenEnv": "HA_TOKEN",
+    "entities": {
+      "lamp": {
+        "entity": "light.example_lamp",
+        "attributes": [
+          "brightness"
+        ]
+      }
+    },
+    "actions": {
+      "lamp_on": {
+        "service": "light.turn_on",
+        "targets": [
+          "light.example_lamp"
+        ],
+        "parameters": {},
+        "required": []
+      }
+    },
+    "subscriptions": []
+  },
+  "read": {
+    "project": "home-assistant-control",
+    "provider": "ha-read",
+    "account": "REPLACE_WITH_CONTROL_EXECUTION_PRINCIPAL",
+    "prefix": "ha_read_",
+    "tokenEnv": "PLOWSHARE_CONTROL_TOKEN",
+    "journal": "private/read",
+    "leaseSeconds": 120
+  },
+  "control": {
+    "project": "home-assistant-control",
+    "provider": "ha-control",
+    "account": "REPLACE_WITH_CONTROL_EXECUTION_PRINCIPAL",
+    "prefix": "ha_control_",
+    "tokenEnv": "PLOWSHARE_CONTROL_TOKEN",
+    "journal": "private/control",
+    "leaseSeconds": 120,
+    "allowedActions": [
+      "lamp_on"
+    ]
+  },
+  "timing": {
+    "connectTimeoutMillis": 20000,
+    "requestTimeoutMillis": 2000,
+    "cleanupTimeoutMillis": 2000,
+    "pollIntervalMillis": 500,
+    "renewEveryMillis": 10000,
+    "metadataMaxAgeMillis": 30000
+  }
+}

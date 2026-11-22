@@ -1,0 +1,66 @@
+{
+  "candidate_id": "out-profile-01-v2",
+  "node": "OUT-PROFILE-01",
+  "created_at": "2026-11-22T00:00:13.055382+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_outbound_profiles_implementer",
+  "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
+  "files": {
+    "integrations/home-assistant/examples/outbound/README.md": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
+    "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
+    "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
+    "integrations/home-assistant/examples/outbound/control/application/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/outbound/control/provider.json": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+    "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
+    "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
+    "integrations/home-assistant/examples/outbound/readonly/application/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/outbound/readonly/provider.json": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "a2d999582ae59358f5ae33a51774cc8f15ac3234d381edbe47d8e03d5379d216",
+    "docs/reviews/home-assistant-out-profile-01-v2-implementation.md": "51f5a8501b1eadb5ae2b8db469bdf4d5331de03ad87e48e8f720cedd730b3724",
+    "docs/reviews/home-assistant-out-profile-01-v2-package-evidence.json": "c7c2ec0ea5b6f12f2222e07b567632f5c1da190ffd21c6528125069a714ca706"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-out-profile-01-v2-state.json",
+    "sha256": "45e1fda62b5731e688b6cdc782be688af984bc2d0d9cc24732072ec389cac44a"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-out-profile-01-v2.diff",
+    "sha256": "f36f9e26b115b41c203a8799c967e93b2d2d5be5030f8cd65e7f04e619c1e729"
+  },
+  "dependencies": {
+    "OUT-PLAN-01": {
+      "id": "out-plan-01-v2",
+      "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
+      "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
+    },
+    "CORE-04": {
+      "id": "ha-core-04-v1",
+      "manifest_path": "docs/reviews/home-assistant-core-04-v1-candidate.json",
+      "manifest_sha256": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0"
+    },
+    "HA-03": {
+      "id": "ha-ha-03-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+      "manifest_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424"
+    },
+    "HA-04": {
+      "id": "ha-ha-04-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-04-v2-candidate.json",
+      "manifest_sha256": "a8a46645535397cf3b01b2298b7e96af1b441f78377d97acb07a899647928c96"
+    },
+    "HA-09": {
+      "id": "ha-ha-09-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-09-v1-candidate.json",
+      "manifest_sha256": "293509f545137d676861c499208d8745e5f936f1c5e890bf58c4e2244fadc8f8"
+    }
+  },
+  "structural_validation": {
+    "nodes": 28,
+    "edges": 55,
+    "acyclic": true,
+    "independent_roles": true,
+    "original_gated_nodes": 11,
+    "all_four_gates_unsatisfied": true
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

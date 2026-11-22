@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "name": "home-assistant-readonly",
+  "executionAccount": "REPLACE_WITH_READONLY_EXECUTION_PRINCIPAL",
+  "access": {
+    "accounts": []
+  },
+  "toolScopes": [
+    {
+      "scope": "ha-read",
+      "provider": "ha-read",
+      "grants": [
+        "ha_read_search",
+        "ha_read_describe",
+        "ha_read_read",
+        "ha_read_list_actions"
+      ]
+    }
+  ],
+  "toolGrants": [
+    {
+      "toolScope": "ha-read",
+      "agent": "house_reader"
+    }
+  ],
+  "caps": {
+    "steps": 40,
+    "budget": 200,
+    "autoIncrease": false
+  },
+  "commands": {
+    "local": {
+      "mode": "off"
+    },
+    "server": {
+      "mode": "off"
+    }
+  }
+}

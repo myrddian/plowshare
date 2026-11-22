@@ -1,0 +1,956 @@
+{
+  "kind": "HA integration and recovery publication verification",
+  "captured_at": "2026-11-22T21:58:53.468535+00:00",
+  "main_baseline": "4a3ed34eea2d7176e972e5fb08a96f2420b931d6",
+  "test_fixture_commit": "7394f5ef01ce5c1b488eb77c146cd2e1ea862407",
+  "source_snapshot": {
+    ".agents/guides/integrations.md": "3a3c684d1d5e948c34349e4326557dfa1978f6fa8bc0d5a737e160655c77553e",
+    "docs/home-assistant-delivery-plan.md": "880e9e82faf587805fcb428482054ba646655976ca8dd980c7607e8362775837",
+    "docs/home-assistant-integration-design-and-plan.md": "2a8f9a9e93edef2a726df914066289a06b2fd428deb54832c39f82d8175a9266",
+    "integrations/home-assistant/ACTION-PROVIDER.md": "b8bc91245c793865fe3d11ac235d9702675d130cc0d16b0c6ae58fd020901569",
+    "integrations/home-assistant/OBSERVATION-ROUTES.md": "7aa3092688d1749938979e7d879ca8c4085f2f2539cdeaa8a73f587e5ca0231a",
+    "integrations/home-assistant/PROVIDER-HOST.md": "5b2f76c9d94874235a167f0f7974908a669387df40833b9599fc880b9613e39e",
+    "integrations/home-assistant/README.md": "acd72515ab9112195e63675f054ce46536a7e3c2b0953665e2bd99b36cabd1c7",
+    "integrations/home-assistant/RELEASE-RUNBOOK.md": "217212652242e1150cdf382fcadb9f12b73fa15bceababa64ec28f168a084b46",
+    "integrations/home-assistant/RESOURCE-CONTRACTS.md": "dd64f459d73621ea697a40c571cb232d77ad6dc1dd76ea22b4ed488764e88882",
+    "integrations/home-assistant/TOOL-PROVIDER.md": "3ca0f018f553c0412b9ea4aeb3ccdf6a2bf1ce164319caacc53eb8446e07fbd2",
+    "integrations/home-assistant/assist/PACKAGE-PROFILES.md": "391815d7402eacd2e58e482b6e321186a6ccd826d14c8b9596033910044e2bf4",
+    "integrations/home-assistant/assist/README.md": "4f9845e84c36ec29ad3d750baa1f1cfd47ccdb33eee4635a343411dfe01bf530",
+    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "210b79f9782601ef6b85a72ccf0929b2521a48153873ddb541421ed31ae98fb2",
+    "integrations/home-assistant/assist/custom_components/plowshare/agent.py": "0bea26471ab9511271a26c6a6cb6b585205e73889dc55c02da583b264cf7171c",
+    "integrations/home-assistant/assist/custom_components/plowshare/ai_task.py": "28d806febd0a7918c1227bfbf665368789131c0e6e644bbb6baeb3d7cabf7103",
+    "integrations/home-assistant/assist/custom_components/plowshare/config.py": "0e8a1845335fb7173ad0ea2a01a2ea0f5db0d5a5d506cdd29241c3d33def81b1",
+    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "2b61f7f74181897edfef0cc8fc04a07e5e76464fab4277ecc522413ec45912e5",
+    "integrations/home-assistant/assist/custom_components/plowshare/const.py": "e69077ac31d7e170b104f4e38000d55b51f0215fad44b64d0c3b1a1fc317d873",
+    "integrations/home-assistant/assist/custom_components/plowshare/conversation.py": "746df42a7b8f71a44327654cc80d165b8cb8f551464f255b2828f506ef6b8de8",
+    "integrations/home-assistant/assist/custom_components/plowshare/manifest.json": "e572fa360739e045f988bb638ff36dee212518f6191f2194338b702e13015897",
+    "integrations/home-assistant/assist/custom_components/plowshare/models.py": "1289cc93024ba4d05fe0e86db854afefabb561e79e61e202b4eb48dc2389262f",
+    "integrations/home-assistant/assist/custom_components/plowshare/requests.py": "15a6cd457b02c7236e52d77a56a7cd47357b91409524fa569e2b50ed8ba3ba23",
+    "integrations/home-assistant/assist/custom_components/plowshare/runtime.py": "0b7b4d298a8bbed69a9e572b736b8eadf1dbb9a6c8bc62badb89a4d40828de92",
+    "integrations/home-assistant/assist/custom_components/plowshare/storage.py": "4161b97a7f1330ec1a5e13a34e1ad0c861730a4911738899e2089fa3cd16b257",
+    "integrations/home-assistant/assist/custom_components/plowshare/strings.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/custom_components/plowshare/structured.py": "1d60788b772f7c2ec6f3c4d79acc5ee23a914be4b33fc70df8092803dcc50b5b",
+    "integrations/home-assistant/assist/custom_components/plowshare/translations/en.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/custom_components/plowshare/validation.py": "a4b081f8ca396e62a9f87e1a6d2dfa5c72ac1ceb71e6aa24760b8e54f63cbfa5",
+    "integrations/home-assistant/assist/pyproject.toml": "01c3de637c44fc6a086365dc91e4349cf6b54ecb2ca00a21812f350f2da824af",
+    "integrations/home-assistant/assist/scripts/check.py": "49c23ec87a8f11c569ddec5253114b76933bc4a6c7caadd594ca51dde8c2ecee",
+    "integrations/home-assistant/assist/scripts/package.py": "ff10046a02786d8cc980b79328e1011ea8d7a495452f5737b2684a23f57f519e",
+    "integrations/home-assistant/assist/tests/installed_contract.py": "75e6c93dc43877008b1cb3f2ce583cf8e5d8448c1a6123d75e325312308cea09",
+    "integrations/home-assistant/assist/tests/support.py": "f840b543eb4cda7446a8bfe6156717a2525fa881a5d4fd0f126249d665754943",
+    "integrations/home-assistant/assist/tests/test_agent.py": "0e11cd5d5c9f0d82760d43457f2d24fc33234f44922337c6569597f3e43ce92c",
+    "integrations/home-assistant/assist/tests/test_ai_task.py": "22f89695978307fa7095408396aed8d1626c5b034d217e35a46d4b557aa64c07",
+    "integrations/home-assistant/assist/tests/test_assist_pipeline.py": "30a73cd5d7bed02bfec3008d95a10b62dc85637849da30984df27f7647f46226",
+    "integrations/home-assistant/assist/tests/test_conversation_config.py": "e2271007aeada442b8cba5fcdbf134bb0ebe1c566a5cc58facd9ff5b7d0f1f9a",
+    "integrations/home-assistant/assist/tests/test_entry_setup.py": "ad4c17b000b24562479d40419879138eed4066c413789bf95e311b4923b5764c",
+    "integrations/home-assistant/assist/tests/test_gateway.py": "a3484daa56e8d8e02af8acd990c0e16b3fe156b8206cbd224803342f7b6f0e3a",
+    "integrations/home-assistant/assist/tests/test_home_assistant.py": "289e2ad6a0931eecf5d074cc00a8c13295b5c93378692268dada4b5640cef9f9",
+    "integrations/home-assistant/assist/tests/test_install_lifecycle.py": "0bb33e47248391ad8c8e7ec2aaec29bb686267b461a68ee74694bee1afd1e5ab",
+    "integrations/home-assistant/assist/tests/test_installed_contract.py": "bba12505679d9b2334b43bfe881dad576acc32a531bbb1913e6b3a11f291ffc1",
+    "integrations/home-assistant/assist/tests/test_packaging.py": "eff695f81f6087bbe852b67431dede718563221a8fc3a395f798c6f5f60fc553",
+    "integrations/home-assistant/assist/tests/test_socket.py": "93e0cef063178106cf12c3fd7ea08b92d49434c81f9bbbaa7c548852bcde8c38",
+    "integrations/home-assistant/assist/tests/test_storage.py": "5fe70f0ead268e08e2cf087639c77bcfc8a5a423c62c418cbae97697417daa50",
+    "integrations/home-assistant/assist/tests/test_structured.py": "304cbdb7631acc76b372fa6be42bbaf2f7c15c1f23ca4fe6a9f5281c9406ead0",
+    "integrations/home-assistant/build.gradle.kts": "f6c26532ed02fe90c764c1ed95e238025a165c67ec2c840294979648251da267",
+    "integrations/home-assistant/examples/application/README.md": "d3b142dfaeada6683c44d3dd13bd1c523b080936abe6f4c48eccf7ec1cb1072b",
+    "integrations/home-assistant/examples/application/agents/house_coordinator.md": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
+    "integrations/home-assistant/examples/application/orchestrations/investigate_office_heat.md": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
+    "integrations/home-assistant/examples/application/plowshare.json": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_controller.md": "7d13c6b4dac465bdf4cbe25a27734022d5f1b8debea33e481161a512f592c896",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_reader.md": "612adbc35d7f9c334217fe892d98ed6b628c67baad57c88bec421410cc4e1d11",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/control/plowshare.json": "3cb54dc74300883f515aed83f606b7ebacc4ca001e91e938be0625e8749c921a",
+    "integrations/home-assistant/examples/application/profiles/control/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/application/profiles/readonly/agents/house_reader.md": "612adbc35d7f9c334217fe892d98ed6b628c67baad57c88bec421410cc4e1d11",
+    "integrations/home-assistant/examples/application/profiles/readonly/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/readonly/plowshare.json": "1066830364dbdadf9e05d8c52f3fd698ed82150e21bf1bc327b7ef88dc379803",
+    "integrations/home-assistant/examples/application/profiles/readonly/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/application/profiles/task/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/task/plowshare.json": "eb30e577c8057fc4f1a0310e1a6e1ead302170bf2d67031abb23150ae7ab3fb1",
+    "integrations/home-assistant/examples/application/skills/house-evidence/SKILL.md": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
+    "integrations/home-assistant/examples/config.json": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
+    "integrations/home-assistant/examples/office.mjs": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
+    "integrations/home-assistant/examples/outbound/README.md": "6b6e853224c269731c294096d9254a5c58e3f3e1bf9f2a19fbe8bb7f6f001a09",
+    "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
+    "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
+    "integrations/home-assistant/examples/outbound/control/application/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/outbound/control/provider.json": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+    "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
+    "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
+    "integrations/home-assistant/examples/outbound/readonly/application/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/outbound/readonly/provider.json": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+    "integrations/home-assistant/scripts/check-outbound-package.py": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionExecutor.java": "c861895a316e1f8803087ea9c22eff826397bd45032904aa568914cd131bfa6e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionOfferValidator.java": "8397c83dc70604e7a076f7ba0167e70ea0b6336e4d4a18e8316f2e5f938004ef",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionVerifier.java": "b47fed524cae1924f28cac34edb3a5e9e4941bb2c86056c5da15d622f3621944",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionPolicy.java": "c1a3da9d5d6408848993bbbd082f1ca901f74ef92d12c56122ad15ac223e505b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProfiles.java": "9b6692f03e587019a38b985dda2c5dd92d4fcf103fe150a2cac741642124b0b4",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionTools.java": "2c8d62d69b30ebf7c4cd39040c3f79cb30b25e493a0d96e737ca18ba19a7dc1e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifier.java": "579e5c42c0996e20c9e829b60f08fd171356416186f017c719ad927e1eda861c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "24baa8a0c5116b71f989ff16903ba5ba134c312409d2f48b8a1bae7b1a1f21ce",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServices.java": "37171d5e34242e48f1cd13a939bbd249d23d54c6972a55f2aecb3e8250071df4",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantDiscoveryPolicy.java": "05828ef6f9dd4e4168fa03ff4852117a5d0111d7057f32ef6809a529f7f769be",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantFactory.java": "daca8f08ecfd81309e5b2dd384c34a83473ca40b9f27e8d8ea58e8fd0a0d42b5",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java": "85d8767ecf393345bf5f887b5969dd8d64866da70ef8a70e60edc93293fcead2",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantObservations.java": "822d56f25881eef7092d058f251884d1aad10a510f324fe6da1da7d0da97860c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java": "db8983c94a3e9811f721ceee1bb34bcb92fd0e004ff92183ec5bd4aa9f8f631b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "322cd7b24a3d47fd54747192d36ee27e4784c81fee2957c11aa0c9ab303a2cc1",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderJournal.java": "6b6762a050d34f91cf2daa180dd724279b807b57065ab27cb1e2f83cac8ff3a6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java": "85ce158535b4ae1b3682e22e49f6c8aa942005c4595b080e73960442b6090ca6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "8f3e02ec7d33571c7b496c7470495799f135f0153fa07a56c9c906a73fceb51e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalog.java": "186f5dddbb62622a3e57f192882a2acd3ca4f93cda66f5cd93abd7c6b1c46acb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceSource.java": "17940d584e64aaa0fd2940bcf8a6be5c0e22f1bfec28edf3163faa9ce0f36623",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResources.java": "b8d8671e10b78a27665b6bb9aa5f683f6fd62f56b8868ea9c587cf0bdfb3ed56",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantSettings.java": "ce80e740018e1ae17f743c8c1e9054b0b71b6c3ee1da569c51688b076cbc8652",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolHandlers.java": "bea32d08c93c6a77e0e46e333fa454b1ba3f9d72bd7deca97f1772b6db749918",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournal.java": "843b2e15f2ba84e2939047166a2c134919427dc7dd72da175da6d6b0b4df1378",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProvider.java": "438f44f75e3f9a2419e5dbd835302d0c89efa15263b1d5494d997bab7b2b11e6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransport.java": "e05acd7aee44abcea06f63629d48a2bf1411afc19641a28a538213f0acd9aa02",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantWire.java": "34477a58ce99edc6677c61e9079ae7468c88f85350bb38519a7d9e0c608504cb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceDiscovery.java": "335f9b36528b451afca8e73f1c344602f3c0d12803a55aa2dc64434fbc1ebc3d",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceReader.java": "02caa379adcf11b8ad66398a01444dc8bb0d442cb5504738f3bbcfbb64632b53",
+    "integrations/home-assistant/src/main/resources/META-INF/services/io.aeyer.plowshare.integrations.AdapterFactory": "658709c5d6bf80ea27d598eb632d84d45140a8d6a68a883b8bf86fab9f24fd2b",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ApplicationProfilesTest.java": "8e33303b62bb78c5f31ebdc0243bbc7d3fa1dd53429d9b855f40ab49f042625e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HarnessPipelineTest.java": "057a136ede88a26ba5fe6121c1792aa41f0b07303d639c109dd9ed860d2ae4eb",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionOfferFenceTest.java": "1ae2bda7b5f55f9cc0f01f94a6f8dc9c2511ac44d6a4a7fa836cbec5620adb25",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProviderTest.java": "adc9a1d4c8e108322f6efcaf07a8b12b0fd78c2a2c29703e44b4a844bd2eeade",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionToolsTest.java": "bae50af73ad2297e028a9f3157dbd4aae241550ff0683d8fd26a4b1c44779487",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifierTest.java": "88d382e445909466ac29a0d131a8f0f5a3f95e3e9b26db787f8d04a7aa91fc9d",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapterTest.java": "5009ccc209c6bf055f14ed59f16da29aacfce342547368f4fc97de634a5802b0",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServicesTest.java": "a39bd9c433c6c048a4c43a7ef1a9a015937b94237f871965581f20075683b804",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java": "d375a59a60cd1adf41ee9c0aa38daeeb0273901376a3e6a75b669bc9750114b8",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeActionsTest.java": "5fe5c2d276c872a01c25fe9faf3f1927464be95e26a0499fd9d9de5f0ecddc01",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeResourcesTest.java": "15ed225e175e9b64c9afce076d26c4bcd7db1b7654ab43a8c61f92f07f18491e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantObservationLifecycleTest.java": "71f0565fd71d6ff28e3e72d9e789c0e40b03a1549ce780980271a7ca9e88d58c",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfigurationTest.java": "135eba7cc8a02ede436128f2725f3d9e4a1ec50b3355455753d37891d12ad355",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHostTest.java": "ec828a3c9bc4c161d7f385e2438b1fabd0f88466cd3ddb386267a084bc62e270",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "88ee7b0bdf48ff9703230d9f092c0ca30c2fd6d33c6c539621c081fccd379877",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalogTest.java": "465be766d24dbb571054c4eb1da859cc79daac238383fd44443823d37352c23c",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceContractsTest.java": "beb90d8c2225ca5dc3b2cf02878133a9a854e805c24039e1fd525e90009c99f9",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournalTest.java": "219deafb9a791287bcbf453bc92abe6c5bbb2f2ab3fe8cb441196740d595d961",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProviderTest.java": "2cc87ee7153559dbabf9c8f8ddf9feff0b363fa1291a22230477b9a4c3cc9907",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransportTest.java": "a4f8cb1855585025360b2530a86304eaa69ce32c3b5a9d2c0577c59e1a32f236",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "a2d999582ae59358f5ae33a51774cc8f15ac3234d381edbe47d8e03d5379d216",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "d2f82137bc8a95380ed535b82cbb15c638aae193a61758f4086b4f725a769b9c",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/PipelineTest.java": "8a73f14f0c78317f5bdc89268c92e820c36e4ac6e7412d5967a136398645147a",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ProjectExamplesTest.java": "653633b10113422ce8c97643c83bd778a3b7b9edabbb3da894cfbd3df0a896ae",
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java": "1804bc5e331d9f5eb05a660120981f9656b4cb09b1cf491bbb332973b38fac00"
+  },
+  "source_snapshot_exclusions": "Coordinator ledger and publication evidence/report/review avoid self-reference; Git and the publication staged manifest bind them. Historical candidate snapshots retain their original hashes.",
+  "verification": {
+    "repository_check": {
+      "command": "./gradlew formatCheck check :plowshare-integration-home-assistant:installDist --max-workers=2",
+      "result": "PASS",
+      "seconds": 90,
+      "tasks": 144,
+      "log_sha256": "f53d600a162d356c8e78de6753f0c0f5e42056161a22c00a3cae012a2e405f7d"
+    },
+    "ha_java_cases": 189,
+    "assist_python": {
+      "cases": 141,
+      "native_pipeline_cases": 6,
+      "installed_consumer_cases_inside_wrapper": 3,
+      "ruff": "PASS",
+      "log_sha256": "1de94b4d9668b2b5d5ac5b3c1534ae1c996052647c131bbcdacd1eb53f5efa20",
+      "scope": "Retained exact Assist source evidence; latest repository check passed and Assist runtime/test sources remain unchanged."
+    },
+    "post_documentation_module_check": {
+      "result": "PASS",
+      "seconds": 1,
+      "tasks": 31,
+      "log_sha256": "5660199f62bc0f9cb48513a56cbb317fb69b06134f08bd289e2ff82838626344"
+    },
+    "fresh_outbound_package": {
+      "result": "PASS",
+      "checks": [
+        "readonly: offline provider config",
+        "control: offline provider config",
+        "legacy: offline manual-alias config",
+        "readonly: retained journals untouched",
+        "control: retained journals untouched",
+        "prompt input remains refused",
+        "contradictory control principal refused",
+        "malformed provider CLI refused"
+      ],
+      "runtime_jars": 26,
+      "artifact_files": 56,
+      "report_sha256": "cb8caf5b291775db9b84b28fbde1f45f77b32bc34c76b8d0456c388986154d61",
+      "log_sha256": "45c412d228cda8276033e6996a406179383c57ba0eaf316cab7e0744ff940889"
+    },
+    "full_database_tests_run": false
+  },
+  "assist_artifact": {
+    "version": "0.1.1",
+    "sha256": "1ad223a4859e415fd9e2b63344a3736b162a175e753e2fc3f7b8371e049110aa",
+    "entry_count": 51,
+    "original_0_1_0_archive_preserved": true
+  },
+  "outbound_package_files": [
+    {
+      "path": "PROVIDER-HOST.md",
+      "sha256": "5b2f76c9d94874235a167f0f7974908a669387df40833b9599fc880b9613e39e",
+      "bytes": 10822
+    },
+    {
+      "path": "bin/plowshare-integration-home-assistant",
+      "sha256": "dfcd1adf9034d2c411c3593f57d93c520739001cf142d7369fe03cd20268fbbc",
+      "bytes": 9923
+    },
+    {
+      "path": "bin/plowshare-integration-home-assistant.bat",
+      "sha256": "1ecc590a0c30da5a53ad7280dd057561188d9e853023637fd7c630b7286ab147",
+      "bytes": 4162
+    },
+    {
+      "path": "examples/application/README.md",
+      "sha256": "d3b142dfaeada6683c44d3dd13bd1c523b080936abe6f4c48eccf7ec1cb1072b",
+      "bytes": 7260
+    },
+    {
+      "path": "examples/application/agents/house_coordinator.md",
+      "sha256": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
+      "bytes": 2469
+    },
+    {
+      "path": "examples/application/orchestrations/investigate_office_heat.md",
+      "sha256": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
+      "bytes": 1654
+    },
+    {
+      "path": "examples/application/plowshare.json",
+      "sha256": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
+      "bytes": 301
+    },
+    {
+      "path": "examples/application/profiles/control/agents/house_controller.md",
+      "sha256": "7d13c6b4dac465bdf4cbe25a27734022d5f1b8debea33e481161a512f592c896",
+      "bytes": 1601
+    },
+    {
+      "path": "examples/application/profiles/control/agents/house_reader.md",
+      "sha256": "612adbc35d7f9c334217fe892d98ed6b628c67baad57c88bec421410cc4e1d11",
+      "bytes": 1211
+    },
+    {
+      "path": "examples/application/profiles/control/agents/house_task.md",
+      "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "bytes": 1025
+    },
+    {
+      "path": "examples/application/profiles/control/plowshare.json",
+      "sha256": "3cb54dc74300883f515aed83f606b7ebacc4ca001e91e938be0625e8749c921a",
+      "bytes": 993
+    },
+    {
+      "path": "examples/application/profiles/control/server/tools.json",
+      "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+      "bytes": 378
+    },
+    {
+      "path": "examples/application/profiles/readonly/agents/house_reader.md",
+      "sha256": "612adbc35d7f9c334217fe892d98ed6b628c67baad57c88bec421410cc4e1d11",
+      "bytes": 1211
+    },
+    {
+      "path": "examples/application/profiles/readonly/agents/house_task.md",
+      "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "bytes": 1025
+    },
+    {
+      "path": "examples/application/profiles/readonly/plowshare.json",
+      "sha256": "1066830364dbdadf9e05d8c52f3fd698ed82150e21bf1bc327b7ef88dc379803",
+      "bytes": 664
+    },
+    {
+      "path": "examples/application/profiles/readonly/server/tools.json",
+      "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+      "bytes": 216
+    },
+    {
+      "path": "examples/application/profiles/task/agents/house_task.md",
+      "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "bytes": 1025
+    },
+    {
+      "path": "examples/application/profiles/task/plowshare.json",
+      "sha256": "eb30e577c8057fc4f1a0310e1a6e1ead302170bf2d67031abb23150ae7ab3fb1",
+      "bytes": 376
+    },
+    {
+      "path": "examples/application/skills/house-evidence/SKILL.md",
+      "sha256": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
+      "bytes": 894
+    },
+    {
+      "path": "examples/config.json",
+      "sha256": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
+      "bytes": 2601
+    },
+    {
+      "path": "examples/office.mjs",
+      "sha256": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
+      "bytes": 821
+    },
+    {
+      "path": "examples/outbound/README.md",
+      "sha256": "6b6e853224c269731c294096d9254a5c58e3f3e1bf9f2a19fbe8bb7f6f001a09",
+      "bytes": 5730
+    },
+    {
+      "path": "examples/outbound/control/application/agents/house_controller.md",
+      "sha256": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
+      "bytes": 1658
+    },
+    {
+      "path": "examples/outbound/control/application/plowshare.json",
+      "sha256": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
+      "bytes": 921
+    },
+    {
+      "path": "examples/outbound/control/application/server/tools.json",
+      "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+      "bytes": 378
+    },
+    {
+      "path": "examples/outbound/control/provider.json",
+      "sha256": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+      "bytes": 1422
+    },
+    {
+      "path": "examples/outbound/readonly/application/agents/house_reader.md",
+      "sha256": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
+      "bytes": 1172
+    },
+    {
+      "path": "examples/outbound/readonly/application/plowshare.json",
+      "sha256": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
+      "bytes": 665
+    },
+    {
+      "path": "examples/outbound/readonly/application/server/tools.json",
+      "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+      "bytes": 216
+    },
+    {
+      "path": "examples/outbound/readonly/provider.json",
+      "sha256": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+      "bytes": 1037
+    },
+    {
+      "path": "lib/annotations-13.0.jar",
+      "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+      "bytes": 17536
+    },
+    {
+      "path": "lib/collections-23.1.12.jar",
+      "sha256": "54a6c6d50be1a7f732cc294b2feb930b5771ce8afd6cd7c2b4a831f85bb25aef",
+      "bytes": 121580
+    },
+    {
+      "path": "lib/icu4j-23.1.12.jar",
+      "sha256": "2c9ab5dfd797cc145ebfb0b1320ce831aa9b76c0adc70945a580bef1a8730dd0",
+      "bytes": 39645881
+    },
+    {
+      "path": "lib/jackson-annotations-2.17.2.jar",
+      "sha256": "873a606e23507969f9bbbea939d5e19274a88775ea5a169ba7e2d795aa5156e1",
+      "bytes": 78492
+    },
+    {
+      "path": "lib/jackson-core-2.17.2.jar",
+      "sha256": "721a189241dab0525d9e858e5cb604d3ecc0ede081e2de77d6f34fa5779a5b46",
+      "bytes": 581927
+    },
+    {
+      "path": "lib/jackson-databind-2.17.2.jar",
+      "sha256": "c04993f33c0f845342653784f14f38373d005280e6359db5f808701cfae73c0c",
+      "bytes": 1649454
+    },
+    {
+      "path": "lib/jackson-datatype-jsr310-2.17.2.jar",
+      "sha256": "9b80024a9822e70b07f6bb13824c76c137c1064a1b5eb518374ab141870fdbcc",
+      "bytes": 132264
+    },
+    {
+      "path": "lib/jniutils-23.1.12.jar",
+      "sha256": "7489745b9889851d7586d89f8e2698ea7374ae78ffdebf1ed4550dd58117dc48",
+      "bytes": 275246
+    },
+    {
+      "path": "lib/js-language-23.1.12.jar",
+      "sha256": "3639558b4a776147d22acd2dc61a03a90d340064ef744916c5adf37c0d9cf2c1",
+      "bytes": 27289717
+    },
+    {
+      "path": "lib/kotlin-stdlib-1.9.10.jar",
+      "sha256": "55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504",
+      "bytes": 1708006
+    },
+    {
+      "path": "lib/kotlin-stdlib-common-1.9.10.jar",
+      "sha256": "cde3341ba18a2ba262b0b7cf6c55b20c90e8d434e42c9a13e6a3f770db965a88",
+      "bytes": 225141
+    },
+    {
+      "path": "lib/kotlin-stdlib-jdk7-1.9.10.jar",
+      "sha256": "ac6361bf9ad1ed382c2103d9712c47cdec166232b4903ed596e8876b0681c9b7",
+      "bytes": 959
+    },
+    {
+      "path": "lib/kotlin-stdlib-jdk8-1.9.10.jar",
+      "sha256": "a4c74d94d64ce1abe53760fe0389dd941f6fc558d0dab35e47c085a11ec80f28",
+      "bytes": 965
+    },
+    {
+      "path": "lib/nativeimage-23.1.12.jar",
+      "sha256": "8b7ec0f100d4eeaebbdc02be2bf4f57147f1873cbea6cf8597beb555b03134ae",
+      "bytes": 217333
+    },
+    {
+      "path": "lib/okhttp-4.12.0.jar",
+      "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+      "bytes": 789531
+    },
+    {
+      "path": "lib/okio-jvm-3.6.0.jar",
+      "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+      "bytes": 359580
+    },
+    {
+      "path": "lib/plowshare-integration-home-assistant-0.1.0-SNAPSHOT.jar",
+      "sha256": "a7e071a78ab775c8e752f64470383ed5086d37ec4fe051ae013cbb218127bc5c",
+      "bytes": 255141
+    },
+    {
+      "path": "lib/plowshare-integrations-0.1.0-SNAPSHOT.jar",
+      "sha256": "9970fd9e4ce41b0c8c0a67dc6055b6d24ee87ea5973cd818d63a82728c5ace53",
+      "bytes": 162744
+    },
+    {
+      "path": "lib/plowshare-protocol-0.1.0-SNAPSHOT.jar",
+      "sha256": "8681b0406a9d7ea489e2a18bf2e2d8097c0e5ac24b573a631f9f6dce34a3c833",
+      "bytes": 812338
+    },
+    {
+      "path": "lib/plowshare-sdk-0.1.0-SNAPSHOT.jar",
+      "sha256": "dbd45b20039ae1d2a28d0f2b230c9eb66b187be1cdd9fb47bfcb5ee8145f9881",
+      "bytes": 398158
+    },
+    {
+      "path": "lib/polyglot-23.1.12.jar",
+      "sha256": "677ce37f6f8cf9c155344711dc85fcea9f25629ff8b761b71400d1243626a112",
+      "bytes": 939215
+    },
+    {
+      "path": "lib/regex-23.1.12.jar",
+      "sha256": "ac00e975681325123e6b5da5610a8aebdc1629c0bc869009d469f8b614f32953",
+      "bytes": 3701640
+    },
+    {
+      "path": "lib/truffle-api-23.1.12.jar",
+      "sha256": "ab0898a4f06b01eb738823fb750aef24ac0bcbcc5856302a9efc1561c68489d6",
+      "bytes": 16738164
+    },
+    {
+      "path": "lib/truffle-compiler-23.1.12.jar",
+      "sha256": "41a25a7357092e2b47e339f8311974e16a2cb40bde1ccb36ef71cf3a314e6c7e",
+      "bytes": 61865
+    },
+    {
+      "path": "lib/truffle-runtime-23.1.12.jar",
+      "sha256": "3d0e5c1d290747b351af5b589a9801d9796af29274f184291d1a3fab62fca48e",
+      "bytes": 1053408
+    },
+    {
+      "path": "lib/word-23.1.12.jar",
+      "sha256": "8c6221a04dc1c917a75e526ffcf5f4cdd80b812b45561dc9225538b0eb97bee6",
+      "bytes": 22242
+    }
+  ],
+  "independent_approvals": {
+    "PLAN-00": {
+      "candidate": {
+        "id": "ha-plan-00-v2",
+        "manifest_path": "docs/reviews/home-assistant-plan-00-v2-candidate.json",
+        "manifest_sha256": "554444e229c006158750509e680304783d34167eae3c8851325c2f6dcd17b092"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "554444e229c006158750509e680304783d34167eae3c8851325c2f6dcd17b092",
+        "report_path": "docs/reviews/home-assistant-plan-00-v2-review.md",
+        "report_sha256": "b992f2a9a920a945ef0c87070699b8ba47d8e92fdd3b05a1768108e2ecfe0b4d",
+        "approved_at": "2026-11-16T23:15:30.186477+00:00"
+      }
+    },
+    "AUDIT-01": {
+      "candidate": {
+        "id": "ha-audit-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+        "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855",
+        "report_path": "docs/reviews/home-assistant-audit-01-review.md",
+        "report_sha256": "0b03c62ac6563e29f497f2a66a65c2875f4bfdc637f511735c90f32dc8ff4685",
+        "approved_at": "2026-11-16T21:33:50.055430+00:00"
+      }
+    },
+    "CORE-01": {
+      "candidate": {
+        "id": "ha-core-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-core-01-v2-candidate.json",
+        "manifest_sha256": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "d15c764b81a308f4365b8406619e3890555c8277218830324e10ce3d4bc1dcca",
+        "report_path": "docs/reviews/home-assistant-core-01-v2-review.md",
+        "report_sha256": "9f515559a19a38217cd9c2b107aa3a3050bb2070d6ac848efd9701067365726e",
+        "approved_at": "2026-11-16T21:45:20.065667+00:00"
+      }
+    },
+    "CORE-02": {
+      "candidate": {
+        "id": "ha-core-02-v3",
+        "manifest_path": "docs/reviews/home-assistant-core-02-v3-candidate.json",
+        "manifest_sha256": "f428a11b4894d58648680361440737b0fead49d567ae665198219c53e6e7e05b"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "f428a11b4894d58648680361440737b0fead49d567ae665198219c53e6e7e05b",
+        "report_path": "docs/reviews/home-assistant-core-02-v3-review.md",
+        "report_sha256": "000f66295d60a08846dc4d15e1bf614227e2e1dd035b2a32ffe4e8caf0c6c4f2",
+        "approved_at": "2026-11-16T22:49:50.733679+00:00"
+      }
+    },
+    "CORE-03A": {
+      "candidate": {
+        "id": "ha-core-03a-v2",
+        "manifest_path": "docs/reviews/home-assistant-core-03a-v2-candidate.json",
+        "manifest_sha256": "ebf322a572498875df1c9866a34f4c1556d972fbe5fe344851b4b83145dc2914"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "ebf322a572498875df1c9866a34f4c1556d972fbe5fe344851b4b83145dc2914",
+        "report_path": "docs/reviews/home-assistant-core-03a-v2-review.md",
+        "report_sha256": "38c4ebaa0bfd8678746852d4c38697c2a8729b041d98b2242eca89afe393ccee",
+        "approved_at": "2026-11-17T01:53:04.215754+00:00"
+      }
+    },
+    "CORE-03": {
+      "candidate": {
+        "id": "ha-core-03-v4",
+        "manifest_path": "docs/reviews/home-assistant-core-03-v4-candidate.json",
+        "manifest_sha256": "221c9e73088c09d71d637ec0e6281f3b25e8920d53b5a2414cd450809f194ac2"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "221c9e73088c09d71d637ec0e6281f3b25e8920d53b5a2414cd450809f194ac2",
+        "report_path": "docs/reviews/home-assistant-core-03-v4-review.md",
+        "report_sha256": "b81cc20b2bfe66aab7d3f0b8ea133e37a68b3d1dc9867e72a42f8995531937ca",
+        "approved_at": "2026-11-17T04:36:25.467849+00:00"
+      }
+    },
+    "CORE-04": {
+      "candidate": {
+        "id": "ha-core-04-v1",
+        "manifest_path": "docs/reviews/home-assistant-core-04-v1-candidate.json",
+        "manifest_sha256": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0",
+        "report_path": "docs/reviews/home-assistant-core-04-review.md",
+        "report_sha256": "dd7066786e92d82f544eab70b65e583cc120b90df844b0c6f723674fc9e48f3d",
+        "approved_at": "2026-11-17T04:47:09.041004+00:00"
+      }
+    },
+    "FIDELITY-01": {
+      "candidate": {
+        "id": "ha-fidelity-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-fidelity-01-v2-candidate.json",
+        "manifest_sha256": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "7a0bfe2f35c1c9bae60ca78b436b14772575ff163bf27d60ef7d81e4b5928ef7",
+        "report_path": "docs/reviews/home-assistant-fidelity-01-v2-review.md",
+        "report_sha256": "232f986ed4c403d96e2e787c2b7017266f67c32898c38d165b9c563940883b52",
+        "approved_at": "2026-11-16T21:50:46.630922+00:00"
+      }
+    },
+    "HA-01": {
+      "candidate": {
+        "id": "ha-ha-01-v5",
+        "manifest_path": "docs/reviews/home-assistant-ha-01-v5-candidate.json",
+        "manifest_sha256": "d8babe9febaae69e1d9b630d3de86b16e7c300e95cc122c5f9b9585cf927ada8"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "d8babe9febaae69e1d9b630d3de86b16e7c300e95cc122c5f9b9585cf927ada8",
+        "report_path": "docs/reviews/home-assistant-ha-01-v5-review.md",
+        "report_sha256": "dadfaac00634e2e2a600e0eaaba2ffff9b3751bc552ba93f468d0be8cb20f35e",
+        "approved_at": "2026-11-17T00:50:36.944378+00:00"
+      }
+    },
+    "HA-02": {
+      "candidate": {
+        "id": "ha-ha-02-v3",
+        "manifest_path": "docs/reviews/home-assistant-ha-02-v3-candidate.json",
+        "manifest_sha256": "9612efe6a189eb2f0b61d3e353d5feb5714cfb4f35fe4459a73fd5c0b4061997"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "9612efe6a189eb2f0b61d3e353d5feb5714cfb4f35fe4459a73fd5c0b4061997",
+        "report_path": "docs/reviews/home-assistant-ha-02-v3-review.md",
+        "report_sha256": "9a7f919b09e0ebace79884e4cd0dc1eec04ce08cff764cc7be04139e4e4e82ac",
+        "approved_at": "2026-11-17T01:56:50.815783+00:00"
+      }
+    },
+    "HA-03": {
+      "candidate": {
+        "id": "ha-ha-03-v2",
+        "manifest_path": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+        "manifest_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424",
+        "report_path": "docs/reviews/home-assistant-ha-03-v2-review.md",
+        "report_sha256": "e524e1d15a3247e062a31dff3a5996083f2efda11e38b2277819136cf32e393c",
+        "approved_at": "2026-11-17T01:16:05.933445+00:00"
+      }
+    },
+    "HA-04": {
+      "candidate": {
+        "id": "ha-ha-04-v2",
+        "manifest_path": "docs/reviews/home-assistant-ha-04-v2-candidate.json",
+        "manifest_sha256": "a8a46645535397cf3b01b2298b7e96af1b441f78377d97acb07a899647928c96"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "a8a46645535397cf3b01b2298b7e96af1b441f78377d97acb07a899647928c96",
+        "report_path": "docs/reviews/home-assistant-ha-04-v2-review.md",
+        "report_sha256": "867ca4bbb2bdfed6bbb75b633b150c523c95d6570211c03e3f9922e0f7c2067a",
+        "approved_at": "2026-11-17T02:18:03.593694+00:00"
+      }
+    },
+    "HA-05": {
+      "candidate": {
+        "id": "ha-05-v2",
+        "manifest_path": "docs/reviews/home-assistant-ha-05-v2-candidate.json",
+        "manifest_sha256": "f165cb89ae87625c1dcaacad1eced1ed1e37224efb85dcd420167c1d12197f92"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "f165cb89ae87625c1dcaacad1eced1ed1e37224efb85dcd420167c1d12197f92",
+        "report_path": "docs/reviews/home-assistant-ha-05-v2-review.md",
+        "report_sha256": "bad1d3604c91d5ce47013e41c2857bb9524a04138139a1f2e45ecb6fabb6e846",
+        "approved_at": "2026-11-22T10:25:38.571881+00:00"
+      }
+    },
+    "HA-06": {
+      "candidate": {
+        "id": "ha-06-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-06-v1-candidate.json",
+        "manifest_sha256": "cf7eac366e2391654667b1b204b11eafee784cfcae92f72ef43882c2897e5434"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "cf7eac366e2391654667b1b204b11eafee784cfcae92f72ef43882c2897e5434",
+        "report_path": "docs/reviews/home-assistant-ha-06-v1-review.md",
+        "report_sha256": "70651ac24386caeed3a872ad7f90bb3d89665597a988e5fc4499b4412da18110",
+        "approved_at": "2026-11-22T11:13:03.281951+00:00"
+      }
+    },
+    "HA-07": {
+      "candidate": {
+        "id": "ha-07-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-07-v1-candidate.json",
+        "manifest_sha256": "68311df2e9c62d0a0ff547f39fb3fd35ef74e8f5d94ac6ed619949366eb30aef"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "68311df2e9c62d0a0ff547f39fb3fd35ef74e8f5d94ac6ed619949366eb30aef",
+        "report_path": "docs/reviews/home-assistant-ha-07-v1-review.md",
+        "report_sha256": "1dade1af3008b7a96b6d5aa0143cbe101c6b93e7f5f8b595b4690a94f5b3669c",
+        "approved_at": "2026-11-22T11:16:21.198600+00:00"
+      }
+    },
+    "HA-08": {
+      "candidate": {
+        "id": "ha-08-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-08-v1-candidate.json",
+        "manifest_sha256": "9685b039703ae04d9a10727ff042c1b2f922cee179a19a029b19cb56870fad88"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "9685b039703ae04d9a10727ff042c1b2f922cee179a19a029b19cb56870fad88",
+        "report_path": "docs/reviews/home-assistant-ha-08-v1-review.md",
+        "report_sha256": "5e097493bb158cf15df6c20a71080933d39687ef65443a2049bc21744b5af68c",
+        "approved_at": "2026-11-22T11:26:11.469204+00:00"
+      }
+    },
+    "HA-09": {
+      "candidate": {
+        "id": "ha-ha-09-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-09-v1-candidate.json",
+        "manifest_sha256": "293509f545137d676861c499208d8745e5f936f1c5e890bf58c4e2244fadc8f8"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "293509f545137d676861c499208d8745e5f936f1c5e890bf58c4e2244fadc8f8",
+        "report_path": "docs/reviews/home-assistant-ha-09-review.md",
+        "report_sha256": "341aa6a034e852b631dc71d60cc289b8a3299a9b78dcdfc8a88abc1878fac9b4",
+        "approved_at": "2026-11-17T02:20:47.982417+00:00"
+      }
+    },
+    "HA-10": {
+      "candidate": {
+        "id": "ha-10-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-10-v1-candidate.json",
+        "manifest_sha256": "b04aee138fa8d2cd36f88f6fee498ce723052006307b3a31b09b8667e871ea9f"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "b04aee138fa8d2cd36f88f6fee498ce723052006307b3a31b09b8667e871ea9f",
+        "report_path": "docs/reviews/home-assistant-ha-10-v1-review.md",
+        "report_sha256": "9923f78db753e85548023f9c095cc4254f0b6321cf70d639aebc1387fed8bbdc",
+        "approved_at": "2026-11-22T11:32:41.228227+00:00"
+      }
+    },
+    "HA-11": {
+      "candidate": {
+        "id": "ha-11-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-11-v1-candidate.json",
+        "manifest_sha256": "df6d5565452fc38b805a471e232de624b4749f9878f1b8de6e387723c726d774"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "df6d5565452fc38b805a471e232de624b4749f9878f1b8de6e387723c726d774",
+        "report_path": "docs/reviews/home-assistant-ha-11-v1-review.md",
+        "report_sha256": "1b04e07d0dc35edb56bc0ab90fd6a59dbd3babe95046148dc58a00cb211810b8",
+        "approved_at": "2026-11-22T11:42:17.371675+00:00"
+      }
+    },
+    "VERIFY-01": {
+      "candidate": {
+        "id": "verify-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-verify-01-v1-candidate.json",
+        "manifest_sha256": "b9f3e57fa47090bd8ad2ac876fc6a2211f173ad68ef43bec9cb20138eea9ab0c"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "b9f3e57fa47090bd8ad2ac876fc6a2211f173ad68ef43bec9cb20138eea9ab0c",
+        "report_path": "docs/reviews/home-assistant-verify-01-v1-review.md",
+        "report_sha256": "08b1e3950abe1a6135e9737608fd5b18ffce077300ce9fa258a79cd01c86e2b7",
+        "approved_at": "2026-11-22T11:47:26.598678+00:00"
+      }
+    },
+    "RELEASE-01": {
+      "candidate": {
+        "id": "release-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-release-01-v1-candidate.json",
+        "manifest_sha256": "c68faa34ed945401db4736fb794bf8d80348097d73801887c91ec61f8db581ff"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "c68faa34ed945401db4736fb794bf8d80348097d73801887c91ec61f8db581ff",
+        "report_path": "docs/reviews/home-assistant-release-01-v1-review.md",
+        "report_sha256": "9d193b94823c3f229100ff42d9e2ba764e9a1236d56474ac0c74eeb851679c28",
+        "approved_at": "2026-11-22T11:51:14.535522+00:00"
+      }
+    },
+    "DEPLOY-01": {
+      "candidate": {
+        "id": "deploy-01-v3",
+        "manifest_path": "docs/reviews/home-assistant-deploy-01-v3-candidate.json",
+        "manifest_sha256": "3ebfabc023b65a0acf2faafbfcd5b4aa3faa29b407bd4914f4f17a2e637ebd2d"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "3ebfabc023b65a0acf2faafbfcd5b4aa3faa29b407bd4914f4f17a2e637ebd2d",
+        "report_path": "docs/reviews/home-assistant-deploy-01-v3-review.md",
+        "report_sha256": "1224922805a20ac2386505737bf04517a19dd9c1648006fa633ba06e0138d34f",
+        "approved_at": "2026-11-22T20:15:21.152078+00:00"
+      }
+    },
+    "OUT-PLAN-01": {
+      "candidate": {
+        "id": "out-plan-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
+        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
+        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
+        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
+        "approved_at": "2026-11-21T23:28:54.029777+00:00"
+      }
+    },
+    "OUT-PACK-01": {
+      "candidate": {
+        "id": "out-pack-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
+        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
+        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
+        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
+        "approved_at": "2026-11-21T23:56:58.858900+00:00"
+      }
+    },
+    "OUT-PROFILE-01": {
+      "candidate": {
+        "id": "out-profile-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
+        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
+        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
+        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
+        "approved_at": "2026-11-22T00:02:16.951402+00:00"
+      }
+    },
+    "OUT-VERIFY-01": {
+      "candidate": {
+        "id": "out-verify-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
+        "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
+        "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
+        "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
+        "approved_at": "2026-11-22T01:42:25.574527+00:00"
+      }
+    },
+    "PLAT-SQL-01": {
+      "candidate": {
+        "id": "plat-sql-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
+        "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c",
+        "report_path": "docs/reviews/home-assistant-plat-sql-01-v1-review.md",
+        "report_sha256": "81be571f929f49c43e543768aad3c27292ef3565dbc731253a8d1123fce7b5b7",
+        "approved_at": "2026-11-22T01:37:55.656407+00:00"
+      }
+    },
+    "SCOPE-01": {
+      "candidate": {
+        "id": "scope-01-v2",
+        "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
+        "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516",
+        "report_path": "docs/reviews/home-assistant-scope-01-v2-review.md",
+        "report_sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac",
+        "approved_at": "2026-11-22T09:36:47.006389+00:00"
+      }
+    },
+    "HA-FIX-01": {
+      "candidate": {
+        "id": "ha-fix-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-ha-fix-01-v1-candidate.json",
+        "manifest_sha256": "9eb3354c2682da906c31dd4affbaa36316b573049e6b2b964f6b4ed81f185582"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "9eb3354c2682da906c31dd4affbaa36316b573049e6b2b964f6b4ed81f185582",
+        "report_path": "docs/reviews/home-assistant-ha-fix-01-v1-review.md",
+        "report_sha256": "c864c833f6efb300aa07e64429faa629040f696823c371cc8b885bf3ba5a0515",
+        "approved_at": "2026-11-22T19:08:20.429367+00:00"
+      }
+    },
+    "HA-FIX-02": {
+      "candidate": {
+        "id": "ha-fix-02-v2",
+        "manifest_path": "docs/reviews/home-assistant-ha-fix-02-v2-candidate.json",
+        "manifest_sha256": "507b83649e387b25440cf7a1f7c5870b4292807863a5cf15f5d2f9a16dffd1ed"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "507b83649e387b25440cf7a1f7c5870b4292807863a5cf15f5d2f9a16dffd1ed",
+        "report_path": "docs/reviews/home-assistant-ha-fix-02-v2-review.md",
+        "report_sha256": "54af5560a0ffe51913908b851507eef88a61a627432c63fdb19cf307728aac54",
+        "approved_at": "2026-11-22T20:08:02.614881+00:00"
+      }
+    },
+    "RECOVER-01": {
+      "candidate": {
+        "id": "recover-01-v1",
+        "manifest_path": "docs/reviews/home-assistant-recover-01-v1-candidate.json",
+        "manifest_sha256": "16461fff0cb51f301c54e8c18e3cbb117b227c965bcc5b1a44919c661a64f70d"
+      },
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "candidate_digest": "16461fff0cb51f301c54e8c18e3cbb117b227c965bcc5b1a44919c661a64f70d",
+        "report_path": "docs/reviews/home-assistant-recover-01-v1-review.md",
+        "report_sha256": "6b29d783f297dc855d20b86703d9622b881b811a7c4e6a9bd430c4920bafc6f8",
+        "approved_at": "2026-11-22T20:37:46.154754+00:00"
+      }
+    }
+  },
+  "latest_live_read_recovery_reviews": {
+    "docs/reviews/home-assistant-deploy-01-v3-review.md": "1224922805a20ac2386505737bf04517a19dd9c1648006fa633ba06e0138d34f",
+    "docs/reviews/home-assistant-recover-01-v1-review.md": "6b29d783f297dc855d20b86703d9622b881b811a7c4e6a9bd430c4920bafc6f8",
+    "docs/reviews/home-assistant-read-provider-recovery.md": "ec4b6412d26aff047f801e8bd500718aab501794575b5ef12ac06e00cf327370"
+  },
+  "production_core_or_sdk_changes": false,
+  "separate_test_only_correction": {
+    "path": "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java",
+    "sha256": "1804bc5e331d9f5eb05a660120981f9656b4cb09b1cf491bbb332973b38fac00",
+    "node": "PLAT-SQL-01"
+  },
+  "control_enabled": false,
+  "live_scope": "Read-only Application/Assist connection,68fixedstate/unitprovider,process/networkautorecovery andfreshread. ExistingSDK/invocationreceipts preserved.",
+  "limits": [
+    "No actual shared-host reboot, microphone/STT/TTS or AI Task generation acceptance.",
+    "No physical control enabled or tested; full LIVE-01 matrix and optional cache measurement remain separate.",
+    "HA context is ordinary task/user input, with no native system-role/cache rewriting guarantee.",
+    "Raw credentials/private endpoint configuration/logs stay outside the PR.",
+    "Optional control profile is inert and isolated; control defaults false."
+  ]
+}
