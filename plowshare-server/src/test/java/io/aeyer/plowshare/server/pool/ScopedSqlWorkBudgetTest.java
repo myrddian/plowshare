@@ -37,6 +37,7 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -46,6 +47,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -442,8 +444,14 @@ class ScopedSqlWorkBudgetTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
-  void lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied(boolean fetch)
-      throws Exception {
+  void queryAndFetchRefreshInheritedNetworkDeadlineWhenPhysicalCleanupWorkerIsOccupied(
+      boolean fetch) throws Exception {
+    long fixtureStarted = System.nanoTime();
+    var phases = new ConcurrentLinkedQueue<String>();
+    Consumer<String> phase =
+        value ->
+            phases.add(
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - fixtureStarted) + "ms " + value);
     DataSource source = mock(DataSource.class);
     Connection first = mock(Connection.class);
     Connection second = mock(Connection.class);
@@ -452,15 +460,14 @@ class ScopedSqlWorkBudgetTest {
     when(source.getConnection()).thenReturn(first, second);
     when(second.prepareStatement("late")).thenReturn(statement);
     AtomicInteger socketTimeout = new AtomicInteger(1000);
+    AtomicInteger initialTimeout = new AtomicInteger();
     AtomicInteger captured = new AtomicInteger();
     CountDownLatch cleanupBlocked = new CountDownLatch(1);
     CountDownLatch cleanupRelease = new CountDownLatch(1);
-    CountDownLatch prepared = new CountDownLatch(1);
-    CountDownLatch startLate = new CountDownLatch(1);
     CountDownLatch socketRead = new CountDownLatch(1);
-    AtomicLong operationEnd = new AtomicLong();
     doAnswer(
             invocation -> {
+              phase.accept("first abort entered");
               cleanupBlocked.countDown();
               assertTrue(cleanupRelease.await(2, TimeUnit.SECONDS));
               return null;
@@ -470,6 +477,7 @@ class ScopedSqlWorkBudgetTest {
     doAnswer(
             invocation -> {
               socketTimeout.set(invocation.getArgument(1));
+              phase.accept("second network timeout " + socketTimeout.get());
               return null;
             })
         .when(second)
@@ -479,8 +487,10 @@ class ScopedSqlWorkBudgetTest {
             invocation -> {
               if (!fetch) {
                 captured.set(socketTimeout.get());
+                phase.accept("raw execute timeout " + captured.get());
                 socketRead.countDown();
-                platformRead(socketTimeout.get());
+                platformRead(socketTimeout.get() + 1);
+                phase.accept("raw execute completed");
               }
               return rows;
             });
@@ -488,74 +498,108 @@ class ScopedSqlWorkBudgetTest {
         .thenAnswer(
             invocation -> {
               captured.set(socketTimeout.get());
+              phase.accept("raw fetch timeout " + captured.get());
               socketRead.countDown();
-              platformRead(socketTimeout.get());
+              platformRead(socketTimeout.get() + 1);
+              phase.accept("raw fetch completed");
               return true;
             });
     var settings =
         new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 1);
+    // Setup has its own finite allowance. Neither cold lease setup nor a scheduled wakeup must
+    // land inside the tested 120ms window. The SQL query ceiling and cleanup budget stay unchanged.
+    Duration setupBudget = Duration.ofSeconds(5);
     try (var budget = fakeBudget(settings, null);
-        var calls = Executors.newSingleThreadExecutor();
-        var scheduler = Executors.newSingleThreadScheduledExecutor()) {
+        var calls = Executors.newSingleThreadExecutor()) {
       try {
         assertThrows(
             ReadFailedException.class,
             () ->
                 budget.within(
-                    Duration.ofMillis(100),
+                    setupBudget,
                     () -> {
-                      try (Connection held = budget.decorate(source).getConnection()) {
-                        assertFalse(held.isClosed());
-                        platformRead(150);
-                        return "late";
+                      try {
+                        Connection held = budget.decorate(source).getConnection();
+                        // Intentionally leave the aborted handle owned: finish must retain it
+                        // until the one physical cleanup worker passes the release barrier.
+                        held.abort(Runnable::run);
+                        throw ReadFailedException.queryCancelled(null);
                       } catch (SQLException failed) {
-                        throw new IllegalStateException(failed);
+                        throw new AssertionError(failed);
                       }
                     }));
-        assertTrue(cleanupBlocked.await(1, TimeUnit.SECONDS));
+        assertTrue(cleanupBlocked.await(1, TimeUnit.SECONDS), phases::toString);
+        verify(first, never()).close();
         var pending =
             calls.submit(
-                () -> {
-                  operationEnd.set(System.nanoTime() + Duration.ofMillis(400).toNanos());
-                  return budget.within(
-                      Duration.ofMillis(400),
-                      () -> {
-                        try (Connection connection = budget.decorate(source).getConnection();
-                            PreparedStatement selected = connection.prepareStatement("late")) {
-                          ResultSet values = fetch ? selected.executeQuery() : null;
-                          prepared.countDown();
+                () ->
+                    budget.within(
+                        setupBudget,
+                        () -> {
                           try {
-                            assertTrue(startLate.await(1, TimeUnit.SECONDS));
-                          } catch (InterruptedException interrupted) {
-                            Thread.currentThread().interrupt();
-                          }
-                          if (fetch) {
-                            try (values) {
-                              return values.next();
+                            Connection connection = budget.decorate(source).getConnection();
+                            PreparedStatement selected = connection.prepareStatement("late");
+                            ResultSet values = fetch ? selected.executeQuery() : null;
+                            initialTimeout.set(socketTimeout.get());
+                            assertTrue(initialTimeout.get() > 150, phases::toString);
+                            var owningScope = ScopedSqlWorkBudget.current();
+                            // Nested SQL units narrow the existing Scope.end. Both execute and
+                            // an already-open result must re-clamp at Query.check, the same path
+                            // that subtracts elapsed time from an aging scope's absolute deadline.
+                            try {
+                              return budget.within(
+                                  Duration.ofMillis(120),
+                                  () -> {
+                                    assertSame(owningScope, ScopedSqlWorkBudget.current());
+                                    // Close before restoring the setup deadline: canceled SQL must
+                                    // not wait again using the longer fixture setup allowance.
+                                    try (connection;
+                                        selected) {
+                                      if (fetch) {
+                                        try (values) {
+                                          return values.next();
+                                        }
+                                      }
+                                      try (var result = selected.executeQuery()) {
+                                        return result.next();
+                                      }
+                                    } catch (SQLException failed) {
+                                      throw new AssertionError(failed);
+                                    }
+                                  });
+                            } finally {
+                              phase.accept("narrowed scope and resource close finished");
                             }
+                          } catch (SQLException failed) {
+                            throw new AssertionError(failed);
                           }
-                          try (var result = selected.executeQuery()) {
-                            return result.next();
-                          }
-                        } catch (SQLException failed) {
-                          throw new AssertionError(failed);
-                        }
-                      });
-                });
-        assertTrue(prepared.await(1, TimeUnit.SECONDS));
-        scheduler.schedule(
-            startLate::countDown,
-            Math.max(0, operationEnd.get() - System.nanoTime() - Duration.ofMillis(120).toNanos()),
-            TimeUnit.NANOSECONDS);
-        assertTrue(socketRead.await(1, TimeUnit.SECONDS));
-        assertTrue(captured.get() <= 150, "late I/O must not retain checkout's longer timeout");
-        assertInstanceOf(
-            ReadFailedException.class,
-            assertThrows(ExecutionException.class, () -> pending.get(250, TimeUnit.MILLISECONDS))
-                .getCause());
+                        }));
+        if (!socketRead.await(1, TimeUnit.SECONDS)) {
+          try {
+            pending.get(10, TimeUnit.MILLISECONDS);
+          } catch (ExecutionException | TimeoutException failed) {
+            throw new AssertionError("SQL fixture phases: " + phases, failed);
+          }
+          throw new AssertionError("SQL fixture phases: " + phases);
+        }
+        assertTrue(captured.get() > 0 && captured.get() <= 120, phases::toString);
+        assertTrue(captured.get() < initialTimeout.get(), phases::toString);
+        // This observes worker settlement; it is not the SQL deadline. A host can deschedule the
+        // socket fixture past its requested sleep, while the applied network limit stays <=120ms.
+        var failure =
+            assertInstanceOf(
+                ReadFailedException.class,
+                assertThrows(
+                        ExecutionException.class,
+                        () -> pending.get(1, TimeUnit.SECONDS),
+                        phases::toString)
+                    .getCause());
+        assertEquals(ReadFailedException.Reason.DEADLINE_EXCEEDED, failure.reason());
+        assertEquals(1, cleanupRelease.getCount());
+        verify(first, never()).close();
         verify(second, never()).abort(any());
+        verify(second, never()).close();
       } finally {
-        startLate.countDown();
         cleanupRelease.countDown();
       }
     }
