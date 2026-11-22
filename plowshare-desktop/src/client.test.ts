@@ -2869,6 +2869,59 @@ await test('restored job status cannot attach another conversation outcome to th
   );
 });
 
+await test('a missing restored job reads its own retained failure behind newer turns without replay', async (t) => {
+  const f = fixture();
+  t.after(() => f.client.dispose());
+  await connect(f.client);
+  f.status(() => ({
+    code: 'NOT_FOUND',
+    said: 'Job status missing from this process.',
+  }));
+  const job = 'saved-interrupted-job';
+  f.trajectory((payload) => {
+    assert.equal(payload.conversation, 'first');
+    if (isList(payload.kinds)) {
+      assert.deepEqual(payload.kinds, ['attempt_failed']);
+      assert.equal(payload.tail, true);
+      return page(
+        [
+          entry(7, 'attempt_failed', 'UNAVAILABLE: The continuation stopped.', {
+            job,
+          }),
+          entry(8, 'attempt_failed', 'CANCELLED: A later job stopped.', {
+            job: 'another-job',
+          }),
+        ],
+        160,
+      );
+    }
+    return page([entry(160, 'answer', 'Newer successful turn.')], 160, true);
+  });
+  await f.client.restoreJobs([
+    { id: job, handle: job, conversation: 'first', agent: 'bot' },
+  ]);
+  await tick();
+  const recovered = present(f.client.state.jobs[0]);
+  assert.equal(recovered.status, 'finished');
+  assert.equal(recovered.ending, 'UNAVAILABLE');
+  assert.equal(recovered.answered, false);
+  assert.equal(recovered.resumable, false);
+  assert.equal(recovered.text, 'The continuation stopped.');
+  assert.equal(recovered.detail, undefined);
+  assert.equal(f.client.savedJobs().length, 0);
+  assert.deepEqual(
+    f.client.state.history.first?.entries.map((row) => row.ordinal),
+    [160],
+  );
+  assert.equal(f.calls.filter((call) => call.type === 'job.status').length, 1);
+  assert.equal(
+    f.calls.some((call) =>
+      ['agent.run', 'conversation.resume', 'job.cancel'].includes(call.type),
+    ),
+    false,
+  );
+});
+
 await test('direct workflow starts check the agent grant, preserve the request key and never dispatch a caller turn', async (t) => {
   const f = fixture();
   t.after(() => f.client.dispose());

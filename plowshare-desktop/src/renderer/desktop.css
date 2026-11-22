@@ -333,6 +333,7 @@
 .conversation-alerts { margin:0 21px 8px; flex-shrink:0; max-height:120px; overflow:auto; }
 .conversation-alert { display:flex; align-items:center; gap:7px 10px; flex-wrap:wrap; padding:9px 12px; background:#30261b; border:1px solid #5d4930; border-radius:6px; margin-top:5px; font-size:11px; line-height:1.7; color:#c4b59b; }
 .conversation-alert strong { color:#e1bf88; font-size:10px; font-weight:550; }.conversation-alert.note { background:#25251f; border-color:#454234; }
+.conversation-alert [data-dismiss-job-alert] { margin-left:auto; }
 .composer-status { display:inline-flex; align-items:center; gap:7px; max-width:150px; min-width:0; }
 #composer-status-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .run-indicator { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0; color:#c6b380; }

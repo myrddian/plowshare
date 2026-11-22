@@ -189,6 +189,7 @@ let personalBotReadKey = '';
 let projectExpansion: Record<string, boolean> = {};
 let filterExpansion: Record<string, boolean> = {};
 let identity = '';
+const dismissedJobAlerts = new Set<string>();
 const pendingPreferences = new Set<string>();
 let signature = '';
 let docked = false;
@@ -289,6 +290,7 @@ function update(next: DesktopState) {
   const nextIdentity = key(next);
   if (nextIdentity !== identity) {
     persist(false);
+    dismissedJobAlerts.clear();
     identity = nextIdentity;
     delete draft.dataset.conversation;
     const saved = pendingPreferences.has(identity)
@@ -1019,7 +1021,8 @@ function renderStatus() {
       )
       .join(' ')}`;
   } else pace.innerHTML = '';
-  const alerts: { label: string; text: string; kind: string }[] = [];
+  const alerts: { label: string; text: string; kind: string; job?: boolean }[] =
+    [];
   if (state.connected && state.liveHistory?.status === 'unavailable')
     alerts.push({
       label: 'Live updates unavailable',
@@ -1053,18 +1056,21 @@ function renderStatus() {
         job.detail ||
         'The job may still be running on the server. Reconnect to check its state.',
       kind: 'warning',
+      job: true,
     });
   else if (job?.status === 'unavailable')
     alerts.push({
       label: 'Job status unavailable',
       text: 'Check the conversation history for recorded results.',
       kind: 'note',
+      job: true,
     });
   else if (job?.status === 'interrupted')
     alerts.push({
       label: 'Request interrupted',
       text: job.detail || 'Inspect the trajectory before retrying.',
       kind: 'warning',
+      job: true,
     });
   else if (job && stoppedJob(job))
     alerts.push({
@@ -1073,18 +1079,27 @@ function renderStatus() {
         [job.text, job.detail].filter(Boolean).join(' — ') ||
         'The run ended without a completed answer.',
       kind: 'warning',
+      job: true,
     });
   else if (job?.status === 'finished' && job.detail)
-    alerts.push({ label: 'Answer note', text: job.detail, kind: 'note' });
+    alerts.push({
+      label: 'Answer note',
+      text: job.detail,
+      kind: 'note',
+      job: true,
+    });
+  const jobAlertKey = job ? runAlertKey(job) : '';
+  const dismissed = dismissedJobAlerts.has(jobAlertKey);
+  const visibleAlerts = alerts.filter((row) => !row.job || !dismissed);
   const panel = $('#conversation-alerts');
-  panel.hidden = !alerts.length;
-  panel.innerHTML = alerts
+  panel.hidden = !visibleAlerts.length;
+  panel.innerHTML = visibleAlerts
     .map(
       (row) =>
-        `<div class="conversation-alert ${row.kind}">${icon(row.kind === 'warning' ? 'alert' : 'file')}<strong>${esc(row.label)}</strong><span>${esc(row.text)}</span></div>`,
+        `<div class="conversation-alert ${row.kind}">${icon(row.kind === 'warning' ? 'alert' : 'file')}<strong>${esc(row.label)}</strong><span>${esc(row.text)}</span>${row.job ? `<button type="button" class="icon-button" data-dismiss-job-alert="${esc(jobAlertKey)}" aria-label="Dismiss job banner" title="Dismiss job banner">${icon('close')}</button>` : ''}</div>`,
     )
     .join('');
-  if (job?.status === 'finished' && job.resumable) {
+  if (job?.status === 'finished' && job.resumable && !dismissed) {
     const retry = document.createElement('button');
     const needsAllowance =
       job.allowance?.noBudget === false &&
@@ -1115,6 +1130,11 @@ function renderStatus() {
     });
     panel.append(retry);
   }
+}
+function runAlertKey(job: Job): string {
+  // Dismissal hides this presentation only. A new state for this job can
+  // still surface, and an unresolved receipt continues to guard submission.
+  return JSON.stringify([job.id, job.status, job.ending]);
 }
 function renderTranscript() {
   const history = state.history[selected];
@@ -1772,6 +1792,16 @@ $('#notice-connect').addEventListener('click', openConnect);
 $('#close-dialog').addEventListener('click', () => dialog.close());
 $('#dismiss-error').addEventListener('click', () => {
   $('#error').hidden = true;
+});
+$('#conversation-alerts').addEventListener('click', (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest<HTMLButtonElement>(
+    '[data-dismiss-job-alert]',
+  );
+  const key = button?.dataset.dismissJobAlert;
+  if (!key) return;
+  dismissedJobAlerts.add(key);
+  renderStatus();
 });
 $('#new-conversation').addEventListener('click', () =>
   background(newConversation()),
