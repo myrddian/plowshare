@@ -1,0 +1,47 @@
+{
+  "candidate_id": "ha-fix-02-v2",
+  "node": "HA-FIX-02",
+  "created_at": "2026-11-22T20:06:17.710758+00:00",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "8f3e02ec7d33571c7b496c7470495799f135f0153fa07a56c9c906a73fceb51e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "88ee7b0bdf48ff9703230d9f092c0ca30c2fd6d33c6c539621c081fccd379877",
+    "integrations/home-assistant/PROVIDER-HOST.md": "6475a74890633087cd6d85ce2c021e619f5f225790c042557aed51b8e6760615",
+    "docs/reviews/home-assistant-ha-fix-02-implementation.md": "3a02cfd6644df38da53c42fdc89c18feda42ad40ca4386c945f6ef55c80f79f2"
+  },
+  "private_evidence": {
+    "/private/tmp/ha-read-provider-20261123/fix02-focused-v2.log": "9533f521ee00e07b48e31273f90307f1cf0900caa37d61e6dc8af767c709f4df",
+    "/private/tmp/ha-read-provider-20261123/fix02-final-check.log": "2c9401cdb50d5f8813e93e381356a8d4192a9eb37d73dba4dff5336f57d3ac99",
+    "/private/tmp/ha-read-provider-20261123/fix02-installed-v2-report.json": "20563435d616c50907f7e881db8d267e2628e5aa13f8ca8ec8d6a9438532c79a",
+    "/private/tmp/ha-read-provider-20261123/fix02-installed-v2.log": "45c412d228cda8276033e6996a406179383c57ba0eaf316cab7e0744ff940889",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/rollout-candidate.json": "0270cc89ab3ba8d51f9956e6d42006e99b8bdf3f19d2e2616a0720c7a5d1a35f"
+  },
+  "scope": "Adapterreadschemapresentationonly;strictobjectcontractpreserved. Operationalrolloutconditionalcandidateboundprivately, no liveacceptanceclaim.",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "supersedes": {
+    "id": "ha-fix-02-v1",
+    "manifest_path": "docs/reviews/home-assistant-ha-fix-02-v1-candidate.json",
+    "manifest_sha256": "75b2eec91d0b8f84090489ae3b251ab35ce393f14713f93597a5d8c02f665f3d"
+  },
+  "dependencies": {
+    "HA-03": {
+      "id": "ha-ha-03-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-03-v2-candidate.json",
+      "manifest_sha256": "8d29b5b267b8fb298b1a24d9e66e2c262b2f822981c0a3eb1838d5837bf99424"
+    },
+    "OUT-VERIFY-01": {
+      "id": "out-verify-01-v2",
+      "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
+      "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd"
+    }
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-ha-fix-02-v2-state.json",
+    "sha256": "018258223422b1fc1a5f337cc18143d9ec6bcea8475177d020aae960dcd8580b"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-fix-02-v2.diff",
+    "sha256": "f718d6c0a2967fab7cb0aed1f21cb0bc908a1336eaddd7874213347f399e3243"
+  }
+}

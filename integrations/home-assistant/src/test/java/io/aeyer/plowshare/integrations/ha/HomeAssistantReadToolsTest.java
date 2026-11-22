@@ -24,6 +24,7 @@ import io.aeyer.plowshare.integrations.ha.HomeAssistantResources.State;
 import io.aeyer.plowshare.protocol.IntegrationPayload.NumberParameter;
 import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
 import io.aeyer.plowshare.protocol.SchemaCodec;
+import io.aeyer.plowshare.protocol.ToolSchemas;
 import io.aeyer.plowshare.protocol.ToolValue;
 import io.aeyer.plowshare.sdk.RelayTools;
 import java.math.BigDecimal;
@@ -158,6 +159,56 @@ class HomeAssistantReadToolsTest {
 
   static OperationBudget budget() {
     return OperationBudget.start(Duration.ofSeconds(2));
+  }
+
+  @Test
+  void offeredRevisionsAreInlineObjectsAndEncodedStringsRemainInvalid() throws Exception {
+    var resources = new Resources();
+    var tools = new HomeAssistantReadTools(SOURCE, PREFIX, resources, resources);
+    var revision = new ToolValue.ObjectValue(revision());
+    for (var declaration : tools.declarations()) {
+      var schema = Json.MAPPER.readTree(Json.MAPPER.writeValueAsString(declaration.schema()));
+      assertFalse(schema.has("$defs"));
+      assertFalse(schema.toString().contains("\"$ref\""));
+      var arguments = new LinkedHashMap<String, ToolValue>();
+      if (declaration.name().equals(PREFIX + "search")) {
+        assertEquals(
+            "object",
+            schema
+                .path("properties")
+                .path("cursor")
+                .path("properties")
+                .path("revision")
+                .path("type")
+                .textValue());
+        arguments.put(
+            "cursor",
+            new ToolValue.ObjectValue(
+                Map.of("revision", revision, "offset", new NumberParameter(BigDecimal.ZERO))));
+        ToolSchemas.validate(declaration.schema(), new ToolValue.ObjectValue(arguments));
+        arguments.put(
+            "cursor",
+            new ToolValue.ObjectValue(
+                Map.of(
+                    "revision", new TextParameter(Json.MAPPER.writeValueAsString(revision)),
+                    "offset", new NumberParameter(BigDecimal.ZERO))));
+      } else {
+        assertEquals("object", schema.path("properties").path("revision").path("type").textValue());
+        if (declaration.name().equals(PREFIX + "read")) {
+          arguments.put("aliases", new ToolValue.Array(List.of(new TextParameter("first"))));
+        } else {
+          arguments.put("alias", new TextParameter("first"));
+        }
+        arguments.put("revision", revision);
+        ToolSchemas.validate(declaration.schema(), new ToolValue.ObjectValue(arguments));
+        arguments.put("revision", new TextParameter(Json.MAPPER.writeValueAsString(revision)));
+      }
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> ToolSchemas.validate(declaration.schema(), new ToolValue.ObjectValue(arguments)));
+    }
+    assertEquals(0, resources.reads);
+    assertEquals(0, resources.searches);
   }
 
   @Test

@@ -1,0 +1,49 @@
+{
+  "candidate_id": "out-verify-01-v2",
+  "node": "OUT-VERIFY-01",
+  "created_at": "2026-11-22T01:38:34.055081+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_outbound_validation_v2_implementer",
+  "reviewer_agent_id": "/root/ha_outbound_validation_reviewer",
+  "files": {
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "3b6ed48ede8f3c14d8447001de34162a1b761ef418bb916a067c929ced71e545",
+    "integrations/home-assistant/scripts/check-outbound-package.py": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c",
+    "docs/reviews/home-assistant-outbound-validation-v2.md": "0fb31081b0f99cb708c840a7072953941cf2b34afe080fbd4481e42fdb73efc2",
+    "docs/reviews/home-assistant-outbound-validation-v2-source.json": "83f9305673ab94353929d8760e9a3c9e23f789c0f1e63787034d8e2d48405776",
+    "docs/reviews/home-assistant-outbound-validation-v2-package-evidence.json": "a1c305be58e23965fb34c35355457d276aa5a592b7c204df4023f4d51017187f"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-out-verify-01-v2-state.json",
+    "sha256": "f0adf274948be899d3eabd237fd8f4afd3a1e92683820e92553795df8bace4e0"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-out-verify-01-v2.diff",
+    "sha256": "a24281b448f83a044e018f71ec78024b1a58b53d57ba0e7a414b050ca369fb37"
+  },
+  "dependencies": {
+    "OUT-PACK-01": {
+      "id": "out-pack-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
+      "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
+    },
+    "OUT-PROFILE-01": {
+      "id": "out-profile-01-v2",
+      "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
+      "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
+    },
+    "PLAT-SQL-01": {
+      "id": "plat-sql-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
+      "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c"
+    }
+  },
+  "structural_validation": {
+    "nodes": 29,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "original_gated_nodes": 11,
+    "all_four_gates_unsatisfied": true
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

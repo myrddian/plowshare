@@ -1,0 +1,941 @@
+diff --git a/docs/home-assistant-delivery-plan.md b/docs/home-assistant-delivery-plan.md
+index 1da007b6..12f32fa2 100644
+--- a/docs/home-assistant-delivery-plan.md
++++ b/docs/home-assistant-delivery-plan.md
+@@ -1,6 +1,7 @@
+ # Home Assistant package delivery graph
+ 
+ Created: 17 November 2026. Coordinator: `/root` (this chat's primary agent).
++Last reconciled: 22 November 2026 against main `6de685f63e060f3003cb93233d2567e004269755`.
+ Approval and current delivery progress are recorded in the linked ledger.
+ The node table below is the initial planning snapshot, not a live status board.
+ Baseline commit: `2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e` **plus the existing dirty working tree**. A commit ID alone
+@@ -51,6 +52,49 @@ Its [scoped design](reviews/home-assistant-ex-sql-budget-design.md) and this gra
+ amendment require independent plan approval before code dispatch. This amendment
+ does not claim a universal deadline fix or change unrelated unscoped operations.
+ 
++## 22 November outbound-only amendment
++
++The user authorized updating this graph/ledger and implementing independently
++reviewed outbound-only packaging, profiles and validation. PR #300 merged the
++original thirteen accepted deliverables as `16dec24b`; their merge milestones now
++reflect that fact. Historical manifests, reports and frozen ledger snapshots are
++immutable. Acceptance records remain evidence for their exact candidates, not a
++claim that every subsequent main revision was independently reviewed by those
++original agents.
++
++Current main owns the timeout contract: actual SQL queries/transactions have a
++configurable two-second default limit; nested statements share their transaction's
++remaining budget. Independent transactions, hooks, common authorization, durable
++job admission and reply delivery do not inherit an aggregate two-second workflow
++lifetime. Slow accepted workflows warn without cancellation or replacement.
++CORE-02/03A/03 acceptance text below is reconciled to that current contract; old
++reports retain the older requirements as historical evidence. Adapter/provider
++IO, polling and cleanup keep their own explicit finite resource budgets.
++
++The new branch consists of OUT-PLAN-01, OUT-PACK-01, OUT-PROFILE-01 and
++OUT-VERIFY-01. OUT-PLAN-01 freezes the common operator contract and independent
++review before source dispatch. Packaging and profiles may then proceed in parallel
++with disjoint ownership. Validation starts after both are independently accepted.
++This branch has no prompt-fidelity dependency because it invokes existing
++Plowshare agents/tools rather than offering an HA model endpoint. It neither
++satisfies nor removes any original gate/dependency.
++
++All eleven original awaiting-gate nodes remain awaiting_gate. HA-05–08, HA-10–11,
++VERIFY-01, PERF-01 and RELEASE-01 remain blocked on faithful prompt/context support;
++DEPLOY-01 and LIVE-01 retain release dependencies and their separate operational
++authorizations. No external system-context API, task-text substitute, prompt
++rewriting, Assist enablement or installable HA custom component is authorized.
++Prefix caching remains impact assessment of integrator-supplied prompts. Outbound
++source/artifacts may be prepared and tested locally; this amendment authorizes no
++new publication, target-branch merge, deployment, HA restart or live model/device
++operation.
++
++The named provider host is isolated from the legacy runtime's event workflows.
++It admits no routes, scripts, causal-feedback configuration or selected event
++subscriptions. It does not synthesize cross-host effect correlation. Operators
++must retain the existing documented separation from legacy feedback-dependent
++workflows; a future shared correlation owner requires its own reviewed scope.
++
+ ## Independence and closure protocol
+ 
+ 1. Root dispatches a ready node to its named implementer role only after its
+@@ -146,6 +190,20 @@ flowchart TD
+   D1 --> D2["HA-02 Discovery/reads"]
+   D2 --> D3["HA-03 Read ToolProvider"]
+   D3 --> D4["HA-04 Action provider"]
++  P --> OP["OUT-PLAN-01 Outbound amendment"]
++  A --> OP
++  OP --> OH["OUT-PACK-01 Provider host/package"]
++  D3 --> OH
++  D4 --> OH
++  EV --> OH
++  C4 --> OH
++  OP --> OT["OUT-PROFILE-01 Outbound profiles"]
++  D3 --> OT
++  D4 --> OT
++  EV --> OT
++  C4 --> OT
++  OH --> OV["OUT-VERIFY-01 Outbound validation"]
++  OT --> OV
+   C4 --> G["HA-05 Shared gateway"]
+   F --> G
+   PG{{"Verified prompt public path"}} -.-> G
+@@ -253,15 +311,15 @@ Implement a narrow typed resolver/repository and a new migration enforcing the a
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/<new-alias-contract-and-repository>`; `plowshare-server/src/main/resources/db/migration/<new-version>`; `plowshare-server/src/test/java/<selected-alias-tests>`.
+ 
+-**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify shared 2-second default SQL completion deadline, normal <=500 ms queries and <=1-second worst-case ceiling including waits/materialization; inspect real enforcement and report gaps.
++**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify each actual SQL query/transaction uses its configured two-second default completion limit, normally completes within 500 ms, and includes acquisition/waits/materialization. Nested SQL shares its transaction remaining time; independent SQL units and the surrounding workflow do not share an aggregate deadline. Inspect owning enforcement and report gaps.
+ 
+ ### CORE-03A — Scoped SQL completion for Ex admission
+ 
+-Implement the independently approved [internal scoped SQL-budget design](reviews/home-assistant-ex-sql-budget-design.md) so all Ex-owned identity/authority, alias, post-target and ordinary run-admission SQL shares one finite completion budget. Keep repositories responsible for SQL and keep ordinary transaction/lifecycle owners intact. The scope starts before admission; it does not open a transaction across the facade, hooks or scheduling. Decorate the repository connection holder and caller-thread authoritative projection leases while preserving the raw primary Hikari source and unscoped compatibility, including pool-admission-disabled composition.
++Retain the internal SQL-budget infrastructure under the current owning contract. Each hard scope covers one actual query or SQL transaction, including acquisition, execution/materialization and bounded physical cleanup. Nested SQL shares the transaction's earlier deadline. Preserve raw primary/pool identity, repository ownership and unscoped compatibility; never hold a connection across hooks, network calls or scheduling. The original design/report records its historical Ex-wide scope and must not override the current contract in ADR 0077 and the persistence/transport guides.
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/<scoped-sql-budget-interface-infrastructure-and-composition>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/ProjectionCacheConfiguration.java` (only necessary lease composition); `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/<Ex-private-miss-mode-and-atomic-existing-read>`; `plowshare-server/src/test/java/<scoped-budget-and-selected-PostgreSQL-tests>`; `docs/reviews/home-assistant-ex-sql-budget-design.md`; `docs/reviews/<scoped-sql-budget-implementation-evidence>`. CORE-03 owns wiring the accepted interface into its facade and its facade fixtures; coordinate that handoff instead of concurrent edits.
+ 
+-**Acceptance evidence:** Mock/barrier tests prove two-second default shared operation budget, earlier nested deadlines, one-second query ceiling through materialization, admission/acquisition interruption, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, unavailable/uncertain outcomes without replay and bounded shutdown. Verify fixed-label duration/breach/cancellation metrics and no raw SQL/identifiers. Selected tagged PostgreSQL cases prove actual lock/stream cancellation, rollback, acquisition and safe pool reuse only where mocks cannot. Confirm raw primary/pool metrics, shared template/transaction source identity, enabled/disabled admission and unchanged unscoped behavior. Preserve warm authorized hits and existing-fill coalescing; Ex-only private misses use existing uncached loaders so a scoped cancellation never aborts an ordinary shared fill/joiner. Verify current authority and query-count cost without claiming better cache performance. Record driver assumptions and gaps honestly; a logical timeout or SQL-only scope cannot establish whole-call completion for hooks/file loading.
++**Acceptance evidence:** Mock/barrier tests prove finite actual SQL-unit deadlines, earlier nested transaction deadlines, materialization cancellation, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, typed query failures with commit uncertainty and bounded cleanup. Backpressure applies before dispatch and must not cancel accepted work; workflow duration warnings cannot replace an accepted job/result. Preserve warm authorized cache hits and existing-fill ownership. Select tagged PostgreSQL tests only for actual locking, cancellation, rollback or pool reuse that mocks cannot establish; retain exact historical evidence separately. A SQL-only scope does not establish universal cancellation or a whole-call deadline for hooks/file loading.
+ 
+ This node is a prerequisite discovered during implementation. Existing CORE-03 semantic work was dispatched against accepted CORE-02; its completion and new scoped-budget wiring now require accepted CORE-03A. Root records that transition in the ledger, not as an implicit approval or a finished facade.
+ 
+@@ -271,7 +329,7 @@ Deliver the canonical wire/request/schema definitions, FrameTypes/dispatch regis
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/<Ex-handlers-FrameTypes-and-routing>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/<owning-admission-seams>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/api/<Ex-request-contracts>`; `plowshare-protocol/<required-shared-contracts>`; `sdk/typescript/src/operations/<canonical-Ex-contracts>`; `scripts/generate-sdk-contracts.mjs`; `sdk/<owning-generated-contract-outputs>`; `plowshare-server/src/test/java/<facade-tests>`.
+ 
+-**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Integrate accepted CORE-03A before the first admission SQL and through final synchronous checks without an outer Spring transaction. Verify remaining non-SQL phase budgets, including hook loading/execution; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
++**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Use accepted CORE-03A infrastructure at actual repository SQL-unit boundaries without an outer facade transaction or aggregate workflow timeout. Verify bounded intake/reply ownership, existing non-SQL resource budgets and warning-only slow workflow observations; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
+ 
+ ### CORE-04 — Shared catalogues and every SDK
+ 
+@@ -439,6 +497,119 @@ Exercise the public deployed package with the agreed permitted targets: scoped d
+ 
+ **Additional gates:** `live_acceptance_authorized`.
+ 
++## Outbound-only deliverables
++
++| Node | Dependencies | Implementer | Independent reviewer |
++| --- | --- | --- | --- |
++| OUT-PLAN-01 | PLAN-00, AUDIT-01 | `/root` | `/root/ha_outbound_plan_reviewer` |
++| OUT-PACK-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_pack_implementer` | `/root/ha_outbound_pack_reviewer` |
++| OUT-PROFILE-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_profiles_implementer` | `/root/ha_outbound_profiles_reviewer` |
++| OUT-VERIFY-01 | OUT-PACK-01, OUT-PROFILE-01 | `/root/ha_outbound_validation_implementer` | `/root/ha_outbound_validation_reviewer` |
++
++These are separate deliverables, not partial acceptance of HA-10/11 or VERIFY-01.
++All use the same frozen-candidate/independent-approval protocol. Validation's
++implementer/reviewer must not have authored either feature implementation. Root
++records actual IDs at dispatch; role reservation is not a running-agent claim.
++
++### OUT-PLAN-01 — Current-main reconciliation and operator contract
++
++**Owned outputs:** this plan, the coordinator-owned ledger and the
++[outbound host contract](reviews/home-assistant-outbound-host-contract.md).
++Reconcile PR #300 merge milestones and current SQL/accepted-work semantics without
++rewriting prior evidence. Add these nodes/edges with no inherited prompt gate.
++Freeze strict CLI/configuration, file ownership, dependencies and evidence limits.
++Independent review must approve exact plan/contract/ledger snapshot before code.
++
++**Acceptance evidence:** JSON/schema consistency, acyclic graph, dependency and
++gate references, independent role identities, all original eleven gated nodes
++unchanged, all four capability gates unsatisfied, historical evidence unchanged,
++and explicit authorization/merge/deployment distinctions. No runtime/DB check is
++required for this documentation node.
++
++### OUT-PACK-01 — Standalone outbound provider host and package
++
++Expose named read and optional explicit control providers using the existing
++public Java SDK and HA adapter. Preserve the legacy executable via delegation;
++new `--provider CONFIG` and `--provider --check CONFIG` select isolated provider
++mode. Strict typed configuration supplies explicit origins, binding/policy,
++credential environment-variable names, project/provider/principal/prefix, private
++journal paths, selected fixed action profiles and finite owning timing budgets.
++Read/control providers use separate authenticated SDK connections, identities,
++non-overlapping prefixes and journals; read grants never authorize control.
++
++Offline `--check` validates complete inputs without credential lookup, network,
++journal creation or catalogue mutation. Provider mode rejects event subscriptions,
++routes/scripts/feedback fields and unsupported recursive model endpoints. The
++supervisor owns finite adapter maintenance, catalogue publication/renewal,
++read-only uncertainty reconciliation and bounded polls/cleanup. Unknown mutation
++outcomes never trigger replay/replacement, silent account fallback or journal
++reset. Fail closed and retain ownership/receipts if physical cleanup cannot settle.
++Use narrow lifecycle interfaces for testable effects, not raw JSON domain APIs.
++
++**Owned outputs:** new HA-specific main/configuration/host interfaces and
++composition under `integrations/home-assistant/src/main/java/`; their new unit
++fixtures; HA `build.gradle.kts`; `PROVIDER-HOST.md`; narrow README links and correct
++explicit `-PfullDb` instructions for existing PostgreSQL harness tests. No edits
++to core, public SDK/shared contracts, legacy runtime behavior, Assist code or
++profile-owned example files.
++
++**Acceptance evidence:** invalid/unknown/null config and identity/path/prefix
++collisions refuse before effects; offline checks need no secrets; read-only has
++no actuator; control opt-in is exact; startup/renew/expiry/uncertainty/restart,
++bounded physical shutdown and legacy invocation preservation use fakes/local
++transports. Build the distribution and inspect its production dependency boundary.
++No live server/HA/model/device operation and no real database test by default.
++
++### OUT-PROFILE-01 — Read-only and explicit-control Application templates
++
++Supply separate outbound-only Application roots and matching provider configs in
++`examples/outbound/readonly` and `examples/outbound/control`. They use local
++`dynamic: true` agents, exact named external tool grants, static provider
++permissions with `bindings: []`, explicit execution/provider principal
++placeholders, empty access grants and separate private journals. No wildcard,
++implicit control, Assist/AI Task, event routes, shared private conversation
++history, built-in tools or automatic authority provisioning. Connection/policy
++belongs in typed configuration, not agent prose.
++
++**Owned outputs:** all `examples/outbound/**`, example-specific operator guidance
++and `OutboundProfilesTest.java`. Packaging host/configuration code is owned by
++OUT-PACK-01; the approved common contract permits parallel work.
++
++**Acceptance evidence:** current real manifest/provider/agent loaders accept both
++complete roots; exact assignments deny wrong agent/principal/project/control;
++missing grants confer no authority; invalid examples fail clearly. Match host
++configurations to the typed parser, exact provider names/prefixes/journals and
++installed files once OUT-PACK-01 is ready. No model fleet or deployment claim from
++parsing a template; placeholders must be replaced in private operator source.
++
++### OUT-VERIFY-01 — Integrated outbound-only validation
++
++Assemble exact independently accepted packaging/profile candidates. Verify a fresh
++installed distribution runs offline config validation without credential/network
++or journal side effects, ships only public SDK/runtime production dependencies,
++and includes the approved examples. Exercise host lifecycle and public SDK
++request/recovery contracts over controlled local WebSocket/HA fixtures, retaining
++server-side authorization ownership and distinct delivery/effect/observation states.
++Recheck the Ex SDK contract and existing server authorization tests with mocked
++repositories. Template/source checks cannot establish actual live grant issuance
++or physical device behavior; record those as later operational prerequisites.
++
++**Owned outputs:** new cross-boundary fixtures only under the HA module, and
++`docs/reviews/home-assistant-outbound-validation.md` plus text candidate/source/
++package hash manifests. Feature source corrections return to their original
++implementers and reviewers; validation agents may not self-approve them.
++
++**Acceptance evidence:** current `check`, `formatCheck`, `integrationBoundaryCheck`,
++canonical SDK-contract drift checks and scoped fresh installed-consumer fixtures
++pass against one frozen source. Real SDK transport tests prove public request
++shapes/correlation and no replay after uncertainty; no manual internal-service or
++SQL access from production. Use mocked repositories by default; a selected
++`full-db` test requires an independently stated PostgreSQL-specific assertion,
++not general integration confidence. Guard Assist setup/configuration/packaging
++remains disabled; do not install HA dependencies or enable the component merely
++to claim complete-package validation. Record missing explicit Python/HA checks
++honestly. This node does not close original VERIFY/PERF/RELEASE/DEPLOY/LIVE nodes.
++
+ ## Coordinator scheduling and tracking
+ 
+ There are four concurrent agent slots: root plus at most three workers. The safe
+@@ -447,6 +618,10 @@ a disjoint ready branch. Reviewer slots are reserved before opening more work;
+ root never leaves reviews starved behind unreviewed implementation batches.
+ Roles are reused sequentially only where independence and file ownership hold.
+ 
++Outbound amendment schedule: OUT-PLAN-01 review first, then OUT-PACK-01 and
++OUT-PROFILE-01 on disjoint paths, each with independent review, followed by
++OUT-VERIFY-01. Original prompt-dependent waves below remain gated.
++
+ Initial waves after PLAN-00 approval:
+ 
+ 1. AUDIT-01 establishes the exact baseline. No feature node inherits an assumed
+diff --git a/docs/reviews/home-assistant-outbound-host-contract.md b/docs/reviews/home-assistant-outbound-host-contract.md
+new file mode 100644
+index 00000000..fc9cb428
+--- /dev/null
++++ b/docs/reviews/home-assistant-outbound-host-contract.md
+@@ -0,0 +1,154 @@
++# Outbound provider host contract — 22 November 2026
++
++Owner: OUT-PLAN-01, implementer `/root`; independent review required before
++OUT-PACK-01/OUT-PROFILE-01 source dispatch. Baseline main `6de685f6`.
++This contract uses existing public SDK capabilities only. No core/shared SDK,
++Assist, AI Task, system-context, inference endpoint or live-operation change.
++
++## CLI and ownership
++
++The existing HA distribution keeps its executable name. HA-specific
++`HomeAssistantMain` delegates unchanged legacy arguments to integration `Main`.
++Only `--provider CONFIG` and `--provider --check CONFIG` choose the new provider
++mode. Malformed provider flags fail visibly rather than falling back to legacy.
++`--check` parses and validates without looking up credentials, opening any socket,
++creating/locking journals or publishing/connecting scopes. Print bounded safe
++status/errors without tokens, provider payloads or private paths.
++
++The provider host is not IntegrationRuntime. It starts no workflows and refuses
++routes, scripts, feedback fields and nonempty HA subscriptions. No shared feedback
++index is promised. Named controls continue refusing conversation.process and
++ai_task generation endpoints through their existing owning policy. The legacy
++manual-alias executable's behavior remains compatible.
++
++## Strict configuration
++
++All shown scalar/object fields are required unless marked optional; explicit null,
++unknown fields, duplicate keys, trailing tokens, malformed UTF-8 and over-limit
++input fail before effects. Maximum file size is 256 KiB, matching the existing
++integration JSON boundary; bound reading before decoding. Convert at that boundary
++to immutable typed records before lifecycle logic. No arbitrary JSON/maps cross
++into host contracts. Existing HA fixed entity/attribute/action policies retain
++their existing strict domain rules.
++
++```json
++{
++  "version": 1,
++  "plowshare": "https://plowshare.example.invalid",
++  "binding": "house",
++  "policyRevision": "outbound-v1",
++  "homeAssistant": {
++    "endpoint": "https://home-assistant.example.invalid",
++    "tokenEnv": "HA_TOKEN",
++    "entities": {
++      "lamp": {"entity": "light.example_lamp", "attributes": []}
++    },
++    "actions": {
++      "lamp_on": {
++        "service": "light.turn_on",
++        "targets": ["light.example_lamp"],
++        "parameters": {},
++        "required": []
++      }
++    },
++    "subscriptions": []
++  },
++  "read": {
++    "project": "home-assistant-control",
++    "provider": "ha-read",
++    "account": "REPLACE_WITH_READ_PROVIDER_PRINCIPAL",
++    "prefix": "ha_read_",
++    "tokenEnv": "PLOWSHARE_READ_TOKEN",
++    "journal": "private/read",
++    "leaseSeconds": 120
++  },
++  "control": {
++    "project": "home-assistant-control",
++    "provider": "ha-control",
++    "account": "REPLACE_WITH_CONTROL_PROVIDER_PRINCIPAL",
++    "prefix": "ha_control_",
++    "tokenEnv": "PLOWSHARE_CONTROL_TOKEN",
++    "journal": "private/control",
++    "leaseSeconds": 120,
++    "allowedActions": ["lamp_on"]
++  },
++  "timing": {
++    "connectTimeoutMillis": 20000,
++    "requestTimeoutMillis": 2000,
++    "cleanupTimeoutMillis": 2000,
++    "pollIntervalMillis": 500,
++    "renewEveryMillis": 10000,
++    "metadataMaxAgeMillis": 30000
++  }
++}
++```
++
++`control` is optional and absent in read-only configuration. `allowedActions` is
++required only in control, a nonempty duplicate-free subset of the configured
++fixed HA actions. Separate read/control SDK connections use their own explicit
++principal, token environment reference, logical provider, prefix and private
++journal. Require the same project and distinct principals/provider names/token
++references, nonoverlapping prefixes and nonidentical/nonnested normalized absolute
++journal paths. Relative journal paths resolve against the configuration's parent.
++Treat symlink/real-path aliases conservatively at actual journal opening; do not
++silently adopt another provider's receipts. Empty access/manifest grants in
++examples create no authority. Static Application provider declarations and exact
++manifest tool scopes are provisioned separately; the host never grants itself
++access or invents tool.scope.connect mutations.
++
++Origins are explicit HTTP(S) origins without credentials/path/query/fragment or
++local fallback. Required environment names follow existing uppercase identifier
++rules. Reuse existing SDK/binding/project/alias validators. Finite scalar timing
++bounds: connect/request/cleanup 100..30000 ms, poll 10..30000 ms, metadata age
++1..300000 ms. Lease 1..300 seconds; renew interval positive and below half the
++minimum lease; poll interval below renew interval and request budget below half
++the minimum lease. Validate arithmetic without overflow. These are host resource
++budgets, not a two-second accepted-agent workflow lifetime. A slow/unavailable
++provider may lose its lease; it must fail explicitly, never execute under guessed
++catalogue authority or promise uninterrupted availability.
++
++## Lifecycle and uncertainty
++
++Compose a configured HA adapter/resource catalogue and one read provider, plus
++optional separate control provider. Narrow injected lifecycle interfaces own SDK
++and HA effects; construction/composition alone selects concrete implementations.
++Keep existing host, credential, policy, schema and broker receipt fences.
++
++Startup opens validated owners and reconciles original retained uncertainty
++before new catalogue publication. A supervisor performs finite maintenance,
++explicit scheduled renewals and bounded polling through existing owner APIs.
++No generic retry after IOException, SDK auto-reconnect, new UUID replacement of
++uncertain work or journal reset. Unresolved errors terminate intake and preserve
++original receipts/physical ownership for operator inspection. Legitimate later
++scheduled lease renewal is distinct from replay of a failed publication. Do not
++renew while unresolved original catalogue intent remains.
++
++Normal shutdown stops intake, withdraws only known settled catalogues and closes
++owned resources within explicit cleanup budgets. Failure/uncertainty shutdown
++must not send a new withdrawal to conceal unknown publication/effects. Preserve
++caller interruption and SDK/HA physical ownership; if cleanup cannot settle,
++report failure and retain the bounded owner/journal rather than creating a new
++worker or reconnect around it. Reverse-order partial startup cleanup cannot leak
++journals/threads or erase uncertain records. Do not claim that caller cancellation
++proves remote abort. Installation/source changes do not imply live deployment.
++
++## Parallel file ownership and acceptance
++
++OUT-PACK-01 owns new main/configuration/host/lifecycle Java and host tests,
++HA build.gradle.kts, PROVIDER-HOST.md, and narrow parent README changes.
++OUT-PROFILE-01 owns examples/outbound/** and OutboundProfilesTest.java.
++Profile roots: readonly/application (`home-assistant-readonly`, `house_reader`)
++and control/application (`home-assistant-control`, `house_controller`). Each has
++plowshare.json, agents, static server/tools.json and matching sibling provider.json.
++Use explicit principal placeholders/empty access grants, dynamic agents and exact
++read four-tool names plus separately granted control two-tool names. No built-ins,
++wildcards, Assist, task provider, workflow starts or shared history by default.
++
++Root serializes Gradle and generated-artifact work. Freeze Java during compiled
++checks. Independent reviewers bind exact source/hash/ledger snapshots; no agent
++reviews its own authored feature. OUT-VERIFY-01 starts after both feature approvals
++and authors only cross-boundary fixtures/evidence. Mock repositories and local
++public SDK/HA transport fixtures by default; no real PostgreSQL without a precise
++actual-database assertion. Record source/installed artifact identities, all checks
++and missing proof honestly. No original gated node is closed by outbound-only
++validation; all eleven and all four capability/operational gates remain unchanged.
+diff --git a/docs/home-assistant-delivery-state.json b/docs/home-assistant-delivery-state.json
+index be85469d..96d7df47 100644
+--- a/docs/home-assistant-delivery-state.json
++++ b/docs/home-assistant-delivery-state.json
+@@ -11,7 +11,7 @@
+     "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
+   },
+   "scope": {
+-    "current_request": "Commit reviewed changes and open a pull request; keep prompt-dependent features gated",
++    "current_request": "Update plan/ledger, add independent outbound-only packaging/profiles/validation and implement them; keep prompt-dependent features gated",
+     "runtime_implementation_dispatched": true,
+     "merge_authorized": false,
+     "deployment_authorized": false,
+@@ -21,11 +21,16 @@
+       "Preserve HA prompt/context as supplied; assess cache impact without rewriting it.",
+       "2026-11-17: user authorized execution with Start it; merge, deployment, live effects and backend measurements retain their explicit gates.",
+       "User explicitly chose Leave prompt-dependent features gated. No external system-context API or weaker task-text substitution authorized.",
+-      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only."
++      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only.",
++      "2026-11-22: user authorized outbound-only implementation and plan/ledger reconciliation. PR300 is already merged. No new publication/target merge/deployment/live authorization and no prompt/context extension. Prior exact-source review artifacts remain immutable."
+     ],
+     "commit_authorized": true,
+     "push_authorized": true,
+-    "pull_request_authorized": true
++    "pull_request_authorized": true,
++    "outbound_implementation_authorized": true,
++    "outbound_publication_authorized": false,
++    "outbound_target_merge_authorized": false,
++    "outbound_deployment_authorized": false
+   },
+   "status_values": [
+     "planned",
+@@ -134,11 +139,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T23:15:30.186477+00:00"
++      "updated_at": "2026-11-16T23:15:30.186477+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "AUDIT-01",
+@@ -187,11 +198,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:33:50.055430+00:00"
++      "updated_at": "2026-11-16T21:33:50.055430+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-01",
+@@ -263,11 +280,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.065667+00:00"
++      "updated_at": "2026-11-16T21:45:20.065667+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-02",
+@@ -360,11 +383,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T22:49:50.733679+00:00"
++      "updated_at": "2026-11-16T22:49:50.733679+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03A",
+@@ -460,11 +489,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:53:04.215754+00:00"
++      "updated_at": "2026-11-17T01:53:04.215754+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03",
+@@ -688,11 +723,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T04:36:25.467849+00:00"
++      "updated_at": "2026-11-17T04:36:25.467849+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-04",
+@@ -834,14 +875,20 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+       "updated_at": "2026-11-17T04:47:09.041004+00:00",
+       "implementation_collaborators": [
+         "/root/ha_sdk_implementer/native_ex"
+-      ]
++      ],
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "FIDELITY-01",
+@@ -918,11 +965,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:50:46.630922+00:00"
++      "updated_at": "2026-11-16T21:50:46.630922+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-01",
+@@ -1033,11 +1086,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T00:50:36.944378+00:00"
++      "updated_at": "2026-11-17T00:50:36.944378+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-02",
+@@ -1147,11 +1206,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:56:50.815783+00:00"
++      "updated_at": "2026-11-17T01:56:50.815783+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-03",
+@@ -1221,11 +1286,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:16:05.933445+00:00"
++      "updated_at": "2026-11-17T01:16:05.933445+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-04",
+@@ -1301,11 +1372,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:18:03.593694+00:00"
++      "updated_at": "2026-11-17T02:18:03.593694+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-05",
+@@ -1514,11 +1591,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:20:47.982417+00:00"
++      "updated_at": "2026-11-17T02:20:47.982417+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-10",
+@@ -1807,6 +1890,165 @@
+         "live_validated": false
+       },
+       "updated_at": "2026-11-16T21:45:20.262205+00:00"
++    },
++    {
++      "id": "OUT-PLAN-01",
++      "title": "Current-main reconciliation and outbound host contract",
++      "dependencies": [
++        "PLAN-00",
++        "AUDIT-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root",
++      "reviewer_role": "/root/ha_outbound_plan_reviewer",
++      "implementation_agent_id": "/root",
++      "review_agent_id": "/root/ha_outbound_plan_reviewer",
++      "status": "in_review",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-outbound-host-contract.md"
++      ],
++      "candidate_revision": null,
++      "evidence": [],
++      "findings": [],
++      "review": {
++        "state": "in_review",
++        "verdict": null,
++        "candidate_digest": null,
++        "report_path": null,
++        "report_sha256": null,
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:24:28.418778+00:00"
++    },
++    {
++      "id": "OUT-PACK-01",
++      "title": "Standalone outbound provider host and package",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "implementation_agent_id": null,
++      "review_agent_id": null,
++      "status": "planned",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md"
++      ],
++      "candidate_revision": null,
++      "evidence": [],
++      "findings": [],
++      "review": {
++        "state": "not_started",
++        "verdict": null,
++        "candidate_digest": null,
++        "report_path": null,
++        "report_sha256": null,
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "not_started",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:23:44.569338+00:00"
++    },
++    {
++      "id": "OUT-PROFILE-01",
++      "title": "Read-only and explicit-control Application templates",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "implementation_agent_id": null,
++      "review_agent_id": null,
++      "status": "planned",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ],
++      "candidate_revision": null,
++      "evidence": [],
++      "findings": [],
++      "review": {
++        "state": "not_started",
++        "verdict": null,
++        "candidate_digest": null,
++        "report_path": null,
++        "report_sha256": null,
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "not_started",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:23:44.569338+00:00"
++    },
++    {
++      "id": "OUT-VERIFY-01",
++      "title": "Integrated outbound-only validation",
++      "dependencies": [
++        "OUT-PACK-01",
++        "OUT-PROFILE-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "implementation_agent_id": null,
++      "review_agent_id": null,
++      "status": "planned",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md"
++      ],
++      "candidate_revision": null,
++      "evidence": [],
++      "findings": [],
++      "review": {
++        "state": "not_started",
++        "verdict": null,
++        "candidate_digest": null,
++        "report_path": null,
++        "report_sha256": null,
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "not_started",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:23:44.569338+00:00"
+     }
+   ],
+   "history": [
+@@ -2681,6 +2923,39 @@
+         "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
+       },
+       "note": "Final source matches independent approvals; repository/SDK/package checks pass. 13 accepted and 11 awaiting_gate remain unchanged. No target merge/deployment/live authorization."
++    },
++    {
++      "at": "2026-11-21T23:23:44.569338+00:00",
++      "event": "outbound_amendment_ready_for_review",
++      "author": "/root",
++      "base": {
++        "commit": "6de685f63e060f3003cb93233d2567e004269755",
++        "date": "2026-11-22",
++        "branch": "codex/ha-outbound-delivery",
++        "working_tree_at_start": "clean",
++        "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++      },
++      "nodes_added": [
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "OUT-VERIFY-01"
++      ],
++      "previous_accepted_nodes_merged": 13,
++      "original_gated_nodes_unchanged": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "PERF-01",
++        "RELEASE-01",
++        "DEPLOY-01",
++        "LIVE-01"
++      ],
++      "note": "Current-main targeted review previously passed110 HA tests+86 selected core tests, SDK contract/boundary checks. PythonHA venv absent; no DB/live check. Source dispatch awaits independent OUT-PLAN approval."
+     }
+   ],
+   "publication_guard": {
+@@ -2728,5 +3003,37 @@
+     "evidence": "docs/reviews/home-assistant-publication-verification.json",
+     "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+     "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
++  },
++  "current_baseline": {
++    "commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "working_tree_at_start": "clean",
++    "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++  },
++  "outbound_amendment": {
++    "date": "2026-11-22",
++    "host_contract": "docs/reviews/home-assistant-outbound-host-contract.md",
++    "original_gated_nodes_preserved": [
++      "HA-05",
++      "HA-06",
++      "HA-07",
++      "HA-08",
++      "HA-10",
++      "HA-11",
++      "VERIFY-01",
++      "PERF-01",
++      "RELEASE-01",
++      "DEPLOY-01",
++      "LIVE-01"
++    ],
++    "current_contract": "Actual SQL-unit two-second default, nested transaction deadline; accepted workflow duration warns without outcome replacement. Provider IO/poll/cleanup retain finite owner budgets.",
++    "independent_review_required_before_source_dispatch": true,
++    "node_ids": [
++      "OUT-PLAN-01",
++      "OUT-PACK-01",
++      "OUT-PROFILE-01",
++      "OUT-VERIFY-01"
++    ]
+   }
+ }

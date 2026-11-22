@@ -1,0 +1,302 @@
+{
+  "node": "OUT-VERIFY-01",
+  "captured_at": "2026-11-22T00:23:38.348193+00:00",
+  "result": "PASS",
+  "command": "JAVA_HOME=<explicit Java 21+> python3 integrations/home-assistant/scripts/check-outbound-package.py --distribution <fresh installDist> --report <private report>",
+  "validator_source": {
+    "path": "integrations/home-assistant/scripts/check-outbound-package.py",
+    "sha256": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c"
+  },
+  "consumer_report_sha256": "ec0980c62c721724d220a1b99480fccf4589a4524292d47e11a3eff7431b129a",
+  "consumer_log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
+  "source_distribution_unchanged": true,
+  "checks": [
+    "readonly: offline provider config",
+    "control: offline provider config",
+    "legacy: offline manual-alias config",
+    "readonly: retained journals untouched",
+    "control: retained journals untouched",
+    "prompt input remains refused",
+    "contradictory control principal refused",
+    "malformed provider CLI refused"
+  ],
+  "payload_checks": {
+    "runtime_jars": 26,
+    "local_document_links": 4
+  },
+  "platform": "darwin",
+  "java_major": 21,
+  "artifacts": [
+    {
+      "path": "PROVIDER-HOST.md",
+      "sha256": "1e593204fbec14ea4237e2318ea8e74807b98b231fd83fc45c80617d3d4acbcf",
+      "bytes": 8183
+    },
+    {
+      "path": "bin/plowshare-integration-home-assistant",
+      "sha256": "dfcd1adf9034d2c411c3593f57d93c520739001cf142d7369fe03cd20268fbbc",
+      "bytes": 9923
+    },
+    {
+      "path": "bin/plowshare-integration-home-assistant.bat",
+      "sha256": "1ecc590a0c30da5a53ad7280dd057561188d9e853023637fd7c630b7286ab147",
+      "bytes": 4162
+    },
+    {
+      "path": "examples/application/agents/house_coordinator.md",
+      "sha256": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
+      "bytes": 2469
+    },
+    {
+      "path": "examples/application/orchestrations/investigate_office_heat.md",
+      "sha256": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
+      "bytes": 1654
+    },
+    {
+      "path": "examples/application/plowshare.json",
+      "sha256": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
+      "bytes": 301
+    },
+    {
+      "path": "examples/application/skills/house-evidence/SKILL.md",
+      "sha256": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
+      "bytes": 894
+    },
+    {
+      "path": "examples/config.json",
+      "sha256": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
+      "bytes": 2601
+    },
+    {
+      "path": "examples/office.mjs",
+      "sha256": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
+      "bytes": 821
+    },
+    {
+      "path": "examples/outbound/README.md",
+      "sha256": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
+      "bytes": 5701
+    },
+    {
+      "path": "examples/outbound/control/application/agents/house_controller.md",
+      "sha256": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
+      "bytes": 1658
+    },
+    {
+      "path": "examples/outbound/control/application/plowshare.json",
+      "sha256": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
+      "bytes": 921
+    },
+    {
+      "path": "examples/outbound/control/application/server/tools.json",
+      "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+      "bytes": 378
+    },
+    {
+      "path": "examples/outbound/control/provider.json",
+      "sha256": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+      "bytes": 1422
+    },
+    {
+      "path": "examples/outbound/readonly/application/agents/house_reader.md",
+      "sha256": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
+      "bytes": 1172
+    },
+    {
+      "path": "examples/outbound/readonly/application/plowshare.json",
+      "sha256": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
+      "bytes": 665
+    },
+    {
+      "path": "examples/outbound/readonly/application/server/tools.json",
+      "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+      "bytes": 216
+    },
+    {
+      "path": "examples/outbound/readonly/provider.json",
+      "sha256": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+      "bytes": 1037
+    },
+    {
+      "path": "lib/annotations-13.0.jar",
+      "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+      "bytes": 17536
+    },
+    {
+      "path": "lib/collections-23.1.12.jar",
+      "sha256": "54a6c6d50be1a7f732cc294b2feb930b5771ce8afd6cd7c2b4a831f85bb25aef",
+      "bytes": 121580
+    },
+    {
+      "path": "lib/icu4j-23.1.12.jar",
+      "sha256": "2c9ab5dfd797cc145ebfb0b1320ce831aa9b76c0adc70945a580bef1a8730dd0",
+      "bytes": 39645881
+    },
+    {
+      "path": "lib/jackson-annotations-2.17.2.jar",
+      "sha256": "873a606e23507969f9bbbea939d5e19274a88775ea5a169ba7e2d795aa5156e1",
+      "bytes": 78492
+    },
+    {
+      "path": "lib/jackson-core-2.17.2.jar",
+      "sha256": "721a189241dab0525d9e858e5cb604d3ecc0ede081e2de77d6f34fa5779a5b46",
+      "bytes": 581927
+    },
+    {
+      "path": "lib/jackson-databind-2.17.2.jar",
+      "sha256": "c04993f33c0f845342653784f14f38373d005280e6359db5f808701cfae73c0c",
+      "bytes": 1649454
+    },
+    {
+      "path": "lib/jackson-datatype-jsr310-2.17.2.jar",
+      "sha256": "9b80024a9822e70b07f6bb13824c76c137c1064a1b5eb518374ab141870fdbcc",
+      "bytes": 132264
+    },
+    {
+      "path": "lib/jniutils-23.1.12.jar",
+      "sha256": "7489745b9889851d7586d89f8e2698ea7374ae78ffdebf1ed4550dd58117dc48",
+      "bytes": 275246
+    },
+    {
+      "path": "lib/js-language-23.1.12.jar",
+      "sha256": "3639558b4a776147d22acd2dc61a03a90d340064ef744916c5adf37c0d9cf2c1",
+      "bytes": 27289717
+    },
+    {
+      "path": "lib/kotlin-stdlib-1.9.10.jar",
+      "sha256": "55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504",
+      "bytes": 1708006
+    },
+    {
+      "path": "lib/kotlin-stdlib-common-1.9.10.jar",
+      "sha256": "cde3341ba18a2ba262b0b7cf6c55b20c90e8d434e42c9a13e6a3f770db965a88",
+      "bytes": 225141
+    },
+    {
+      "path": "lib/kotlin-stdlib-jdk7-1.9.10.jar",
+      "sha256": "ac6361bf9ad1ed382c2103d9712c47cdec166232b4903ed596e8876b0681c9b7",
+      "bytes": 959
+    },
+    {
+      "path": "lib/kotlin-stdlib-jdk8-1.9.10.jar",
+      "sha256": "a4c74d94d64ce1abe53760fe0389dd941f6fc558d0dab35e47c085a11ec80f28",
+      "bytes": 965
+    },
+    {
+      "path": "lib/nativeimage-23.1.12.jar",
+      "sha256": "8b7ec0f100d4eeaebbdc02be2bf4f57147f1873cbea6cf8597beb555b03134ae",
+      "bytes": 217333
+    },
+    {
+      "path": "lib/okhttp-4.12.0.jar",
+      "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+      "bytes": 789531
+    },
+    {
+      "path": "lib/okio-jvm-3.6.0.jar",
+      "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+      "bytes": 359580
+    },
+    {
+      "path": "lib/plowshare-integration-home-assistant-0.1.0-SNAPSHOT.jar",
+      "sha256": "29407d14143509ed64476e4158641bc70cc3c28fd359b2a149fb77f91a0121de",
+      "bytes": 255082
+    },
+    {
+      "path": "lib/plowshare-integrations-0.1.0-SNAPSHOT.jar",
+      "sha256": "9970fd9e4ce41b0c8c0a67dc6055b6d24ee87ea5973cd818d63a82728c5ace53",
+      "bytes": 162744
+    },
+    {
+      "path": "lib/plowshare-protocol-0.1.0-SNAPSHOT.jar",
+      "sha256": "4872ca948e7b24f1e4a9a53e2c8a6b0e0ce3e689fecbac2cc06280aea65d80f4",
+      "bytes": 812338
+    },
+    {
+      "path": "lib/plowshare-sdk-0.1.0-SNAPSHOT.jar",
+      "sha256": "2f05ed142a5fda6d304f3a1a18ced76f89adf14ff67b3ad71318ceb6c79b6582",
+      "bytes": 398158
+    },
+    {
+      "path": "lib/polyglot-23.1.12.jar",
+      "sha256": "677ce37f6f8cf9c155344711dc85fcea9f25629ff8b761b71400d1243626a112",
+      "bytes": 939215
+    },
+    {
+      "path": "lib/regex-23.1.12.jar",
+      "sha256": "ac00e975681325123e6b5da5610a8aebdc1629c0bc869009d469f8b614f32953",
+      "bytes": 3701640
+    },
+    {
+      "path": "lib/truffle-api-23.1.12.jar",
+      "sha256": "ab0898a4f06b01eb738823fb750aef24ac0bcbcc5856302a9efc1561c68489d6",
+      "bytes": 16738164
+    },
+    {
+      "path": "lib/truffle-compiler-23.1.12.jar",
+      "sha256": "41a25a7357092e2b47e339f8311974e16a2cb40bde1ccb36ef71cf3a314e6c7e",
+      "bytes": 61865
+    },
+    {
+      "path": "lib/truffle-runtime-23.1.12.jar",
+      "sha256": "3d0e5c1d290747b351af5b589a9801d9796af29274f184291d1a3fab62fca48e",
+      "bytes": 1053408
+    },
+    {
+      "path": "lib/word-23.1.12.jar",
+      "sha256": "8c6221a04dc1c917a75e526ffcf5f4cdd80b812b45561dc9225538b0eb97bee6",
+      "bytes": 22242
+    }
+  ],
+  "failed_initial_attempt": {
+    "log_sha256": "4b4c9261aacd7669c64007192bfa3a829e8cedb8728060667641c3154e43caa3",
+    "reason": "Fixture expected helper status 2 as OS status; actual public launcher returns status 1 and Usage diagnostic. Only validator expectation corrected; feature bytes unchanged."
+  },
+  "limits": "Local trap listeners prove no observed connections from offline commands. Static template policy and scripted protocol tests do not prove live grants, device effects, fleet availability or Windows installation. Assist Python runtime checks were not rerun because their former environment is absent. All original gates remain unchanged; no core/SDK/Assist source was modified.",
+  "source_snapshot": {
+    "path": "docs/reviews/home-assistant-outbound-validation-source.json",
+    "sha256": "da2842991041aeb7a462ff920d5c5833009df73a80ec1374bcc754a5d50c9466"
+  },
+  "scope": "Installed consumer and artifact proof PASS only. Node acceptance is blocked because required full repository check FAILS.",
+  "node_acceptance": "BLOCKED_BY_REQUIRED_REPOSITORY_CHECK",
+  "directory_topology_checked": true,
+  "empty_directory_guard_probe": "Implementer and coordinator independently verified require_tree_unchanged rejects new empty-journal directory despite identical file hashes.",
+  "review_correction": "P2: file-only snapshots missed empty directory creation. Original validator added separate bounded directory topology checks around each child, copied payload and original distribution; complete eight-case consumer rerun passed without changing features.",
+  "scoped_verification": {
+    "result": "PASS",
+    "validation_tests": 3,
+    "sql_owning_class_tests": 30,
+    "failures": 0,
+    "duration": "8s",
+    "tasks": 72,
+    "log_sha256": "105eb5c85a5063df25e0658939006fe0921ba121232538d7193869a50df74c39",
+    "format_result": "PASS",
+    "format_duration": "4s",
+    "format_log_sha256": "9ac2df6f4cf3637339c41b981a56f531cbcc79fc77212f61d553819549d512a0"
+  },
+  "repository_verification": {
+    "result": "FAIL",
+    "final_entry_point": "Full Gradle check with --max-workers=2; no exclusions or core changes",
+    "duration": "5m10s",
+    "tasks": 140,
+    "server_tests": 8627,
+    "server_failures": 2,
+    "ha_tests": 166,
+    "ha_failures": 0,
+    "failed_test": "ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied(boolean), both parameter variants, socketRead.await(1s)",
+    "final_log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
+    "first_full_check": {
+      "result": "FAIL",
+      "duration": "4m36s",
+      "server_tests": 8627,
+      "server_failures": 1,
+      "log_sha256": "9b0c0235a254e072bc16c1a8b09ce5555cf0d4a2783f10da2fb6e5a4e75ef0b2"
+    },
+    "isolated_method_check": {
+      "result": "FAIL",
+      "failed_variants": 2,
+      "log_sha256": "a6ac32e5c3e174722e3282692011b9af0cc6d06216e5b5ff5332918e60e9810a"
+    },
+    "interpretation": "The existing unchanged SQL test also passed as a complete owning class. No root cause, harmless flake or causal independence from this change has been established. Required green repository verification remains unmet."
+  }
+}

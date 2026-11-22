@@ -1,0 +1,31 @@
+{
+  "candidate_id": "plat-sql-01-v1",
+  "node": "PLAT-SQL-01",
+  "created_at": "2026-11-22T01:36:13.534537+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/sql_cleanup_implementer",
+  "reviewer_agent_id": "/root/sql_cleanup_reviewer",
+  "files": {
+    "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java": "1804bc5e331d9f5eb05a660120981f9656b4cb09b1cf491bbb332973b38fac00",
+    "docs/reviews/home-assistant-plat-sql-01-implementation.md": "05ca2f1e73f63baff2f235f1502bd6004f3e1d75510c20e8eac2d0dd2f520d22",
+    "docs/home-assistant-delivery-plan.md": "ee2b26a0554a1c74a7a3925ba05e46a7ddfd4dec105d9f1203c4938974cba749"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-plat-sql-01-v1-state.json",
+    "sha256": "2a5881d05b86b7fa393274bf7440240cccaec39dd4001a21495e371be8857a1e"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-plat-sql-01-v1.diff",
+    "sha256": "fc109011499b98ab5adbf41c9e249a49f3eab7cc4ff5768c32ff125a1d3923ec"
+  },
+  "dependencies": {},
+  "structural_validation": {
+    "nodes": 29,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "original_gated_nodes": 11,
+    "all_four_gates_unsatisfied": true
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

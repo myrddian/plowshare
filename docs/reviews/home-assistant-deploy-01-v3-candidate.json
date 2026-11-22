@@ -1,0 +1,61 @@
+{
+  "candidate_id": "deploy-01-v3",
+  "node": "DEPLOY-01",
+  "scope": "Complete separately authorized provider installation/configuration and scoped house_reader read acceptance. No control or whole LIVE-01 acceptance. Prior App/Assist phase approval remains immutable.",
+  "created_at": "2026-11-22T20:12:01.772125+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-read-provider-production-setup.md": "1c094d2e8947a3b15df98da268d67384467e3186b775a15786f65100b8dc17ab"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-deploy-01-v3-state.json",
+    "sha256": "5cb48c395dc0e02a1537c7d74951b0ef0a5f5cd7b1295fe2e1a0c89c1147e16c"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-deploy-01-v3.diff",
+    "sha256": "79cddda9967589650a50a0eb353d74a2ca16b247abaeade772b7f97c1d004bb6"
+  },
+  "dependencies": {
+    "RELEASE-01": {
+      "id": "release-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-release-01-v1-candidate.json",
+      "manifest_sha256": "c68faa34ed945401db4736fb794bf8d80348097d73801887c91ec61f8db581ff"
+    },
+    "HA-FIX-01": {
+      "id": "ha-fix-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-fix-01-v1-candidate.json",
+      "manifest_sha256": "9eb3354c2682da906c31dd4affbaa36316b573049e6b2b964f6b4ed81f185582"
+    },
+    "HA-FIX-02": {
+      "id": "ha-fix-02-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-fix-02-v2-candidate.json",
+      "manifest_sha256": "507b83649e387b25440cf7a1f7c5870b4292807863a5cf15f5d2f9a16dffd1ed"
+    }
+  },
+  "private_evidence": {
+    "/private/tmp/ha-read-provider-20261123/preflight-v2-candidate.json": "33959a916d2b28178fb4fec63ff6d1f043cb86340d5011373b90a897a1e93c49",
+    "/private/tmp/ha-read-provider-20261123/stage-receipt.json": "cbe65f04b0a8921f061051d3d82d08af83fdd3d18d2f52598606361a505b1a2e",
+    "/private/tmp/ha-read-provider-20261123/stage-audit.json": "6aad5f763b6b59392aaaa414ff2860a4816e1d520628145d6b5492bdfab3c244",
+    "/private/tmp/ha-read-provider-20261123/startup-candidate.json": "a47fe33f6966dec175ac3db83fde8586e7fe486846a4ddb27909a60f62af4ef7",
+    "/private/tmp/ha-read-provider-20261123/start-receipt.json": "b691ae45a8aee24074600e55aeb5095c580c5dbfb391fd10e636b9a47d9d67dc",
+    "/private/tmp/ha-read-provider-20261123/initial-terminal-jobs.json": "1f6c1417afea0f1af61d3e62dcac57d988a17bd2ab1ba79063a58b33f5db667c",
+    "/private/tmp/ha-read-provider-20261123/initial-read-job-trajectory.json": "369739bcb956548f841c654435be6803aba9e44b960467657136522a568e70c5",
+    "/private/tmp/ha-read-provider-20261123/stop-receipt.json": "d9136b60597794ea255a4ea4fbe5de93e00f13bdbf93be614c3cea93295e40a8",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/rollout-candidate.json": "0270cc89ab3ba8d51f9956e6d42006e99b8bdf3f19d2e2616a0720c7a5d1a35f",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/stage-receipt.json": "58b24905a3d6e76c7621980d345a315fa212b382451d3d99450e977e19ae0c2b",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/stage-audit.json": "4dfa44c970702b9410cf7fac8d9ad4e50f3ddae199d859f77b29d1535fdfc3d8",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/start-receipt.json": "a50802608bbcac7cb4ffd94fa6af0622e814cecb0a75112eba16d8fe740a6bde",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/postflight-receipt.json": "677517ebb0f5b649aab9d6982c26ebf04f1cb08a9d42a901649012542f8f79a1",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/provider.json": "8a2902ecc6890e82abeafd63f3126a7096210dbdbef9bb1fa46da27a061ad2a6",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/distribution-manifest.json": "d6e65f2c9d29eea3d6f39102e38d1acb7d2bb514b89a23cbba399405e8cc2122",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/assist-read-attempt.json": "8b220f5ee8be9e4aa71216511b5ffea9db8c3b26d6f4c0b22abb5feb545448fc",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/assist-read-response.json": "739c7c69f665cb1ed6b4e7c1b80816311f72589a072ff0982b25bdeb2c2a0c1d",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/jobs-before.json": "1f6c1417afea0f1af61d3e62dcac57d988a17bd2ab1ba79063a58b33f5db667c",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/jobs-after.json": "f9ac43c02d21aa1d0da8f415fd3e694e4e78482a05cf103a1696cbb460196ee1",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/validated-job.json": "4ae55bc0561097506b16b232c7bdf5caaa7f3e7227aac3a76b8ffa005714c1c1",
+    "/private/tmp/ha-read-provider-20261123/inline-v2/read-job-trajectory.json": "26438109b055c9106a982a9806f34fbd6dff7d8e3355cb81adc68e1cde0202ca"
+  },
+  "limits": "No raw credentials included. Full voice/device/control/AI Task acceptance remains separate. Manual recovery after provider/host failure; preserve retained owners/receipts."
+}

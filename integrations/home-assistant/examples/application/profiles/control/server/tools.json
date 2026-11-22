@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "bindings": [],
+  "providers": [
+    {
+      "provider": "ha-read",
+      "account": "REPLACE_WITH_CONTROL_EXECUTION_PRINCIPAL",
+      "prefix": "ha_read_",
+      "leaseSeconds": 120
+    },
+    {
+      "provider": "ha-control",
+      "account": "REPLACE_WITH_CONTROL_EXECUTION_PRINCIPAL",
+      "prefix": "ha_control_",
+      "leaseSeconds": 120
+    }
+  ]
+}

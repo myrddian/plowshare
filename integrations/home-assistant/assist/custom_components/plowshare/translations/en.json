@@ -3,41 +3,52 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect your house agent",
-        "description": "Use a project-scoped Plowshare service token. Everyone using this assistant exercises that service account’s configured house permissions. Device actions use your existing Home Assistant adapter.",
+        "title": "Connect Plowshare profiles",
+        "description": "Select an explicit agent for each enabled platform. Control-off routes to the read-only agent and AI Task uses its own selection. Actual permissions come from Plowshare Application grants; these declarations do not remove tools from an arbitrarily configured agent.",
         "data": {
           "url": "Plowshare server origin",
-          "api_key": "Plowshare project-scoped service token",
-          "project": "House Application name",
-          "agent": "House agent name",
-          "allow_anonymous": "Allow voice satellites without a Home Assistant user",
-          "request_timeout": "Request deadline (seconds)",
-          "response_timeout": "Voice response wait (seconds)",
-          "request_topic": "House adapter request topic"
+          "api_key": "Project-scoped service token",
+          "project": "Application name",
+          "conversation_enabled": "Enable Conversation",
+          "ai_task_enabled": "Enable AI Task",
+          "control_enabled": "Declare a device-control Conversation profile",
+          "read_only_agent": "Read-only Conversation agent (required when control is off)",
+          "agent": "Control Conversation agent (required when control is on)",
+          "task_agent": "AI Task agent (required when AI Task is enabled)",
+          "prompt": "Optional Conversation instruction template",
+          "allow_anonymous": "Allow voice sources without a Home Assistant user",
+          "request_timeout": "Connection and request wait (seconds)",
+          "response_timeout": "Result wait (seconds)",
+          "request_topic": "Existing house-adapter request topic"
         }
       },
       "reconfigure": {
         "title": "Update house assistant connection",
-        "description": "Rotate the service token or adjust timeouts. For a different server, Application or agent, create another integration.",
+        "description": "Rotate the token or adjust waits and prompt settings. Different platform routes require another integration. Token changes fence retained conversations until their earlier work is inspected; they never repeat uncertain work.",
         "data": {
           "url": "Plowshare server origin",
-          "api_key": "Plowshare project-scoped service token",
-          "project": "House Application name",
-          "agent": "House agent name",
-          "allow_anonymous": "Allow voice satellites without a Home Assistant user",
-          "request_timeout": "Request deadline (seconds)",
-          "response_timeout": "Voice response wait (seconds)",
-          "request_topic": "House adapter request topic"
+          "api_key": "Project-scoped service token",
+          "project": "Application name",
+          "conversation_enabled": "Enable Conversation",
+          "ai_task_enabled": "Enable AI Task",
+          "control_enabled": "Declare a device-control Conversation profile",
+          "read_only_agent": "Read-only Conversation agent (required when control is off)",
+          "agent": "Control Conversation agent (required when control is on)",
+          "task_agent": "AI Task agent (required when AI Task is enabled)",
+          "prompt": "Optional Conversation instruction template",
+          "allow_anonymous": "Allow voice sources without a Home Assistant user",
+          "request_timeout": "Connection and request wait (seconds)",
+          "response_timeout": "Result wait (seconds)",
+          "request_topic": "Existing house-adapter request topic"
         }
       }
     },
     "error": {
-      "invalid_config": "Check the server origin, Application, agent and timeout values. The agent must be available to this credential.",
-      "invalid_auth": "Plowshare refused access. Check the service credential and project grants.",
-      "cannot_connect": "Unable to connect to Plowshare within the configured deadline."
+      "invalid_config": "Check enabled platforms, their explicit agent selections, server origin, Application and wait values. HA LLM tool APIs are unsupported.",
+      "cannot_connect": "Plowshare could not complete the connection check, or connection cleanup has not settled. Check server availability and project access.",
+      "validation_busy": "Connection validation is busy. Wait for pending cleanup or server capacity before trying again; no model work was requested."
     },
     "abort": {
-      "prompt_fidelity_unavailable": "Plowshare Assist is unavailable until the public SDK can preserve Home Assistant’s rendered system prompt and context in the required system role.",
       "already_configured": "This house agent is already configured.",
       "reconfigure_successful": "House assistant configuration updated."
     }

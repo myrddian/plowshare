@@ -41,7 +41,7 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
   private static final int RESULT_LIMIT = 15000;
   private static final String REVISION_SCHEMA =
       """
-      {"type":"object","properties":{
+      {"type":"object","description":"Pass the revision object returned by discovery, not a JSON-encoded string.","properties":{
         "binding":{"type":"string","minLength":1,"maxLength":256},
         "credential":{"type":"string","minLength":1,"maxLength":256},
         "policy":{"type":"string","minLength":1,"maxLength":256},
@@ -92,19 +92,21 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
            "area":{"type":"string","minLength":1,"maxLength":256},
            "limit":{"type":"integer","minimum":1,"maximum":20},
            "cursor":{"type":"object","properties":{
-             "revision":{"$ref":"#/$defs/revision"},
+             "revision":%s,
              "offset":{"type":"integer","minimum":0,"maximum":256}},
              "required":["revision","offset"],"additionalProperties":false}}
-          """,
+          """
+                    .formatted(REVISION_SCHEMA),
                 List.of()),
             declaration(
                 "describe",
                 "Describe one permitted alias and a bounded page of attribute names.",
                 """
           {"alias":{"type":"string","minLength":1,"maxLength":256},
-           "revision":{"$ref":"#/$defs/revision"},
+           "revision":%s,
            "attributeOffset":{"type":"integer","minimum":0,"maximum":257}}
-          """,
+          """
+                    .formatted(REVISION_SCHEMA),
                 List.of("alias", "revision")),
             declaration(
                 "read",
@@ -112,20 +114,22 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
                 """
           {"aliases":{"type":"array","items":{"type":"string","minLength":1,"maxLength":256},
              "minItems":1,"maxItems":20,"uniqueItems":true},
-           "revision":{"$ref":"#/$defs/revision"},
+           "revision":%s,
            "attributes":{"type":"array","items":{"type":"string","minLength":1,"maxLength":256},
              "maxItems":16,"uniqueItems":true}}
-          """,
+          """
+                    .formatted(REVISION_SCHEMA),
                 List.of("aliases", "revision")),
             declaration(
                 "list_actions",
                 "List configured action offers for a permitted alias; does not execute or grant them.",
                 """
           {"alias":{"type":"string","minLength":1,"maxLength":256},
-           "revision":{"$ref":"#/$defs/revision"},
+           "revision":%s,
            "offset":{"type":"integer","minimum":0,"maximum":128},
            "limit":{"type":"integer","minimum":1,"maximum":20}}
-          """,
+          """
+                    .formatted(REVISION_SCHEMA),
                 List.of("alias", "revision")));
   }
 
@@ -144,14 +148,15 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
   private RelayTools.Declaration declaration(
       String suffix, String description, String properties, List<String> required) {
     try {
+      // Keep each nested object explicit so model/provider templates need not resolve references
+      // to see its type. The live read test emitted strings for reference-only revision fields.
+      // Inlining changes presentation only: the same closed revision object is still mandatory.
       String source =
           "{\"type\":\"object\",\"properties\":"
               + properties
               + ",\"required\":"
               + Json.MAPPER.writeValueAsString(required)
-              + ",\"additionalProperties\":false,\"$defs\":{\"revision\":"
-              + REVISION_SCHEMA
-              + "}}";
+              + ",\"additionalProperties\":false}";
       return new RelayTools.Declaration(
           prefix + suffix,
           description,

@@ -1,0 +1,41 @@
+{
+  "candidate_id": "out-plan-01-v2",
+  "node": "OUT-PLAN-01",
+  "created_at": "2026-11-21T23:27:27.671386+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_outbound_plan_reviewer",
+  "files": {
+    "docs/home-assistant-delivery-plan.md": "ec8a8e848fa4663fe61a44d84ca47aedd9d5e79a5a2fea6982711d32ad12ebc8",
+    "docs/reviews/home-assistant-outbound-host-contract.md": "65a2ad4b053c2de1dc297ec42e79cf9052c82736dfac977e773fb41fb1bf9bfe"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-out-plan-01-v2-state.json",
+    "sha256": "60c4452d32eb9aa6a2fd35ec87aee40609ff5267b5e1a28c1be54d4d91974869"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-out-plan-01-v2.diff",
+    "sha256": "5e8ff731ae1d89a665b8be2c71b3b7d08673047eac976dbf678095b4e325a40e"
+  },
+  "dependencies": {
+    "PLAN-00": {
+      "id": "ha-plan-00-v2",
+      "manifest_path": "docs/reviews/home-assistant-plan-00-v2-candidate.json",
+      "manifest_sha256": "554444e229c006158750509e680304783d34167eae3c8851325c2f6dcd17b092"
+    },
+    "AUDIT-01": {
+      "id": "ha-audit-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-audit-01-v1-candidate.json",
+      "manifest_sha256": "3519fc68795ed2997aeb7d6ffed4511e0e36894939571c4974d2353b7aa0a855"
+    }
+  },
+  "structural_validation": {
+    "nodes": 28,
+    "edges": 55,
+    "acyclic": true,
+    "independent_roles": true,
+    "original_gated_nodes": 11,
+    "all_four_gates_unsatisfied": true
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

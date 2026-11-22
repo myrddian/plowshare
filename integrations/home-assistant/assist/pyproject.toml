@@ -5,7 +5,7 @@ requires-python = ">=3.14"
 dependencies = ["homeassistant==2026.9.4", "websockets>=17,<18"]
 
 [project.optional-dependencies]
-check = ["ruff==0.16.10", "gazetteer-matcher==1.1.0", "hassil==3.12.1", "home-assistant-intents==2026.8.28"]
+check = ["ruff==0.16.10", "gazetteer-matcher==1.1.0", "hassil==3.12.1", "home-assistant-intents==2026.8.28", "numpy==2.5.5", "PyTurboJPEG==1.8.3", "pymicro-vad==1.0.1", "pyspeex-noise==1.0.2", "mutagen==1.48.1", "ha-ffmpeg==3.2.2"]
 
 [tool.ruff]
 target-version = "py314"

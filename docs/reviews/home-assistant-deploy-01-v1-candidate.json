@@ -1,0 +1,49 @@
+{
+  "candidate_id": "deploy-01-v1",
+  "node": "DEPLOY-01",
+  "created_at": "2026-11-22T18:29:39.721493+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-deployment-receipt.md": "50c44051e4504db422c06c4eedb6da941f76516f853da586fd3da9ce937cb218"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-deploy-01-v1-state.json",
+    "sha256": "977317e38512d65f957993c17707d9f145eddec944da067cf41f1418e60c832f"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-deploy-01-v1.diff",
+    "sha256": "69955deb7cd145ccd8d0d60ad6522caaf388fb7838f17062b47d7bcb03151d4a"
+  },
+  "dependencies": {
+    "RELEASE-01": {
+      "id": "release-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-release-01-v1-candidate.json",
+      "manifest_sha256": "c68faa34ed945401db4736fb794bf8d80348097d73801887c91ec61f8db581ff"
+    }
+  },
+  "private_evidence": {
+    "deployment-evidence.json": {
+      "path": "/private/tmp/ha-install-20261123/deployment-evidence.json",
+      "sha256": "0c4b6f5f0562aeba5e0b821c1bfde5ffd050a0f7ea938fee5612118e18f847c1"
+    },
+    "remote-receipt.json": {
+      "path": "/private/tmp/ha-install-20261123/remote-receipt.json",
+      "sha256": "cbb425ca1f4adb38ed31be354b0b39c63356235a84b55264bf13e4dd3c2cb9e9"
+    },
+    "install.sh": {
+      "path": "/private/tmp/ha-install-20261123/install.sh",
+      "sha256": "9a3641a4d270230bafabcab2f27b659302bda12a0b4d0e25e642f9de5624c2ea"
+    },
+    "transfer-events.jsonl": {
+      "path": "/private/tmp/ha-install-20261123/transfer-events.jsonl",
+      "sha256": "04f38608719d7c85d5deb84766b114d7a763b3768fa83f50165f71983e54da43"
+    },
+    "plowshare-setup.jpg": {
+      "path": "/private/tmp/ha-install-20261123/plowshare-setup.jpg",
+      "sha256": "6bc02381a9736d51cc04336852b885d63236cd421aa3ebe6306075db12d06191"
+    }
+  },
+  "limits": "HA component installation/discovery/config-flow readiness only. No configured Plowshare entry/entities, Production HA Application/credential/provider provisioning or live model/voice/device acceptance. No HA update."
+}

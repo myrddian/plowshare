@@ -1,0 +1,114 @@
+--- reviewed-0.1.0/custom_components/plowshare/conversation.py
++++ candidate-0.1.1/custom_components/plowshare/conversation.py
+@@ -1,9 +1,11 @@
+ """HA conversation lifecycle over the typed public-SDK gateway.
+ 
+ HA's ChatLog is shared by HA chat ID, whereas Plowshare correlation is also
+-partitioned by caller/profile. Claim the HA log's source before opening it so a
+-foreign caller cannot inherit its retained extra prompt or history. Ownership is
+-bounded, lives for this HA process and never replaces the durable SDK journal.
++partitioned by caller/profile. Claim the HA log's source before the adapter opens
++or prepares it so a foreign caller cannot inherit its retained extra prompt or
++history. Assist may already have opened a fresh log upstream; admission uses its
++active public contexts rather than treating an arbitrary supplied ID as ownership.
++Ownership is bounded, lives for this HA process and never replaces the SDK journal.
+ """
+ 
+ from __future__ import annotations
+@@ -18,10 +20,12 @@
+     ChatLog,
+     ConverseError,
+     SystemContent,
++    UserContent,
++    current_chat_log,
+ )
+ from homeassistant.core import HomeAssistant
+ from homeassistant.helpers import intent
+-from homeassistant.helpers.chat_session import CONVERSATION_TIMEOUT
++from homeassistant.helpers.chat_session import CONVERSATION_TIMEOUT, current_session
+ from homeassistant.helpers.entity_platform import AddEntitiesCallback
+ from homeassistant.util.hass_dict import HassKey
+ 
+@@ -121,14 +125,48 @@
+             )
+         )
+ 
++    def _fresh_native_log(self, user_input: conversation.ConversationInput) -> bool:
++        """Recognize the exact empty first-turn context prepared by HA Assist.
++
++        HA 2026.9.4's pipeline allocates its session and opens the ChatLog before
++        calling the conversation entity. Both public context variables must name
++        that request, and there must be no prior history/context to inherit. A
++        supplied ID alone is never evidence. Reading the current contexts does
++        not open, mutate or inspect HA's global session/log caches.
++        """
++        session = current_session.get()
++        chat_log = current_chat_log.get()
++        if (
++            session is None
++            or chat_log is None
++            or session.conversation_id != user_input.conversation_id
++            or chat_log.conversation_id != user_input.conversation_id
++            or chat_log.hass is not self.hass
++            or chat_log.extra_system_prompt is not None
++            or chat_log.llm_api is not None
++            or chat_log.llm_input_provided_index != 0
++            or len(chat_log.content) != 2
++        ):
++            return False
++        system, current_user = chat_log.content
++        return (
++            isinstance(system, SystemContent)
++            and system.content == ""
++            and isinstance(current_user, UserContent)
++            and current_user.content == user_input.text
++            and current_user.attachments is None
++        )
++
+     async def async_process(
+         self, user_input: conversation.ConversationInput
+     ) -> conversation.ConversationResult:
+-        """Reject unknown/foreign log reuse before HA opens the shared ChatLog.
+-
+-        First calls omit the ID. After HA restart or idle ownership expiry, an
+-        unknown supplied ID is unsupported; we do not create replacement work or
+-        infer authority from a guessed ID. SDK receipts remain retained separately.
++        """Fence ownership before the adapter's log/context and SDK work.
++
++        Direct first calls omit the ID. Assist supplies the ID of an already
++        active empty log, admitted only by the narrow native-context check. A
++        retained/history-bearing unknown ID is never imported. HA can mutate its
++        outer pipeline log before this method runs; this fence cannot undo that
++        upstream behavior. SDK receipts remain retained independently.
+         """
+         try:
+             identity = self._identity(user_input)
+@@ -152,6 +190,17 @@
+             if user_input.conversation_id is not None:
+                 supplied = required_text(user_input.conversation_id)
+                 owner = owners.get(supplied)
++                if owner is None and self._fresh_native_log(user_input):
++                    if len(owners) >= MAX_SESSIONS:
++                        return _error(
++                            user_input.language,
++                            supplied,
++                            "Too many HA conversation sources are retained. Try after an idle chat expires.",
++                        )
++                    # Reserve synchronously before super() can await. Concurrent
++                    # first turns and other sources cannot claim the same log.
++                    owner = _ChatOwner(identity, self.hass.loop.time())
++                    owners[supplied] = owner
+                 if owner is None or owner.identity != identity:
+                     return _error(
+                         user_input.language,
+--- reviewed-0.1.0/custom_components/plowshare/manifest.json
++++ candidate-0.1.1/custom_components/plowshare/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "domain": "plowshare",
+   "name": "Plowshare",
+-  "version": "0.1.0",
++  "version": "0.1.1",
+   "config_flow": true,
+   "dependencies": ["conversation", "ai_task"],
+   "documentation": "https://github.com/myrddian/plowshare/tree/main/integrations/home-assistant/assist",

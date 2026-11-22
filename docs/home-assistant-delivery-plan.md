@@ -1,6 +1,7 @@
 # Home Assistant package delivery graph
 
 Created: 17 November 2026. Coordinator: `/root` (this chat's primary agent).
+Last reconciled: 22 November 2026 against main `6de685f63e060f3003cb93233d2567e004269755`.
 Approval and current delivery progress are recorded in the linked ledger.
 The node table below is the initial planning snapshot, not a live status board.
 Baseline commit: `2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e` **plus the existing dirty working tree**. A commit ID alone
@@ -17,32 +18,42 @@ node IDs. Preserve existing unrelated work.
 
 The user requested a graph whose deliverables have independent implementer and
 reviewer agents, with reviewer approval required before completion, and appointed
-`/root` to coordinate delivery. This turn creates that plan; it does not dispatch
-runtime implementation. The user separately proposed the generic core
+`/root` to coordinate delivery. The initial plan preceded dispatch; subsequent
+implementation authorizations are recorded in the ledger. The user separately
+proposed the generic core
 conversation-map and `ConversationOpenRequestEx` / `AgentRunRequestEx` facades.
 Their general platform decision/contract is a prerequisite node under
 [ADR 0001](decisions/0001-integration-boundary.md); HA-only convenience does not
 justify unrelated core changes.
 
-Faithful HA system prompt/context preservation is required for both Conversation
-and AI Task. The public task-text API does not itself preserve a native system
-message role. FIDELITY-01 must resolve that semantic gap through a verified public
-path or identify a separately authorized platform follow-up. Approval of the gap
-investigation never makes downstream fidelity requirements satisfied. No current
-core facade proposal authorizes a new arbitrary prompt/message-role API.
+The only core extension in this delivery is external-to-internal conversation ID
+mapping through the public Ex SDK calls; that work is already accepted. The HA
+adapter uses existing SDK task input. Preserve supplied HA text without cache
+rewriting, and document its actual task/user semantics rather than claiming a
+native system-message role. Cache awareness and native-role equivalence are not
+prerequisites for supported Conversation or AI Task delivery. No new prompt API,
+runtime, schema or cache mechanism is authorized. The current correction below
+supersedes the earlier native-fidelity prerequisite and pending mapping-choice
+question; neither is an active delivery gate.
 
 Prefix work is **impact assessment of HA's original prompt**, not a proposal to
 correct HA's prefix behavior. Preserve its rendering, ordering and freshness.
 Attachments, image generation, evaluation and HA configuration editing remain
 outside this delivery graph until separately scoped.
 
-Merge, push/publication, production installation, HA restart, live model calls and
-device mutations are not authorized by this plan-only task. The operational nodes
-remain gated until their exact target/action scope is explicitly authorized.
+The user has authorized committing and publishing this HA integration/recovery
+working tree as a pull request, with control disabled and validation evidence
+included. Merge is not part of the current request. The separately authorized
+read-only Production installation, Assist connection and automatic provider
+recovery are complete and independently approved below. Broader LIVE-01/device
+control and optional cache measurements retain their explicit scope boundaries.
+The earlier PR #300 merge and frozen source-readiness evidence are historical;
+the current publication handoff records the later adapter fixes and recovery.
 
 Implementation amendment: the user subsequently instructed “Start it”; the
 coordinator-owned ledger records that authorization and the later decision to
-leave prompt-dependent features gated. During CORE-03 implementation, owning
+leave prompt-dependent features gated under the earlier interpretation, now
+superseded by SCOPE-01. During CORE-03 implementation, owning
 source inspection found unbounded identity/authority SQL outside CORE-02's
 private alias transaction. The proposed CORE-03A below is a necessary internal
 SQL-budget dependency of the authorized Ex facades and the repository's existing
@@ -50,6 +61,185 @@ completion policy. It adds no public capability or prompt transformation.
 Its [scoped design](reviews/home-assistant-ex-sql-budget-design.md) and this graph
 amendment require independent plan approval before code dispatch. This amendment
 does not claim a universal deadline fix or change unrelated unscoped operations.
+
+## 22 November caching-gate correction — current scope
+
+The user clarified that the prompt fidelity gate concerned caching awareness.
+It must not turn potentially poor external prompt behavior into Plowshare
+changes or integration barriers. SCOPE-01 implements this documentation/graph
+correction under independent review. Its accepted result controls the earlier
+requirements and historical outbound amendment below.
+
+Retire `prompt_public_path_verified`; do not mark native prompt support as
+implemented. The correction reopened HA-05–08, HA-10–11, VERIFY-01 and RELEASE-01
+as ordinary SDK-only adapter deliverables requiring implementation, tests and
+independent approval. The ledger records their current acceptance; the correction
+alone did not finish them. HA-05 depends on the reviewed SCOPE-01 contract.
+Preserve HA input in the existing SDK task envelope with explicit semantics;
+unsupported options fail honestly and prompt content grants no authority.
+
+PERF-01 is optional and no longer blocks RELEASE-01. Actual backend measurements,
+deployment and live actions retain their separately scoped authorizations.
+HA-11 subsequently removed the obsolete setup/configuration/packaging guards
+under independent approval after the required adapter nodes were accepted.
+This enables the existing SDK path, without adding native prompt roles or cache
+mechanisms. Earlier manifests/reviews are immutable. The
+[previous plan](reviews/home-assistant-cache-gate-correction-v1-previous-plan.md)
+preserves the exact source used for prior outbound/SQL-fixture approvals.
+
+## Current SDK-only delivery
+
+The Conversation, text/flat-structured AI Task, explicit Application profiles,
+installable Assist component and installed cross-boundary validation nodes have
+independent approval. The [final validation evidence](reviews/home-assistant-final-validation-evidence.json)
+binds the exact working-tree source and both artifact contents; the base commit
+alone does not identify the reviewed delivery. The ledger owns node completion
+and separate merged/deployed/live milestones. RELEASE-01 adds the
+[release runbook](../integrations/home-assistant/RELEASE-RUNBOOK.md) and source
+readiness report; it is complete only after its independent review is accepted.
+
+The final checks passed 135 outer HA tests, including three isolated installed
+consumer cases, Ruff, the default repository check and HA distribution build,
+eight fresh installed outbound checks, and unchanged SDK package conformance.
+The validated HA baseline is 2026.9.4/Python 3.14. The later installation
+preflight confirmed that target version; no HA upgrade was needed. No further core, SDK, shared-runtime or schema extension was
+needed for these remaining adapter features. Existing HA text is preserved as
+ordinary task/user input without prefix-cache rewriting.
+
+PERF-01 remains optional backend measurement. The user subsequently authorized
+the dedicated Production Application and Assist connection described below.
+The separately authorized read provider is installed and its first scoped read
+has passed with independent deployment approval. Broader LIVE-01
+voice/device acceptance remains incomplete.
+
+## 23 November live Assist follow-up
+
+The user authorized the dedicated read-only HA Application on Production and
+completion of Assist. The component is installed; the Application, scoped service
+credential, HA Conversation/AI Task entities and preferred read-only pipeline are
+configured. A live no-tool first-turn check exposed a baseline adapter defect:
+HA's native Assist pipeline opens its session and chat log before invoking the
+entity, so its first input already has a conversation ID. The adapter rejected
+that fresh ID before any SDK/model submission.
+
+HA-FIX-01 depends on HA-06, HA-11 and VERIFY-01. Its independent implementer and
+reviewer are `/root/ha_assist_first_turn_implementer` and
+`/root/ha_assist_first_turn_reviewer`. The adapter correction is independently
+approved: 141 outer HA tests include six real native-pipeline regressions and
+three installed-consumer cases; Ruff and the default repository check passed.
+The refreshed 0.1.1 component was installed after a supported configuration
+backup and source/configuration/journal checks. Normal HA stop/start succeeded.
+No core, SDK, shared-runtime, schema, cache mechanism or device-control extension
+was required. Earlier candidates and reviews remain immutable.
+
+The dedicated `home-assistant-readonly` Application is registered permanently as
+DISJOINT with a separate project-scoped Contributor service credential. Both
+`house_reader` and `house_task` are served; the HA entry selects them for
+Conversation and AI Task respectively. The preferred **Plowshare (read-only)**
+pipeline has control disabled and local-intent preference off, preserving the
+original HA assistant and existing STT/TTS settings. A fresh native Assist text
+chat returned **“Plowshare Assist is connected.”** Its retained Production job
+confirms one model call, zero tool calls and an answered completion. The
+[Production setup receipt](reviews/home-assistant-production-assist-setup.md)
+binds the configuration and artifact evidence; the ledger records the separate
+independent phase approval.
+
+The user subsequently supplied the separate HA token and selected the current
+68 Assist-exposed entities as a fixed state/unit allowlist. The provider is now
+installed on Production as a separate container, with no control block, actions
+or workflow subscriptions. New HA exposure does not silently expand its scope.
+No core, SDK, shared-runtime, schema or main-server/HA restart was needed for
+this provider continuation.
+
+HA-FIX-02 depends on HA-03 and OUT-VERIFY-01. Its implementer is `/root`, with
+independent reviewer `/root/ha_deployment_reviewer`. The first live discovery
+worked but the served model sent revision objects as JSON strings. The adapter
+now inlines the same strict object schema in all read tools, including cursors;
+strings remain invalid. Independent source approval, 185 HA Java cases, the
+repository check and eight fresh installed checks bind this correction. This is
+adapter schema presentation; no core reference-conversion defect is claimed.
+
+DEPLOY-01 depends on both accepted follow-ups. After the initial job finished,
+the old provider stopped normally with confirmed withdrawal and no unresolved
+receipts. Its code, configuration, container and journal are retained. The new
+schema fingerprint has a separate owned journal. The replacement is running;
+a fresh HA Conversation API request through house_reader returned an available,
+nonstale selected sensor reading and unit. Its retained Production job confirms
+four model calls, three searches and one successful read, with no control tools.
+The [read-provider receipt](reviews/home-assistant-read-provider-production-setup.md)
+binds actual artifact/config/runtime and public-protocol evidence. Final
+independent deployment acceptance is recorded in the ledger.
+
+No microphone/audio/TTS, AI Task generation or physical-device acceptance is
+claimed; the broader LIVE-01 matrix remains open. The existing project token's
+expiry still requires rotation.
+
+## 23 November automatic read-provider recovery
+
+RECOVER-01 depends on DEPLOY-01 and HA-FIX-02. Root implements the provider-only
+operations and documentation; `/root/ha_recovery_implementer` owns the real-SDK
+recovery regression cases, with `/root/ha_deployment_reviewer` independent of
+both authors. The existing container now uses `unless-stopped`, retaining its
+exact configuration, credentials, image and persistent journal. Docker is enabled
+at boot. No runtime/core/SDK change or second provider is required.
+
+Process-exit and provider-only connection-outage checks both recovered the same
+container and confirmed a fresh unexpired catalogue. Journal identity/owner and
+original replay fences remain; no existing jobs changed or were duplicated.
+A fresh HA Conversation read completed successfully afterward. All 189 HA Java
+tests and the repository checks passed. The [recovery receipt](reviews/home-assistant-read-provider-recovery.md)
+binds the actual evidence; final independent acceptance is recorded in the ledger.
+
+Ordinary outages recover automatically; absent uncertain publication receipts,
+invalid credentials and corrupt/mismatched journals remain fenced for inspection.
+An operator stop remains respected. Host boot recovery is configured and Docker's
+boot setting verified; the shared host was not rebooted for acceptance. Control
+remains disabled; the broader LIVE-01 matrix and optional cache measurements are
+unchanged.
+
+## 22 November outbound-only amendment — historical scope
+
+The user authorized updating this graph/ledger and implementing independently
+reviewed outbound-only packaging, profiles and validation. PR #300 merged the
+original thirteen accepted deliverables as `16dec24b`; their merge milestones now
+reflect that fact. Historical manifests, reports and frozen ledger snapshots are
+immutable. Acceptance records remain evidence for their exact candidates, not a
+claim that every subsequent main revision was independently reviewed by those
+original agents.
+
+Current main owns the timeout contract: actual SQL queries/transactions have a
+configurable two-second default limit; nested statements share their transaction's
+remaining budget. Independent transactions, hooks, common authorization, durable
+job admission and reply delivery do not inherit an aggregate two-second workflow
+lifetime. Slow accepted workflows warn without cancellation or replacement.
+CORE-02/03A/03 acceptance text below is reconciled to that current contract; old
+reports retain the older requirements as historical evidence. Adapter/provider
+IO, polling and cleanup keep their own explicit finite resource budgets.
+
+The new branch consists of OUT-PLAN-01, OUT-PACK-01, OUT-PROFILE-01 and
+OUT-VERIFY-01. OUT-PLAN-01 freezes the common operator contract and independent
+review before source dispatch. Packaging and profiles may then proceed in parallel
+with disjoint ownership. Validation starts after both are independently accepted.
+This branch has no prompt-fidelity dependency because it invokes existing
+Plowshare agents/tools rather than offering an HA model endpoint. It neither
+satisfies nor removes any original gate/dependency.
+
+At outbound acceptance, all eleven original awaiting-gate nodes remained
+awaiting_gate. HA-05–08, HA-10–11, VERIFY-01, PERF-01 and RELEASE-01 were
+blocked under the superseded faithful prompt/context requirement;
+DEPLOY-01 and LIVE-01 retain release dependencies and their separate operational
+authorizations. No external system-context API, task-text substitute, prompt
+rewriting, Assist enablement or installable HA custom component is authorized.
+Prefix caching remains impact assessment of integrator-supplied prompts. Outbound
+source/artifacts may be prepared and tested locally; this amendment authorizes no
+new publication, target-branch merge, deployment, HA restart or live model/device
+operation.
+
+The named provider host is isolated from the legacy runtime's event workflows.
+It admits no routes, scripts, causal-feedback configuration or selected event
+subscriptions. It does not synthesize cross-host effect correlation. Operators
+must retain the existing documented separation from legacy feedback-dependent
+workflows; a future shared correlation owner requires its own reviewed scope.
 
 ## Independence and closure protocol
 
@@ -115,16 +305,16 @@ runtime dumps. Root records report path and digest in the ledger.
 
 | Gate | Required proof before consuming nodes can start/close |
 | --- | --- |
-| `prompt_public_path_verified` | FIDELITY-01 reviewer approves a verified public path satisfying the agreed HA system-role/content semantics; a gap report alone leaves this false |
+| `prompt_public_path_verified` | Retired by SCOPE-01 following user clarification; no current consumer and no native-role capability claim |
 | `cache_backend_measurement_authorized` | Explicitly authorized non-side-effecting backend access, finite workload and protected evidence handling; local prompt-variation fixtures alone do not establish real cache impact |
 | `deployment_authorized` | Exact target/artifact scope, configuration/backup/rollback plan and any required restart authorization |
 | `live_acceptance_authorized` | Exact live model/device/voice/restart checks and permitted reversible target actions |
 
-All gates start `not_satisfied`. If prompt fidelity needs additional platform
-work, root records an explicit change request, user authorization and independent
-reviewed successor nodes before wiring them into this DAG. Do not mark a fake
-capability as available merely to unblock the graph. Independent HA discovery
-work can continue while prompt-dependent nodes await that gate.
+The three operational authorization gates remain `not_satisfied` until their
+actual scope is authorized. The former prompt gate is `retired`, not satisfied.
+No node may require it. Missing native prompt-role semantics are documented SDK
+limitations, not permission to extend core or to hold supported adapter work.
+Backend measurement remains optional and cannot block release readiness.
 
 ## Graph
 
@@ -146,9 +336,24 @@ flowchart TD
   D1 --> D2["HA-02 Discovery/reads"]
   D2 --> D3["HA-03 Read ToolProvider"]
   D3 --> D4["HA-04 Action provider"]
+  P --> OP["OUT-PLAN-01 Outbound amendment"]
+  A --> OP
+  OP --> OH["OUT-PACK-01 Provider host/package"]
+  D3 --> OH
+  D4 --> OH
+  EV --> OH
+  C4 --> OH
+  OP --> OT["OUT-PROFILE-01 Outbound profiles"]
+  D3 --> OT
+  D4 --> OT
+  EV --> OT
+  C4 --> OT
+  OH --> OV["OUT-VERIFY-01 Outbound validation"]
+  OT --> OV
+  SQ["PLAT-SQL-01 SQL cleanup fixture"] --> OV
   C4 --> G["HA-05 Shared gateway"]
-  F --> G
-  PG{{"Verified prompt public path"}} -.-> G
+  OV --> SC["SCOPE-01 Cache gate correction"]
+  SC --> G
   G --> CV["HA-06 Conversation Entity"]
   G --> AI["HA-07 AI Task text"]
   AI --> ST["HA-08 Structured data"]
@@ -175,9 +380,17 @@ flowchart TD
   AI --> PF
   BG{{"Authorized backend measurement"}} -.-> PF
   V --> R["RELEASE-01 Readiness/runbook"]
-  PF --> R
+  CV --> FX1["HA-FIX-01 Native first turn"]
+  PK --> FX1
+  V --> FX1
+  D3 --> FX2["HA-FIX-02 Inline read revision schemas"]
+  OV --> FX2
   R --> DP["DEPLOY-01 Installation"]
+  FX1 --> DP
+  FX2 --> DP
   DG{{"Authorized deployment"}} -.-> DP
+  DP --> RC["RECOVER-01 Read-provider automatic recovery"]
+  FX2 --> RC
   DP --> LV["LIVE-01 Live acceptance"]
   LG{{"Authorized live checks"}} -.-> LV
 ```
@@ -204,7 +417,7 @@ and a reviewer reserved for independent dispatch.
 | HA-02 | Discovery and batched reads | HA-01 | `ha_read_implementer` | `ha_read_reviewer` | `planned` |
 | HA-03 | Named read tool provider | HA-02 | `ha_read_provider_implementer` | `ha_read_provider_reviewer` | `planned` |
 | HA-04 | Action provider and receipts | HA-03 | `ha_action_implementer` | `ha_action_reviewer` | `planned` |
-| HA-05 | Shared typed request gateway | CORE-04, FIDELITY-01 | `ha_gateway_implementer` | `ha_gateway_reviewer` | `planned` |
+| HA-05 | Shared typed request gateway | CORE-04, SCOPE-01 | `ha_gateway_implementer` | `ha_gateway_reviewer` | `planned` |
 | HA-06 | Conversation Entity lifecycle | HA-05 | `ha_conversation_implementer` | `ha_conversation_reviewer` | `planned` |
 | HA-07 | AI Task text provider | HA-05 | `ha_ai_task_implementer` | `ha_ai_task_reviewer` | `planned` |
 | HA-08 | Structured AI Task subset | HA-07 | `ha_structured_implementer` | `ha_structured_reviewer` | `planned` |
@@ -212,8 +425,8 @@ and a reviewer reserved for independent dispatch.
 | HA-10 | Reusable Application profiles | HA-04, HA-06, HA-07, HA-09 | `ha_profiles_implementer` | `ha_profiles_reviewer` | `planned` |
 | HA-11 | Installable package and operator docs | HA-06, HA-07, HA-08, HA-10 | `ha_package_implementer` | `ha_package_reviewer` | `planned` |
 | VERIFY-01 | Integrated independent contract validation | CORE-04, HA-04, HA-06, HA-07, HA-08, HA-09, HA-10, HA-11 | `ha_verification_implementer` | `ha_verification_reviewer` | `planned` |
-| PERF-01 | Faithful HA prefix-cache impact report | FIDELITY-01, HA-06, HA-07, VERIFY-01 | `ha_performance_implementer` | `ha_performance_reviewer` | `planned` |
-| RELEASE-01 | Release readiness and rollout runbook | VERIFY-01, PERF-01 | `ha_release_implementer` | `ha_release_reviewer` | `planned` |
+| PERF-01 | Optional HA prefix-cache impact assessment | FIDELITY-01, HA-06, HA-07, VERIFY-01 | `ha_performance_implementer` | `ha_performance_reviewer` | `planned` |
+| RELEASE-01 | Release readiness and rollout runbook | VERIFY-01 | `ha_release_implementer` | `ha_release_reviewer` | `planned` |
 | DEPLOY-01 | Separately authorized installation | RELEASE-01 | `ha_deployment_implementer` | `ha_deployment_reviewer` | `planned` |
 | LIVE-01 | Separately authorized live acceptance | DEPLOY-01 | `ha_live_implementer` | `ha_live_reviewer` | `planned` |
 
@@ -253,15 +466,15 @@ Implement a narrow typed resolver/repository and a new migration enforcing the a
 
 **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/<new-alias-contract-and-repository>`; `plowshare-server/src/main/resources/db/migration/<new-version>`; `plowshare-server/src/test/java/<selected-alias-tests>`.
 
-**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify shared 2-second default SQL completion deadline, normal <=500 ms queries and <=1-second worst-case ceiling including waits/materialization; inspect real enforcement and report gaps.
+**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify each actual SQL query/transaction uses its configured two-second default completion limit, normally completes within 500 ms, and includes acquisition/waits/materialization. Nested SQL shares its transaction remaining time; independent SQL units and the surrounding workflow do not share an aggregate deadline. Inspect owning enforcement and report gaps.
 
 ### CORE-03A — Scoped SQL completion for Ex admission
 
-Implement the independently approved [internal scoped SQL-budget design](reviews/home-assistant-ex-sql-budget-design.md) so all Ex-owned identity/authority, alias, post-target and ordinary run-admission SQL shares one finite completion budget. Keep repositories responsible for SQL and keep ordinary transaction/lifecycle owners intact. The scope starts before admission; it does not open a transaction across the facade, hooks or scheduling. Decorate the repository connection holder and caller-thread authoritative projection leases while preserving the raw primary Hikari source and unscoped compatibility, including pool-admission-disabled composition.
+Retain the internal SQL-budget infrastructure under the current owning contract. Each hard scope covers one actual query or SQL transaction, including acquisition, execution/materialization and bounded physical cleanup. Nested SQL shares the transaction's earlier deadline. Preserve raw primary/pool identity, repository ownership and unscoped compatibility; never hold a connection across hooks, network calls or scheduling. The original design/report records its historical Ex-wide scope and must not override the current contract in ADR 0077 and the persistence/transport guides.
 
 **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/<scoped-sql-budget-interface-infrastructure-and-composition>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/ProjectionCacheConfiguration.java` (only necessary lease composition); `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/<Ex-private-miss-mode-and-atomic-existing-read>`; `plowshare-server/src/test/java/<scoped-budget-and-selected-PostgreSQL-tests>`; `docs/reviews/home-assistant-ex-sql-budget-design.md`; `docs/reviews/<scoped-sql-budget-implementation-evidence>`. CORE-03 owns wiring the accepted interface into its facade and its facade fixtures; coordinate that handoff instead of concurrent edits.
 
-**Acceptance evidence:** Mock/barrier tests prove two-second default shared operation budget, earlier nested deadlines, one-second query ceiling through materialization, admission/acquisition interruption, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, unavailable/uncertain outcomes without replay and bounded shutdown. Verify fixed-label duration/breach/cancellation metrics and no raw SQL/identifiers. Selected tagged PostgreSQL cases prove actual lock/stream cancellation, rollback, acquisition and safe pool reuse only where mocks cannot. Confirm raw primary/pool metrics, shared template/transaction source identity, enabled/disabled admission and unchanged unscoped behavior. Preserve warm authorized hits and existing-fill coalescing; Ex-only private misses use existing uncached loaders so a scoped cancellation never aborts an ordinary shared fill/joiner. Verify current authority and query-count cost without claiming better cache performance. Record driver assumptions and gaps honestly; a logical timeout or SQL-only scope cannot establish whole-call completion for hooks/file loading.
+**Acceptance evidence:** Mock/barrier tests prove finite actual SQL-unit deadlines, earlier nested transaction deadlines, materialization cancellation, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, typed query failures with commit uncertainty and bounded cleanup. Backpressure applies before dispatch and must not cancel accepted work; workflow duration warnings cannot replace an accepted job/result. Preserve warm authorized cache hits and existing-fill ownership. Select tagged PostgreSQL tests only for actual locking, cancellation, rollback or pool reuse that mocks cannot establish; retain exact historical evidence separately. A SQL-only scope does not establish universal cancellation or a whole-call deadline for hooks/file loading.
 
 This node is a prerequisite discovered during implementation. Existing CORE-03 semantic work was dispatched against accepted CORE-02; its completion and new scoped-budget wiring now require accepted CORE-03A. Root records that transition in the ledger, not as an implicit approval or a finished facade.
 
@@ -271,7 +484,7 @@ Deliver the canonical wire/request/schema definitions, FrameTypes/dispatch regis
 
 **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/<Ex-handlers-FrameTypes-and-routing>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/<owning-admission-seams>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/api/<Ex-request-contracts>`; `plowshare-protocol/<required-shared-contracts>`; `sdk/typescript/src/operations/<canonical-Ex-contracts>`; `scripts/generate-sdk-contracts.mjs`; `sdk/<owning-generated-contract-outputs>`; `plowshare-server/src/test/java/<facade-tests>`.
 
-**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Integrate accepted CORE-03A before the first admission SQL and through final synchronous checks without an outer Spring transaction. Verify remaining non-SQL phase budgets, including hook loading/execution; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
+**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Use accepted CORE-03A infrastructure at actual repository SQL-unit boundaries without an outer facade transaction or aggregate workflow timeout. Verify bounded intake/reply ownership, existing non-SQL resource budgets and warning-only slow workflow observations; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
 
 ### CORE-04 — Shared catalogues and every SDK
 
@@ -281,13 +494,17 @@ Consume the canonical, compiling Ex wire contract from CORE-03 and complete all 
 
 **Acceptance evidence:** Generator drift check, malformed/missing/conflicting selectors, refusal and unknown-delivery conformance, actual transport facade round trips and old-request compatibility. Run check, sdkCheck and required installed-consumer sdkPackageCheck when package surfaces change; missing toolchains are unresolved evidence, not a PASS. Verify generated files are not hand-edited.
 
-### FIDELITY-01 — Prompt-role fidelity and public capability decision
+### FIDELITY-01 — Historical prompt-role investigation
+
+This accepted investigation and its frozen report record the earlier requirement.
+SCOPE-01 supersedes its proposed native-role delivery prerequisite. It does not
+authorize a platform successor or make cache behavior an integration blocker.
 
 Specify exact Conversation and AI Task prompt/context semantics and inspect available public routes. Decide whether a documented task-envelope adaptation satisfies the requirement or native system-role fidelity is necessary. Identify the existing SDK limitation explicitly; do not silently demote HA system content.
 
 **Owned outputs:** `docs/reviews/home-assistant-prompt-fidelity-decision.md`; `docs/home-assistant-integration-design-and-plan.md`.
 
-**Acceptance evidence:** Review actual request fields and prompt assembly, versioned HA behavior, trust/precedence, compaction and resume. Publish a supported public-path decision or an exact capability-gap report. APPROVE of this investigation is not approval of an unimplemented capability. Set prompt_public_path_verified only when a real acceptable public path is verified; otherwise prompt-consuming nodes remain gated pending an explicitly authorized platform follow-up.
+**Acceptance evidence:** Review actual request fields and prompt assembly, versioned HA behavior, trust/precedence, compaction and resume. Publish a supported public-path decision or an exact capability-gap report. APPROVE of this investigation is not approval of an unimplemented capability. The earlier native-role capability finding remains historical evidence; the retired gate has no current consumers. Use existing SDK semantics for supported adapter work.
 
 ### HA-01 — Discovery and read contracts
 
@@ -323,13 +540,11 @@ Implement reviewed action schemas and ha_execute_action over explicit targets/pa
 
 ### HA-05 — Shared typed request gateway
 
-Refactor the current bridge into separate conversation/task request and result contracts sharing SDK transport and recovery. Carry complete admitted HA system/context content and provenance through the verified public path. Use Ex APIs for durable external conversation mapping; retain accepted-job/uncertain-send correlation locally.
+Refactor the current bridge into separate conversation/task request and result contracts sharing SDK transport and recovery. Carry admitted HA system/context text and provenance in a typed adapter envelope serialized into the existing SDK task field, with actual task/user semantics documented. Use Ex APIs for durable external conversation mapping; retain accepted-job/uncertain-send correlation locally.
 
 **Owned outputs:** `integrations/home-assistant/assist/custom_components/plowshare/agent.py`; `integrations/home-assistant/assist/custom_components/plowshare/models.py`; `integrations/home-assistant/assist/tests/<gateway-tests>`.
 
-**Acceptance evidence:** Prove exact source preservation and role semantics of the approved route, no discarded extra prompt, profile/caller/task isolation, bounded admission/storage/cleanup, restart reconciliation and no replay. Demonstrate a facade call removes the client resolve round trip. Native role fidelity must not be claimed when only text preservation exists.
-
-**Additional gates:** `prompt_public_path_verified`.
+**Acceptance evidence:** Prove exact source-text preservation and actual task/user semantics of the existing SDK route, no discarded extra prompt, profile/caller/task isolation, bounded admission/storage/cleanup, restart reconciliation and no replay. Demonstrate a facade call removes the client resolve round trip. Native role fidelity must not be claimed; its absence and cache behavior do not block the supported adapter contract.
 
 ### HA-06 — Conversation Entity lifecycle
 
@@ -339,8 +554,6 @@ Complete Conversation Entity adaptation for Assist/frontend/API calls, preservin
 
 **Acceptance evidence:** Actual isolated HA Conversation API tests cover first turn/follow-up, session expiry/new returned ID, caller and source partitioning, control-disabled routing, chat-log updates, refusal, unsupported inputs and no duplicate tool execution. Expiring HA session state never cancels accepted durable jobs or erases pending/uncertain effect records.
 
-**Additional gates:** `prompt_public_path_verified`.
-
 ### HA-07 — AI Task text provider
 
 Add an independent AI Task entity/profile for supplied-data generation and optional explicit read-only evidence. Preserve HA-prepared task system/context and use an isolated request/conversation per invocation. Expose standard HA action/helper selection without requiring Assist.
@@ -349,8 +562,6 @@ Add an independent AI Task entity/profile for supplied-data generation and optio
 
 **Acceptance evidence:** Real isolated HA generate_data action and async_generate_data helper return completed text; distinct callers and concurrent identical instructions remain isolated. Timeout, failed/capped run, unsupported llm_api or attachment, invalid context, cancellation and lost acknowledgement yield explicit errors, never pending prose as data. No implicit device-changing permission.
 
-**Additional gates:** `prompt_public_path_verified`.
-
 ### HA-08 — Structured AI Task subset
 
 Implement the approved limited HA selector/type profile and strict generated-data validation. Preserve required/optional distinctions and closed field sets. Retain invalid completed work; use a public shared output-recovery path only if supported and admitted, otherwise return a truthful error.
@@ -358,8 +569,6 @@ Implement the approved limited HA selector/type profile and strict generated-dat
 **Owned outputs:** `integrations/home-assistant/assist/custom_components/plowshare/<typed-output-spec-and-validator>`; `integrations/home-assistant/assist/tests/<structured-output-tests>`.
 
 **Acceptance evidence:** Exercise unsupported schemas before submission, invalid JSON, wrong types, extra/missing fields, parser/byte limits, modest prose overruns, retained failed results and original allowance. No re-running research or actions to fix presentation; no direct inference/internal recovery call. Return only validated completed data.
-
-**Additional gates:** `prompt_public_path_verified`.
 
 ### HA-09 — Observation routing and feedback
 
@@ -377,8 +586,6 @@ Provide optional reusable house-agent, supplied-data generation and read-only ta
 
 **Acceptance evidence:** Current loaders validate complete examples. Agents can share provider capabilities without shared private histories; plain generation works without outbound device provider; control and read-only profiles remain separate; no grants arise from discovery or prompt metadata. Templates are not asserted deployed.
 
-**Additional gates:** `prompt_public_path_verified`.
-
 ### HA-11 — Installable package and operator docs
 
 Package the reviewed external adapter and HA component with correct public SDK dependencies/resources, separate feature flags and configuration entry/profile lifecycle. Document transition from local alias maps to core ownership without replay or competing map owners.
@@ -386,8 +593,6 @@ Package the reviewed external adapter and HA component with correct public SDK d
 **Owned outputs:** `integrations/home-assistant/assist/scripts/package.py`; `integrations/home-assistant/assist/README.md`; `integrations/home-assistant/README.md`; `integrations/home-assistant/assist/custom_components/plowshare/translations/`; `integrations/home-assistant/assist/tests/<install-and-migration-tests>`.
 
 **Acceptance evidence:** Fresh artifact install, SDK byte/resource/dependency integrity, baseline HA config flow, token rotation, reconfigure/unload/restart, old-state migration and pending-job preservation pass. Unsupported evaluation, image and attachment flags stay off. No restart or deployment of live HA is performed by this node.
-
-**Additional gates:** `prompt_public_path_verified`.
 
 ### VERIFY-01 — Integrated independent contract validation
 
@@ -397,17 +602,15 @@ Assemble the exact candidate revision and independently validate core facades, S
 
 **Acceptance evidence:** Run appropriate check/formatCheck/integrationBoundaryCheck, sdkCheck, package checks and HA explicit gate on the exact source. Actual SDK transport fixtures prove one-request alias facade, state/action flow, task completion, isolation, prompt preservation and no replay. Select only justified full-db constraint/race tests. Reviewer must not have authored any feature implementation being validated.
 
-**Additional gates:** `prompt_public_path_verified`.
+### PERF-01 — Optional HA prefix-cache impact assessment
 
-### PERF-01 — Faithful HA prefix-cache impact report
-
-Investigate the original HA prompts as supplied: how often they change, earliest divergence, following history size, chosen public handoff roles, and backend reuse/latency implications. Use the earlier six-case source probe only as initial evidence. Do not rewrite/split/reorder/freeze/relocate HA prompt content to improve caching.
+This optional report is not a release prerequisite. Investigate the original HA prompts as supplied: how often they change, earliest divergence, following history size, chosen public handoff roles, and backend reuse/latency implications. Use the earlier six-case source probe only as initial evidence. Do not rewrite/split/reorder/freeze/relocate HA prompt content to improve caching.
 
 **Owned outputs:** `docs/reviews/home-assistant-prefix-cache-impact.md`; `integrations/home-assistant/assist/<bounded-investigation-fixtures-if-needed>`.
 
 **Acceptance evidence:** Repeat isolated source/helper probes with recorded version/hash and show actual model-request layout for the approved route. Finite, non-side-effecting measurement on an explicitly authorized backend records model/template/configuration, actual cache observations or unknown, cold/warm TTFT/prefill/end-to-end distributions and load. Character common prefixes and count previews are not cache-hit metrics. If backend access is unavailable, report the remaining external prerequisite; no fabricated live report.
 
-**Additional gates:** `prompt_public_path_verified`, `cache_backend_measurement_authorized`.
+**Additional gate for actual backend measurements:** `cache_backend_measurement_authorized`. Source-only observations can be prepared independently; neither measurements nor cache efficiency blocks supported adapter delivery.
 
 ### RELEASE-01 — Release readiness and rollout runbook
 
@@ -415,9 +618,7 @@ Produce the exact source/artifact manifest, all reviewer approvals, compatibilit
 
 **Owned outputs:** `docs/reviews/home-assistant-release-readiness.md`; `integrations/home-assistant/<rollout-and-rollback-runbook>`.
 
-**Acceptance evidence:** Confirm accepted dependencies and exact revision/artifact hashes; no unresolved blocking findings or unimplemented required fidelity path. Review backup validation versus restore rehearsal honestly, target versions, active-work handling and rollback without deleting uncertain receipts. This node prepares a reviewable rollout and does not merge, publish, deploy, restart HA or act on devices.
-
-**Additional gates:** `prompt_public_path_verified`.
+**Acceptance evidence:** Confirm accepted dependencies and exact revision/artifact hashes; no unresolved blocking findings against the declared existing-SDK adapter contract. Unsupported native-role semantics are a documented limitation, not a release prerequisite. Review backup validation versus restore rehearsal honestly, target versions, active-work handling and rollback without deleting uncertain receipts. This node prepares a reviewable rollout and does not merge, publish, deploy, restart HA or act on devices.
 
 ### DEPLOY-01 — Separately authorized installation
 
@@ -439,6 +640,152 @@ Exercise the public deployed package with the agreed permitted targets: scoped d
 
 **Additional gates:** `live_acceptance_authorized`.
 
+## Outbound-only deliverables
+
+| Node | Dependencies | Implementer | Independent reviewer |
+| --- | --- | --- | --- |
+| OUT-PLAN-01 | PLAN-00, AUDIT-01 | `/root` | `/root/ha_outbound_plan_reviewer` |
+| OUT-PACK-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_pack_implementer` | `/root/ha_outbound_pack_reviewer` |
+| OUT-PROFILE-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_profiles_implementer` | `/root/ha_outbound_profiles_reviewer` |
+| PLAT-SQL-01 | None (separate platform test scope) | `/root/sql_cleanup_implementer` | `/root/sql_cleanup_reviewer` |
+| OUT-VERIFY-01 | OUT-PACK-01, OUT-PROFILE-01, PLAT-SQL-01 | `/root/ha_outbound_validation_implementer` | `/root/ha_outbound_validation_reviewer` |
+
+These are separate deliverables, not partial acceptance of HA-10/11 or VERIFY-01.
+All use the same frozen-candidate/independent-approval protocol. Validation's
+implementer/reviewer must not have authored either feature implementation. Root
+records actual IDs at dispatch; role reservation is not a running-agent claim.
+
+### OUT-PLAN-01 — Current-main reconciliation and operator contract
+
+**Owned outputs:** this plan, the coordinator-owned ledger and the
+[outbound host contract](reviews/home-assistant-outbound-host-contract.md).
+Reconcile PR #300 merge milestones and current SQL/accepted-work semantics without
+rewriting prior evidence. Add these nodes/edges with no inherited prompt gate.
+Freeze strict CLI/configuration, file ownership, dependencies and evidence limits.
+Independent review must approve exact plan/contract/ledger snapshot before code.
+
+**Historical acceptance evidence at the outbound revision:** JSON/schema
+consistency, acyclic graph, dependency and gate references, independent role
+identities, the then-original eleven gated nodes unchanged and four gates
+unsatisfied, historical evidence unchanged,
+and explicit authorization/merge/deployment distinctions. No runtime/DB check is
+required for this documentation node.
+
+### OUT-PACK-01 — Standalone outbound provider host and package
+
+Expose named read and optional explicit control providers using the existing
+public Java SDK and HA adapter. Preserve the legacy executable via delegation;
+new `--provider CONFIG` and `--provider --check CONFIG` select isolated provider
+mode. Strict typed configuration supplies explicit origins, binding/policy,
+credential environment-variable names, project/provider/principal/prefix, private
+journal paths, selected fixed action profiles and finite owning timing budgets.
+Read/control providers share one authenticated SDK connection and the explicit
+Application execution principal, as required by the current provider registry.
+Logical provider names, prefixes, journals and exact grant sets remain separate;
+read grants never authorize control.
+
+Offline `--check` validates complete inputs without credential lookup, network,
+journal creation or catalogue mutation. Provider mode rejects event subscriptions,
+routes/scripts/feedback fields and unsupported recursive model endpoints. The
+supervisor owns finite adapter maintenance, catalogue publication/renewal,
+read-only uncertainty reconciliation and bounded polls/cleanup. Unknown mutation
+outcomes never trigger replay/replacement, silent account fallback or journal
+reset. Fail closed and retain ownership/receipts if physical cleanup cannot settle.
+Use narrow lifecycle interfaces for testable effects, not raw JSON domain APIs.
+
+**Owned outputs:** new HA-specific main/configuration/host interfaces and
+composition under `integrations/home-assistant/src/main/java/`; their new unit
+fixtures; HA `build.gradle.kts`; `PROVIDER-HOST.md`; narrow README links and correct
+explicit `-PfullDb` instructions for existing PostgreSQL harness tests. No edits
+to core, public SDK/shared contracts, legacy runtime behavior, Assist code or
+profile-owned example files.
+
+**Acceptance evidence:** invalid/unknown/null config and identity/path/prefix
+collisions refuse before effects; offline checks need no secrets; read-only has
+no actuator; control opt-in is exact; startup/renew/expiry/uncertainty/restart,
+bounded physical shutdown and legacy invocation preservation use fakes/local
+transports. Build the distribution and inspect its production dependency boundary.
+No live server/HA/model/device operation and no real database test by default.
+
+### OUT-PROFILE-01 — Read-only and explicit-control Application templates
+
+Supply separate outbound-only Application roots and matching provider configs in
+`examples/outbound/readonly` and `examples/outbound/control`. They use local
+`dynamic: true` agents, exact named external tool grants, static provider
+permissions with `bindings: []`, explicit execution/provider principal
+placeholders, empty access grants and separate private journals. No wildcard,
+implicit control, Assist/AI Task, event routes, shared private conversation
+history, built-in tools or automatic authority provisioning. Connection/policy
+belongs in typed configuration, not agent prose.
+
+**Owned outputs:** all `examples/outbound/**`, example-specific operator guidance
+and `OutboundProfilesTest.java`. Packaging host/configuration code is owned by
+OUT-PACK-01; the approved common contract permits parallel work.
+
+**Acceptance evidence:** current real manifest/provider/agent loaders accept both
+complete roots; exact assignments deny wrong agent/principal/project/control;
+missing grants confer no authority; invalid examples fail clearly. Match host
+configurations to the typed parser, exact provider names/prefixes/journals and
+installed files once OUT-PACK-01 is ready. No model fleet or deployment claim from
+parsing a template; placeholders must be replaced in private operator source.
+
+### PLAT-SQL-01 — Deterministic SQL cleanup regression fixture
+
+Continuation authorizes a separate owning-platform test investigation of the
+repository-check blocker. Its general purpose is reliable verification of SQL
+network deadlines and physical cleanup ownership; it adds no adapter capability.
+Diagnose hidden acquisition/worker failures with finite phase/Future evidence
+before correction. Initially own only `ScopedSqlWorkBudgetTest.java` and new
+`docs/reviews/home-assistant-plat-sql-01-*` evidence. No production runtime, public
+API, SDK or schema change is authorized by this test scope.
+
+**Acceptance evidence:** independently review actual diagnostic failure evidence;
+retain the short tested SQL deadline, execute and fetch coverage, observed
+occupied cleanup worker, rejection of late results and exact lease ownership.
+Setup may have its own finite fixture budget; do not loosen the tested boundary,
+exclude tests or retry until green. A fresh method-only JVM, owning class and
+repository `check` must pass on frozen bytes, with formatting checks. Mock JDBC
+is sufficient; no PostgreSQL run is justified. Any discovered runtime defect
+requires an explicitly scoped platform decision before production edits.
+
+### OUT-VERIFY-01 — Integrated outbound-only validation
+
+Assemble exact independently accepted packaging/profile candidates. Verify a fresh
+installed distribution runs offline config validation without credential/network
+or journal side effects, ships only public SDK/runtime production dependencies,
+and includes the approved examples. Exercise host lifecycle and public SDK
+request/recovery contracts over controlled local WebSocket/HA fixtures, retaining
+server-side authorization ownership and distinct delivery/effect/observation states.
+Recheck the Ex SDK contract and existing server authorization tests with mocked
+repositories. Template/source checks cannot establish actual live grant issuance
+or physical device behavior; record those as later operational prerequisites.
+
+**Owned outputs:** new cross-boundary fixtures only under the HA module, and
+`docs/reviews/home-assistant-outbound-validation.md` plus text candidate/source/
+package hash manifests. Feature source corrections return to their original
+implementers and reviewers; validation agents may not self-approve them.
+
+**Acceptance evidence:** current `check`, `formatCheck`, `integrationBoundaryCheck`,
+canonical SDK-contract drift checks and scoped fresh installed-consumer fixtures
+pass against one frozen source. Real SDK transport tests prove public request
+shapes/correlation and no replay after uncertainty; no manual internal-service or
+SQL access from production. Use mocked repositories by default; a selected
+`full-db` test requires an independently stated PostgreSQL-specific assertion,
+not general integration confidence. Guard Assist setup/configuration/packaging
+remains disabled; do not install HA dependencies or enable the component merely
+to claim complete-package validation. Record missing explicit Python/HA checks
+honestly. This node does not close original VERIFY/PERF/RELEASE/DEPLOY/LIVE nodes.
+
+### SCOPE-01 — Correct the caching gate and SDK-only adapter contract
+
+**Dependencies:** OUT-VERIFY-01. **Implementer:** `/root`. **Independent reviewer:**
+`/root/ha_cache_gate_correction_reviewer`. Correct the active plan/design/ledger
+and scope direction; preserve the exact prior plan/state and historical reviews.
+Acceptance requires a valid DAG, unchanged accepted implementation sources,
+no active retired-gate consumers, optional cache assessment outside the release
+critical path, preserved operational authorizations and an independent APPROVE.
+No runtime source or publication guard changes are part of this deliverable.
+
 ## Coordinator scheduling and tracking
 
 There are four concurrent agent slots: root plus at most three workers. The safe
@@ -446,6 +793,12 @@ normal schedule is one implementer/reviewer pair and one optional implementer on
 a disjoint ready branch. Reviewer slots are reserved before opening more work;
 root never leaves reviews starved behind unreviewed implementation batches.
 Roles are reused sequentially only where independence and file ownership hold.
+
+Outbound amendment schedule: OUT-PLAN-01 review first, then OUT-PACK-01 and
+OUT-PROFILE-01 on disjoint paths, each with independent review, followed by
+OUT-VERIFY-01. Its initial repository check failed; PLAT-SQL-01 now resolves the
+separate owning-platform test blocker before a new validation candidate. Those
+outbound reviews remain historical exact-source evidence. SCOPE-01 now corrects the unrelated caching/native-fidelity prerequisite for remaining work.
 
 Initial waves after PLAN-00 approval:
 
@@ -461,14 +814,14 @@ Initial waves after PLAN-00 approval:
    to compile its server facades. CORE-04 follows with complete SDK/client usage
    and cross-language evidence; it is not a prerequisite hidden inside CORE-03.
    Upstream canonical fixes reopen the affected approval. HA discovery/read/
-   provider/action work proceeds independently. Prompt-dependent gateway work waits
-   for both core SDK delivery and verified fidelity semantics.
+   provider/action work proceeds independently. Gateway work waits
+   for accepted core SDK delivery and the SCOPE-01 adapter contract review.
 4. Once HA-05 is accepted, Conversation and AI Task can be assigned to separate
    implementers with disjoint files. Shared configuration/setup files are owned
    by one node at a time and handed off explicitly. Each node gets its own reviewer.
-5. Root assembles one integration candidate for VERIFY-01, then permits the faithful
-   cache-impact investigation and release preparation. Operational nodes wait for
-   their independent authorization gates.
+5. Root assembles one integration candidate for VERIFY-01, then release preparation
+   can proceed. Cache-impact investigation is optional and separately scoped.
+   Operational nodes wait for their independent authorization gates.
 
 Root serializes Gradle runs and shared generated-catalog/migration allocation
 work. Pause overlapping Java edits during a compiled candidate's checks. Assign
@@ -514,12 +867,13 @@ role independence and status invariants; it does not run Gradle or database test
 
 ## Completion definition
 
-The requested package is implementation-complete only when all required feature,
-integration, fidelity and faithful cache-impact nodes have independent approval
-on the integrated candidate. RELEASE-01 makes that candidate reviewable for a
-separately authorized rollout. A gate or optional future feature cannot be
-silently dropped from a completion claim. Native role fidelity remains a required
-semantic decision, not an optional future convenience.
+The supported SDK-only package is implementation-complete when all required
+adapter features and integrated validation have independent approval on the
+integrated candidate. RELEASE-01 prepares that candidate for a separately scoped
+rollout. Cache measurements are optional; native system-role parity is not a
+requirement. Document actual task/user semantics and unsupported options. No
+incomplete adapter node may be marked accepted merely because its former gate
+was retired. The accepted outbound branch is only its own completed scope.
 
 Deployment-complete and live-validated are later explicit milestones with their
 own agents, approvals, target/artifact receipts and user authorization. Root keeps

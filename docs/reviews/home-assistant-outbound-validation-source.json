@@ -1,0 +1,53 @@
+{
+  "node": "OUT-VERIFY-01",
+  "captured_at": "2026-11-22T00:23:38.348193+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "accepted_dependencies": {
+    "OUT-PACK-01": {
+      "path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
+      "sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
+      "candidate_id": "out-pack-01-v1"
+    },
+    "OUT-PROFILE-01": {
+      "path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
+      "sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
+      "candidate_id": "out-profile-01-v2"
+    }
+  },
+  "feature_and_validation_files": {
+    "integrations/home-assistant/build.gradle.kts": "f6c26532ed02fe90c764c1ed95e238025a165c67ec2c840294979648251da267",
+    "integrations/home-assistant/README.md": "3173eb536eea0a69a346ebc07ea09feff25fe5420320e6e746ce2454b25ed16e",
+    "integrations/home-assistant/TOOL-PROVIDER.md": "3ca0f018f553c0412b9ea4aeb3ccdf6a2bf1ce164319caacc53eb8446e07fbd2",
+    "integrations/home-assistant/PROVIDER-HOST.md": "1e593204fbec14ea4237e2318ea8e74807b98b231fd83fc45c80617d3d4acbcf",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java": "85d8767ecf393345bf5f887b5969dd8d64866da70ef8a70e60edc93293fcead2",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java": "db8983c94a3e9811f721ceee1bb34bcb92fd0e004ff92183ec5bd4aa9f8f631b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "322cd7b24a3d47fd54747192d36ee27e4784c81fee2957c11aa0c9ab303a2cc1",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java": "85ce158535b4ae1b3682e22e49f6c8aa942005c4595b080e73960442b6090ca6",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java": "d375a59a60cd1adf41ee9c0aa38daeeb0273901376a3e6a75b669bc9750114b8",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfigurationTest.java": "135eba7cc8a02ede436128f2725f3d9e4a1ec50b3355455753d37891d12ad355",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHostTest.java": "ec828a3c9bc4c161d7f385e2438b1fabd0f88466cd3ddb386267a084bc62e270",
+    "integrations/home-assistant/examples/outbound/README.md": "117368f2fc745bcc821f045bf78229d5087d2c84ba091b2b9f5e4b9d7061bc8e",
+    "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "bff6da8a458305319bc4dd492baefd06cc80f0060456289627a72513882ea72d",
+    "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "2dffe9ec1a887b1247b41305184cef3f711987ab3adf6005acd1b99935468986",
+    "integrations/home-assistant/examples/outbound/control/application/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/outbound/control/provider.json": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+    "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "cbac98269c70febff18164898616c9a8147634c1131ac4a444593cd88ba532ec",
+    "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "0be8df301b6db5298135a5575b6f4e23e0186646f08927f7020f8801f89f3785",
+    "integrations/home-assistant/examples/outbound/readonly/application/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/outbound/readonly/provider.json": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "a2d999582ae59358f5ae33a51774cc8f15ac3234d381edbe47d8e03d5379d216",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "3b6ed48ede8f3c14d8447001de34162a1b761ef418bb916a067c929ced71e545",
+    "integrations/home-assistant/scripts/check-outbound-package.py": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c"
+  },
+  "unchanged_prompt_gate_sources": {
+    "integrations/home-assistant/assist/custom_components/plowshare/availability.py": "9ff0dd3d8b44d56e82382381b84713ed6ad6afa3b4dba5d2e0c3105f353dd398",
+    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "239eeb59e80b945104496ef0cc629565ba4ad74f72077b5e58e8ca17a6255bf7",
+    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "f3b46ad300b8b28a323b52c8df139c3e83032dd3e4f5266a29e9e174c2e041a9",
+    "integrations/home-assistant/assist/scripts/package.py": "9e44e4128ba7188fa568bfa61cf04ac8573dd7f9af4147342f7c65d5476db355"
+  },
+  "prompt_guard_candidate": {
+    "path": "docs/reviews/home-assistant-publication-gate-candidate.json",
+    "sha256": "aad3fe80235aafba44d59b2f8dc256e9049cf4eb25808847cb2a8f254ff83b24"
+  },
+  "limits": "Current source bytes only; mutable coordinator ledger and reports excluded to avoid self-reference. Prompt guard sources match original frozen gating candidate; this does not claim a current Python/HA runtime test."
+}

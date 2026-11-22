@@ -1,6 +1,26 @@
 # Home Assistant integration package: design and implementation plan
 
-Status: proposed design and delivery plan. Updated 17 November 2026.
+Status: design and delivery plan. Scope corrected 22 November 2026.
+
+Current scope: the caching/fidelity concern does not justify adapting Plowshare
+to upstream prompt behavior. The only core extension is external conversation-ID
+mapping via the existing Ex SDK calls. Preserve supplied HA text using existing
+SDK task semantics; document native-role limitations without a delivery gate.
+No prompt rewriting/cache optimization or additional core capability is planned.
+Optional backend cache measurements do not block supported integration release.
+This correction supersedes the earlier native-fidelity gate and proposed
+externalContext successor; historical reports retain their original scope.
+See the current delivery graph and SCOPE-01 independent review for closure.
+
+Native Assist lifecycle clarification (23 November 2026, HA-FIX-01): HA can open
+its session/chat log and supply a generated ID before the first entity call.
+Admit that first turn only with matching active native contexts and an otherwise
+empty current-input log; a supplied ID alone grants no ownership. Direct unknown
+IDs and retained foreign history remain refused. Native upstream expiry can mint
+a new ID before the adapter sees the request, so no continuity from the hidden
+old ID can be inferred; old SDK receipts remain independent and are not replayed.
+The adapter fences its own context preparation and SDK handoff, not HA's prior
+pipeline work. See the follow-up's reviewed evidence in the delivery ledger.
 
 The [delivery graph](home-assistant-delivery-plan.md) defines executable nodes,
 independent implementer/reviewer assignments and the approval gate for finishing
@@ -268,11 +288,12 @@ its originating caller's conversation context.
 
 The user separately proposed generic core ownership of external conversation
 aliases, then authorized execution of the reviewed graph. CORE-01 records the
-precise proposed implementation contract in
-[ADR 0077](decisions/0077-conversation-external-aliases.md); CORE-02–CORE-04 must
-implement and independently verify it before the HA gateway consumes it. Neither
-Ex operation nor its table exists in the audited baseline. Adapters never query
-that table or import server internals.
+implementation contract in
+[ADR 0077](decisions/0077-conversation-external-aliases.md). CORE-02–CORE-04 are
+now accepted and merged; the initial audit predated those capabilities. The HA
+gateway consumes the existing public Ex SDK operations and verifies its own
+binding; no new core implementation is needed. Adapters never query the alias
+table or import server internals.
 
 ```text
 (resolved project ID, authenticated account UUID, source, externalConversation)
@@ -492,13 +513,15 @@ HA schema objects out of the internal gateway contract. Enforce explicit byte,
 field-count and parser budgets; an oversized required prompt is an error, not
 permission to truncate instructions. Model-prose word guidance remains separate.
 
-The latest admitted context governs the current request within the configured
-profile; earlier snapshots remain historical evidence. Keep current time and
-device observations current, including after a suspended task resumes. A retained
-snapshot records what the original request saw; a genuinely necessary refresh is
+Each new request captures current HA context within the configured profile;
+earlier snapshots remain historical evidence. An accepted run keeps the normal
+platform retention/recovery behavior. Do not inject a changed prompt into an
+accepted run or recreate work to refresh time/state. A retained snapshot records
+what the original request saw; a genuinely necessary refresh for a new request is
 new bounded work with its own provenance, not a rewrite of that old snapshot.
-After compaction or recovery, verify that required HA instructions still reach
-the next model call. A snapshot retained only in an adapter journal is insufficient.
+Verify and document ordinary compaction/recovery behavior for admitted task text.
+Adapter-journal retention does not establish model retention. The adapter must
+not claim special instruction persistence or require new core compaction behavior.
 
 HA instructions remain subordinate to Plowshare's platform rules, admitted agent
 capabilities, approvals and current authorization. Preserve requested behavior
@@ -520,24 +543,20 @@ labelled `ha_system` does not create a real system message, and model instructio
 about precedence are not an authorization mechanism.
 
 The [FIDELITY-01 investigation](reviews/home-assistant-prompt-fidelity-decision.md)
-finds no current public route that preserves HA's refreshed system content in a
-native system role for both entry points. prompt.pre contributes USER content;
-log.open is a fixed opening and cannot refresh each turn. Keep the prompt public
-path gate unsatisfied. Copying task text does not establish role fidelity.
+records an earlier native-role interpretation and a proposed externalContext
+successor. The user clarified that the concern was caching awareness, not a
+requirement to change Plowshare for upstream systems. That prerequisite is
+retired, not technically satisfied. No system-context API or platform successor
+is authorized or needed for the supported SDK-only adapter contract.
 
-That report proposes, without authorizing or implementing it, a generic bounded
-externalContext native-system-block successor with per-run snapshots, provenance,
-explicit admission and recovery/compaction rules. It requires a separately
-reviewed platform decision and user authorization under ADR 0001. The Ex alias
-slice changes identity resolution only. Independent outbound HA discovery/control
-work can continue while prompt-consuming nodes remain gated. Do not add hidden
-transport fields,
-call the inference provider directly, redefine agents on every request, or create
-a new agent per rendered prompt to work around it.
-
-The user's subsequent decision is to **leave prompt-dependent features gated**.
-The successor remains a deferred proposal; this decision authorizes no new
-prompt-role API or prompt optimization implementation.
+Use a typed, versioned adapter envelope serialized into the existing `task`
+field. Preserve original supplied HA text and its provenance without rewriting
+for caching. Document task/user role and the normal platform retention behavior;
+do not promise native system priority or special compaction persistence. Treat
+context as input, never tool grants. Explicitly refuse unsupported capabilities
+before submission. Do not introduce hidden transport fields, call inference
+directly, redefine agents per request or manufacture agents per rendered prompt.
+There is no additional mandatory user prompt-mapping choice gate.
 
 ### Prefix caching: impact of the prompt HA actually supplies
 
@@ -548,9 +567,9 @@ prompt components to make them cache-friendly.** This plan does not assume the
 integration can "correct" HA's prompt construction. Adapter-owned routing
 metadata must not introduce unnecessary model-visible changes either.
 
-Keep the separate public-SDK role-fidelity question above explicit. The selected
-handoff determines where HA content reaches inference, but must be chosen for
-correctness, not used to quietly demote HA's system prompt to obtain cache hits.
+The SDK-only handoff has explicit task/user semantics. Preserve the supplied
+content for correctness; this adaptation is not a cache optimization or a claim
+of native system-role equivalence.
 Investigating source variation does not require that transport decision to have
 already been implemented.
 
@@ -861,7 +880,7 @@ or live validated.
 | HA-05 | HA-04 | HA AI Task text provider, profile configuration and standard callers | Prepared task system prompt/context reaches the admitted model request; real baseline HA action/helper return completed text; no voice dependency; pending/failure never reported as data |
 | HA-06 | HA-05 | Structured-data subset and strict result validation | Required/optional/extra fields, unsupported selectors, invalid JSON, byte limits and retained failed output exercised |
 | HA-07 | HA-02, HA-03 | Configurable observations, workflow routing and optional Application templates | Gap/reconnect, causal feedback, sustained thresholds and deterministic HA consumption of AI Task results |
-| HA-08 | HA-03, HA-05, HA-06 | Distribution, setup documentation and separately authorized live acceptance | Install/reconfigure/unload tests, public authenticated round trips, target-version evidence and faithful-request backend-specific cold/warm prefix-cache measurements |
+| HA-08 | HA-03, HA-05, HA-06 | Distribution, setup documentation and separately authorized live acceptance | Install/reconfigure/unload tests, public authenticated round trips, target-version evidence and optional separately authorized backend-specific cold/warm prefix-cache measurements |
 
 HA-04 and HA-05 do not depend on device-control discovery: other integrations can
 request generation while the outbound HA provider evolves. HA-07 is required for
@@ -891,14 +910,16 @@ verification, not database or full build reruns.
   result without an Assist conversation.
 - Demonstrate distinct callers/tasks cannot receive one another's results; test
   a slow task and a restart without starting replacement model work.
-- Verify complete effective HA prompts and supported context for both entity
-  platforms, including changed extra prompts and post-compaction continuation.
-  Check actual admitted request evidence and report measured cache impact with
-  missing provider cache observations marked unknown.
+- Verify exact admitted task-envelope text and supported context for both entity
+  platforms, including changed extra prompts on new requests. Check actual
+  task/user semantics and document ordinary platform compaction/recovery; do not
+  require native system-role priority or special prompt persistence. Cache
+  observations are optional and separately authorized, never a live-acceptance
+  requirement; missing observations remain unknown.
 - Verify that AI Task does not invoke its own Plowshare-backed HA endpoint and
   that device events do not create an uncontrolled feedback loop.
 
-## 10. Decisions to resolve during implementation
+## 10. Implementation checks and optional investigations
 
 1. Which HA action/selector profiles form the first executable subset? Discovery
    can be broader than executable capabilities only within explicit read policy.
@@ -914,18 +935,18 @@ verification, not database or full build reruns.
    explicit error, with a documented capability gap if stronger behavior is needed.
 6. What operator workflow reconciles unknown task submissions and later completed
    results? Standard AI Task calls have no durable caller-supplied retry key.
-7. Is carrying HA system content with explicit provenance in the task envelope
-   sufficient for the required semantics, or is native system-role fidelity
-   required? The current public agent-run API does not expose the latter.
-8. How often does each configured HA profile change its system message, where
-   does it first diverge, and what prefix reuse/cache observations does the
-   deployed backend actually support?
-9. Implement and verify the exact Ex facade contract in
-   [ADR 0077](decisions/0077-conversation-external-aliases.md) through CORE-02–CORE-04;
-   its wire names, owner-local namespace, atomic creation, resolve-only runs and
-   phased migration are design decisions, not current capabilities.
+7. Verify supplied HA text and provenance in the existing SDK task envelope.
+   The SDK-only contract is selected; native system-role equivalence is neither
+   supported nor a delivery prerequisite. No further mapping-choice gate applies.
+8. Optional: observe how often configured HA prompts change and what cache
+   information an explicitly authorized backend exposes. This investigation does
+   not block adapter work, release or live acceptance and does not change core.
+9. Use the accepted Ex facade and SDK contract from
+   [ADR 0077](decisions/0077-conversation-external-aliases.md). CORE-02–CORE-04 are
+   completed platform work; verify adapter calls and isolation against the
+   existing wire contract rather than creating another core capability.
 
-The external-conversation facades are the specifically identified core design
-proposal in this document. Their implementation needs its own platform delivery
-slice and recorded decision. Other integration questions do not broaden that
-scope to unrelated runtime, API, SQL or shared-contract changes.
+External-to-internal conversation mapping is the only core extension authorized
+for this delivery and is already implemented through the Ex operations and SDK
+support. Remaining adapter questions do not broaden that scope to prompt APIs,
+runtime, SQL, shared-contract or cache changes.

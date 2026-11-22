@@ -1,0 +1,3929 @@
+diff --git a/integrations/home-assistant/assist/custom_components/plowshare/agent.py b/integrations/home-assistant/assist/custom_components/plowshare/agent.py
+index 6c1058cd..008adfd9 100644
+--- a/integrations/home-assistant/assist/custom_components/plowshare/agent.py
++++ b/integrations/home-assistant/assist/custom_components/plowshare/agent.py
+@@ -1,8 +1,10 @@
+-"""Bounded Assist conversations through the unchanged public Python SDK.
++"""SDK-only HA gateway with durable receipts and resource-owned wait budgets.
+ 
+-Only one foreground interaction is admitted per integration instance. There is
+-no adapter-owned background runtime. Timed-out jobs remain on Plowshare; the next
+-interaction reconciles their status before it can submit another question.
++Plowshare owns agents, history and jobs. HA keeps only bounded correlation and
++submission fences. The save callback must return only after the supplied state
++is durably committed; a best-effort storage API is not sufficient for that
++contract. No adapter code retries an uncertain mutation or cancels remote work
++merely because its caller wait expires.
+ """
+ 
+ from __future__ import annotations
+@@ -12,25 +14,36 @@ import json
+ import logging
+ from collections.abc import Awaitable, Callable
+ from dataclasses import dataclass
+-from typing import Protocol, TypeVar
++from typing import Protocol, TypeVar, runtime_checkable
+ from uuid import UUID
+ 
+ from ._vendor.plowshare import Client, Delivery, Refusal, TransportError
+ from ._vendor.plowshare.contracts import (
+     AgentListRequest,
+-    AgentRunRequest,
+-    ConversationOpenRequest,
++    AgentRunRequestEx,
++    ConversationOpenRequestEx,
+     ConversationTrajectoryRequest,
+     JobStatusRequest,
+     ObservedJobDto,
+     ObservedOutcomeDto,
+     Request,
+ )
+-from .const import CLEANUP_TIMEOUT, MAX_SESSIONS, MAX_TEXT
++from .const import CLEANUP_TIMEOUT, MAX_SESSIONS
+ from .models import Session, Settings, required_text
++from .requests import (
++    ConversationRequest,
++    GatewayResult,
++    HaRequest,
++    TaskRequest,
++    digest,
++    external_key,
++    kind,
++    render_task,
++)
+ 
+ _LOGGER = logging.getLogger(__name__)
+ T = TypeVar("T")
++MAX_ACTIVE = 4
+ PENDING = (
+     "Your house agent is still working. Ask again in this conversation to check "
+     "the result; your request will not be repeated."
+@@ -39,20 +52,56 @@ UNCERTAIN = (
+     "Plowshare did not confirm your request. It may still be running, so I have "
+     "not repeated it. Check the house agent conversation in Plowshare."
+ )
++LEGACY = (
++    "This retained house-agent conversation needs migration or inspection in "
++    "Plowshare before it can continue. Its work has not been repeated."
++)
++ROUTING_CHANGED = (
++    "This conversation belongs to an earlier Plowshare connection or profile. "
++    "Inspect its retained work and start a new HA conversation; it was not repeated."
++)
+ 
+ 
+-class ConversationPort(Protocol):
+-    """Owns SDK connection lifetimes; never retries a model call or mutation."""
++@dataclass(frozen=True)
++class Answer:
++    """Legacy Conversation presentation; task callers use GatewayResult instead."""
++
++    text: str
++    error: bool = False
++
+ 
+-    async def validate(self) -> None: ...
++class ConversationPort(Protocol):
++    async def validate(self, required_agents: tuple[str, ...] = ()) -> None: ...
+ 
+     async def ask(self, key: str, text: str) -> Answer: ...
+ 
+ 
+-@dataclass(frozen=True)
+-class Answer:
+-    text: str
+-    error: bool = False
++class GatewayPort(ConversationPort, Protocol):
++    """Typed entity-facing interface; only completed results contain data."""
++
++    async def converse(self, request: ConversationRequest) -> GatewayResult: ...
++
++    async def generate(self, request: TaskRequest) -> GatewayResult: ...
++
++    async def async_close(self) -> bool: ...
++
++
++@runtime_checkable
++class ProfileRuntime(Protocol):
++    """Shared HA entry runtime; concrete lifecycle/journal ownership is separate.
++
++    Disabled profiles return None. Properties are read-only so an entity cannot
++    replace another profile's gateway. False close retains the entire runtime
++    and its unsettled physical owners for an explicit unload retry.
++    """
++
++    @property
++    def conversation(self) -> GatewayPort | None: ...
++
++    @property
++    def task(self) -> GatewayPort | None: ...
++
++    async def async_close(self) -> bool: ...
+ 
+ 
+ class SdkConversationAgent:
+@@ -62,22 +111,30 @@ class SdkConversationAgent:
+         sessions: dict[str, Session],
+         save: Callable[[], Awaitable[None]],
+         connect: Callable[..., Awaitable[Client]] = Client.connect,
++        *,
++        profile_id: str | None = None,
+     ) -> None:
+         self.settings = settings
+         self.sessions = sessions
+         self.save = save
+         self.connect = connect
+-        self._busy = False
++        # A stable installation/config-entry AND selected-profile identity is
++        # mandatory for submission. None is useful only for read-only validation.
++        self.profile_id = required_text(profile_id) if profile_id is not None else None
++        self._active: set[str] = set()
++        self._closed = False
++        self._settled = asyncio.Event()
++        self._settled.set()
++        self._drains: dict[str, asyncio.Task[None]] = {}
+         self._drain: asyncio.Task[None] | None = None
+ 
+     async def _save(self) -> None:
+-        """A stalled local store cannot hold intake or postpone submission forever."""
++        """The injected owner commits durable intent or raises within its budget."""
+         async with asyncio.timeout(self.settings.request_timeout):
+             await self.save()
+ 
+     async def _request(self, client: Client, request: Request[T]) -> T:
+-        # The SDK's timer starts at transmission. This outer timer also bounds
+-        # admission/queueing and decoding. Non-waiting capacity mode cannot replay.
++        # Capacity waiting is disabled: no caller timeout supplies replay proof.
+         async with asyncio.timeout(self.settings.request_timeout):
+             return (
+                 await client.request(
+@@ -87,23 +144,64 @@ class SdkConversationAgent:
+                 )
+             ).require_payload()
+ 
+-    async def _close(self, client: Client) -> None:
+-        self._drain = asyncio.create_task(client.close())
+-        self._drain.add_done_callback(self._drained)
++    async def _close(self, client: Client, owner: str) -> None:
++        task = asyncio.create_task(client.close())
++        self._drain = task  # Legacy fixture visibility; ownership is per key below.
++        self._drains[owner] = task
++        task.add_done_callback(lambda settled: self._drained(owner, settled))
+         try:
+             async with asyncio.timeout(CLEANUP_TIMEOUT):
+-                await asyncio.shield(self._drain)
++                await asyncio.shield(task)
+         except TimeoutError, TransportError, OSError:
+-            # SDK close owns its shielded drain. Do not claim physical abort.
+-            _LOGGER.warning("Plowshare Assist connection cleanup did not settle")
++            # Physical close still owns the bounded slot; do not invent abort.
++            _LOGGER.warning("Plowshare HA connection cleanup did not settle")
+ 
+-    @staticmethod
+-    def _drained(task: asyncio.Task[None]) -> None:
+-        if not task.cancelled() and task.exception() is not None:
+-            _LOGGER.warning("Plowshare Assist connection cleanup failed")
++    def _drained(self, owner: str, task: asyncio.Task[None]) -> None:
++        if task.cancelled() or task.exception() is not None:
++            # A failed cleanup task does not prove physical SDK settlement. Keep
++            # this bounded owner quarantined; a fresh caller cannot reuse it.
++            _LOGGER.warning("Plowshare HA connection cleanup failed")
++            return
++        if self._drains.get(owner) is task:
++            del self._drains[owner]
++            self._release(owner)
++
++    def _release(self, owner: str) -> None:
++        self._active.discard(owner)
++        if not self._active:
++            self._settled.set()
++
++    async def async_close(self) -> bool:
++        """Stop intake and wait finitely; false retains the owner for unload retry.
++
++        It never cancels accepted work or claims failed physical cleanup settled.
++        The HA lifecycle owner must not discard this gateway while false.
++        """
++        self._closed = True
++        try:
++            async with asyncio.timeout(CLEANUP_TIMEOUT):
++                await self._settled.wait()
++        except TimeoutError:
++            return False
++        return True
+ 
+-    async def validate(self) -> None:
+-        """Read-only setup probe; never creates a conversation or runs a model."""
++    def _claim(self, owner: str) -> bool:
++        # Event-loop confined; no await between checking and claiming ownership.
++        if self._closed or owner in self._active or len(self._active) >= MAX_ACTIVE:
++            return False
++        self._active.add(owner)
++        self._settled.clear()
++        return True
++
++    async def validate(self, required_agents: tuple[str, ...] = ()) -> None:
++        """Check all enabled profiles from one read-only project snapshot."""
++        if type(required_agents) is not tuple or len(required_agents) > 16:
++            raise ValueError("A bounded tuple of agent names is required")
++        selected = required_agents or (self.settings.agent,)
++        names = {required_text(name) for name in selected}
++        owner = "validation"
++        if not self._claim(owner):
++            raise ValueError("Plowshare connection validation is busy")
+         client = None
+         try:
+             async with asyncio.timeout(self.settings.request_timeout):
+@@ -115,77 +213,173 @@ class SdkConversationAgent:
+                 agents = await self._request(
+                     client, AgentListRequest(project=self.settings.project)
+                 )
+-                if not any(agent.name == self.settings.agent for agent in agents):
++                if not names.issubset({agent.name for agent in agents}):
+                     raise ValueError(
+-                        "The selected house agent is not available in this project"
++                        "The selected agent is not available in this project"
+                     )
+         finally:
+             if client is not None:
+-                await self._close(client)
++                await self._close(client, owner)
++            else:
++                self._release(owner)
+ 
+     async def ask(self, key: str, text: str) -> Answer:
+-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+-            return Answer("Please provide a shorter, non-empty house request.", True)
+-        if any(ord(c) < 32 and c not in "\n\t" for c in text):
++        """Compatibility presentation, not an alternative submission lifecycle."""
++        try:
++            request = ConversationRequest(key, text)
++        except ValueError:
+             return Answer(
+-                "The house request contains invalid control characters.", True
++                "Please provide a shorter, valid, non-empty house request.", True
+             )
+-        if self._busy or (self._drain is not None and not self._drain.done()):
+-            return Answer(
+-                "The house assistant is handling another voice request. Try shortly.",
+-                True,
++        result = await self._execute(request, legacy_key=True)
++        if result.status == "completed":
++            return Answer(result.text)
++        if result.status == "pending":
++            return Answer(PENDING)
++        return Answer(result.message or "The house agent could not finish.", True)
++
++    async def converse(self, request: ConversationRequest) -> GatewayResult:
++        if type(request) is not ConversationRequest:
++            raise ValueError("A typed conversation request is required")
++        return await self._execute(request)
++
++    async def generate(self, request: TaskRequest) -> GatewayResult:
++        if type(request) is not TaskRequest:
++            raise ValueError("A typed task request is required")
++        return await self._execute(request)
++
++    def _routing(self, request: HaRequest) -> tuple[str, str, str, str]:
++        if self.profile_id is None:
++            raise ValueError("A stable installation/profile identity is required")
++        request_kind = kind(request)
++        correlation = external_key(request)
++        source = "ha." + request_kind + "." + digest((self.profile_id,))
++        lookup = digest((self.profile_id, request_kind, correlation))
++        # Credential equality is deliberately conservative: the public API does
++        # not prove that two tokens denote the same account. Rotation/configuration
++        # changes never retarget a retained receipt or transparently continue it.
++        binding = digest(
++            (
++                self.settings.origin,
++                self.settings.token,
++                self.settings.project,
++                self.settings.agent,
++                self.profile_id,
++                request_kind,
++            )
++        )
++        return source, lookup, binding, correlation
++
++    def _retained(
++        self, request: HaRequest, lookup: str, binding: str, correlation: str
++    ) -> tuple[str, Session | None, GatewayResult | None]:
++        candidates = []
++        if lookup in self.sessions:
++            candidates.append((lookup, self.sessions[lookup]))
++        if request.key in self.sessions and request.key != lookup:
++            candidates.append((request.key, self.sessions[request.key]))
++        # A changed routing/profile lookup cannot make old pending work invisible.
++        # This scan is bounded by MAX_SESSIONS and never discloses another binding.
++        for key, session in self.sessions.items():
++            if session.correlation == correlation and (key, session) not in candidates:
++                candidates.append((key, session))
++        for key, session in candidates:
++            if session.mapping != "external":
++                return key, session, GatewayResult("uncertain", message=LEGACY)
++            if session.binding != binding or session.correlation != correlation:
++                return key, session, GatewayResult("uncertain", message=ROUTING_CHANGED)
++        if len(candidates) > 1:
++            return lookup, None, GatewayResult("uncertain", message=ROUTING_CHANGED)
++        if candidates:
++            key, session = candidates[0]
++            return key, session, None
++        return lookup, None, None
++
++    async def _record_failure(self) -> None:
++        try:
++            await self._save()
++        except TimeoutError, OSError:
++            # Do not conceal the error as success or remove the in-memory fence.
++            _LOGGER.warning("Plowshare HA correlation could not be committed")
++
++    async def _execute(
++        self, request: HaRequest, *, legacy_key: bool = False
++    ) -> GatewayResult:
++        try:
++            body = render_task(request)
++            source, lookup, binding, correlation = self._routing(request)
++        except ValueError:
++            return GatewayResult(
++                "refused",
++                message="The HA request or profile configuration is unsupported.",
++            )
++        storage, session, problem = self._retained(
++            request, lookup, binding, correlation
++        )
++        if problem is not None:
++            return problem
++        if not self._claim(lookup):
++            return GatewayResult(
++                "busy",
++                message="The house agent is handling another request. Try shortly.",
+             )
+-        # Event-loop confined admission: no await between testing and claiming it.
+-        self._busy = True
+         client = None
+-        session = None
+         try:
+-            session = self.sessions.get(key)
+             if session is None:
+                 if len(self.sessions) >= MAX_SESSIONS:
+                     idle = next(
+                         (
+                             key
+                             for key, item in self.sessions.items()
+-                            if item.phase == "idle"
++                            if item.mapping == "external"
++                            and item.phase in {"idle", "complete"}
+                         ),
+                         None,
+                     )
+                     if idle is None:
+-                        return Answer(
+-                            "The house assistant has too many pending conversations. Check Plowshare.",
+-                            True,
++                        return GatewayResult(
++                            "busy",
++                            message="Too many retained house-agent requests need inspection.",
+                         )
+                     del self.sessions[idle]
+-                session = Session()
+-                self.sessions[key] = session
++                storage = request.key if legacy_key else lookup
++                session = Session(
++                    mapping="external", binding=binding, correlation=correlation
++                )
++                self.sessions[storage] = session
++            if session.phase in {"sending", "uncertain"}:
++                return GatewayResult("uncertain", message=UNCERTAIN)
++            if session.phase == "idle":
++                # This transient pre-mutation phase prevents another profile's
++                # bounded state owner from evicting a record while connect/read
++                # is suspended. A persisted preparing row safely restarts idle.
++                session.phase = "preparing"
+             async with asyncio.timeout(self.settings.response_timeout):
+                 client = await self.connect(
+                     self.settings.origin,
+                     self.settings.token,
+                     timeout=self.settings.request_timeout,
+                 )
+-                if session.phase in {"uncertain", "sending"}:
+-                    return Answer(UNCERTAIN, True)
+-                if session.phase == "idle":
++                if session.phase == "preparing":
+                     if session.conversation is None:
+-                        # Fence even an uncertain conversation.open; never silently
+-                        # replace an unacknowledged mutation with a new one.
++                        # Persist intent before even an alias-opening mutation.
+                         session.phase = "sending"
+                         await self._save()
+                         opened = await self._request(
+                             client,
+-                            ConversationOpenRequest(
++                            ConversationOpenRequestEx(
+                                 project=self.settings.project,
++                                source=source,
++                                external_conversation=correlation,
+                                 max_model_calls=40,
+                                 max_turns=40,
+                             ),
+                         )
+                         session.conversation = required_text(opened.id)
+-                        session.phase = "idle"
++                        session.phase = "preparing"
+                         await self._save()
+-                    # Capture a stable ordinal before submitting this turn. History
+-                    # belongs to Plowshare; HA's transcript is never re-submitted.
++                    # Read an answer cursor once before this new turn. The SDK
++                    # facade resolves the alias inside the subsequent run operation.
+                     page = await self._request(
+                         client,
+                         ConversationTrajectoryRequest(
+@@ -201,36 +395,56 @@ class SdkConversationAgent:
+                     await self._save()
+                     started = await self._request(
+                         client,
+-                        AgentRunRequest(
++                        AgentRunRequestEx(
+                             agent=self.settings.agent,
+-                            conversation=session.conversation,
+-                            task=text,
++                            project=self.settings.project,
++                            source=source,
++                            external_conversation=correlation,
++                            task=body,
+                         ),
+                     )
+                     session.job = required_text(started.id)
+                     if started.conversation != session.conversation:
++                        # Possible admission is now uncertain; never read a foreign
++                        # receipt or infer that this mutation can be repeated.
+                         raise ValueError("Foreign Plowshare conversation reply")
+                     session.phase = "running"
+                     await self._save()
+-                # A pending question is reconciled instead of submitting the new
+-                # utterance. This avoids issuing duplicate house actions on retries.
+                 while True:
+                     answer = await self._poll(client, session)
+                     if answer is not None:
+-                        session.phase = "idle"
+-                        session.job = None
++                        if kind(request) == "task":
++                            # Keep the original terminal receipt while retained;
++                            # no model text is stored in the correlation journal.
++                            session.phase = "complete"
++                        else:
++                            session.phase = "idle"
++                            session.job = None
+                         await self._save()
+-                        return answer
++                        if answer.error:
++                            return GatewayResult("failed", message=answer.text)
++                        return GatewayResult("completed", text=answer.text)
+                     await asyncio.sleep(0.5)
+-        except Refusal:
+-            if session is not None and session.phase == "sending":
++        except Refusal as error:
++            if session is not None and session.phase == "preparing":
+                 session.phase = "idle"
+-                await self._save()
+-            return Answer(
+-                "Plowshare refused this request. Check the house agent's access and allowance.",
+-                True,
++            elif session is not None and session.phase == "sending":
++                # Ex failures can follow alias commit or job admission, including
++                # result-archive unavailability and post-handler authority fences.
++                # A negative reply alone is not proof that no mutation happened.
++                session.phase = (
++                    "idle" if error.code == "CAPACITY_EXHAUSTED" else "uncertain"
++                )
++                await self._record_failure()
++            if session is not None and session.phase == "uncertain":
++                return GatewayResult("uncertain", message=UNCERTAIN)
++            return GatewayResult(
++                "refused",
++                message="Plowshare refused this request. Check the agent's access and allowance.",
+             )
+         except (TransportError, TimeoutError, OSError, ValueError) as error:
++            if session is not None and session.phase == "preparing":
++                session.phase = "idle"
+             if session is not None and session.phase == "sending":
+                 session.phase = (
+                     "idle"
+@@ -238,33 +452,48 @@ class SdkConversationAgent:
+                     and error.delivery == Delivery.NOT_SUBMITTED
+                     else "uncertain"
+                 )
+-                await self._save()
++                await self._record_failure()
+             if session is not None and session.phase == "uncertain":
+-                return Answer(UNCERTAIN, True)
++                return GatewayResult("uncertain", message=UNCERTAIN)
++            if isinstance(error, ValueError):
++                return GatewayResult(
++                    "unavailable",
++                    message="The retained house-agent result could not be verified. Inspect it in Plowshare.",
++                )
+             if session is not None and session.job is not None:
+-                return Answer(PENDING)
+-            return Answer(
+-                "I could not reach the house agent. Please check the Plowshare connection.",
+-                True,
++                return GatewayResult("pending", message=PENDING)
++            return GatewayResult(
++                "unavailable",
++                message="I could not reach the house agent. Check the Plowshare connection.",
+             )
+         except asyncio.CancelledError:
++            if session is not None and session.phase == "preparing":
++                session.phase = "idle"
+             if session is not None and session.phase == "sending":
+                 session.phase = "uncertain"
+-                await self._save()
++                await self._record_failure()
+             raise
+         finally:
+-            try:
+-                if client is not None:
+-                    await self._close(client)
+-            finally:
+-                self._busy = False
++            if client is not None:
++                await self._close(client, lookup)
++            else:
++                self._release(lookup)
+ 
+     async def _poll(self, client: Client, session: Session) -> Answer | None:
+         if session.job is None or session.conversation is None:
+             raise ValueError("Pending turn has no retained job")
+-        if session.phase == "running":
++        if session.phase in {"running", "complete"}:
+             job = await self._request(client, JobStatusRequest(job=session.job))
+             self._check_job(job, session)
++            if session.phase == "complete":
++                if job.state != "DONE" or not isinstance(
++                    job.outcome, ObservedOutcomeDto
++                ):
++                    raise ValueError("Retained terminal result is unavailable")
++                # Completion was established and committed before publication.
++                # Retain that exact job rather than requiring old trajectory
++                # receipts to survive compaction/archive on every repeat read.
++                return self._answer(job.outcome)
+             if job.state != "DONE":
+                 return None
+             outcome = job.outcome
+@@ -301,6 +530,8 @@ class SdkConversationAgent:
+                 if isinstance(job.outcome, ObservedOutcomeDto):
+                     exported = await self._exported(client, session, job.id)
+                     if job.outcome.ending != "AWAITING" and not exported:
++                        session.job = job.id
++                        session.cursor = int(entry.ordinal)
+                         return self._answer(job.outcome)
+                     # A correlated reply can itself request more house evidence.
+                     # Follow that existing job rather than speaking its interim text.
+@@ -343,7 +574,11 @@ class SdkConversationAgent:
+                 )
+                 if entry.kind != "tool_result" or entry.tool_call_id not in calls:
+                     continue
+-                if entry.cut or not isinstance(entry.excerpt, str):
++                if (
++                    entry.cut
++                    or not isinstance(entry.excerpt, str)
++                    or len(entry.excerpt.encode("utf-8")) > 65536
++                ):
+                     raise ValueError("Cannot inspect retained Relay receipt")
+                 try:
+                     receipt = json.loads(entry.excerpt)
+diff --git a/integrations/home-assistant/assist/custom_components/plowshare/models.py b/integrations/home-assistant/assist/custom_components/plowshare/models.py
+index b6fce915..3690d335 100644
+--- a/integrations/home-assistant/assist/custom_components/plowshare/models.py
++++ b/integrations/home-assistant/assist/custom_components/plowshare/models.py
+@@ -77,7 +77,9 @@ class Settings:
+             raise ValueError("Anonymous voice access must be explicitly enabled")
+ 
+ 
+-Phase = Literal["idle", "sending", "running", "waiting", "uncertain"]
++Phase = Literal[
++    "idle", "sending", "running", "waiting", "uncertain", "complete", "preparing"
++]
+ 
+ 
+ @dataclass
+@@ -93,6 +95,9 @@ class Session:
+     job: str | None = None
+     phase: Phase = "idle"
+     cursor: int = 0
++    mapping: Literal["legacy", "external"] = "legacy"
++    binding: str | None = None
++    correlation: str | None = None
+ 
+ 
+ def session_key(
+@@ -122,6 +127,9 @@ def encode_sessions(sessions: dict[str, Session]) -> dict[str, object]:
+             "job": item.job,
+             "phase": item.phase,
+             "cursor": item.cursor,
++            "mapping": item.mapping,
++            "binding": item.binding,
++            "correlation": item.correlation,
+         }
+         for key, item in sessions.items()
+     }
+@@ -139,7 +147,19 @@ def decode_sessions(value: object) -> dict[str, Session]:
+             or len(key) != 64
+             or any(c not in "0123456789abcdef" for c in key)
+             or not isinstance(row, dict)
+-            or set(row) != {"conversation", "job", "phase", "cursor"}
++            or set(row)
++            not in (
++                {"conversation", "job", "phase", "cursor"},
++                {
++                    "conversation",
++                    "job",
++                    "phase",
++                    "cursor",
++                    "mapping",
++                    "binding",
++                    "correlation",
++                },
++            )
+         ):
+             raise ValueError("Invalid Assist session")
+         conversation, job, phase, cursor = (
+@@ -153,15 +173,56 @@ def decode_sessions(value: object) -> dict[str, Session]:
+                 required_text(identifier)
+         if (
+             not isinstance(phase, str)
+-            or phase not in {"idle", "sending", "running", "waiting", "uncertain"}
++            or phase
++            not in {
++                "idle",
++                "sending",
++                "running",
++                "waiting",
++                "uncertain",
++                "complete",
++                "preparing",
++            }
+             or type(cursor) is not int
+             or not 0 <= cursor <= 2_147_483_647
+-            or (phase in {"running", "waiting"} and (not job or not conversation))
++            or (
++                phase in {"running", "waiting", "complete"}
++                and (not job or not conversation)
++            )
+             or (job is not None and conversation is None)
+         ):
+             raise ValueError("Invalid Assist lifecycle state")
+-        # Restart during submission cannot establish whether the server accepted it.
++        mapping = row.get("mapping", "legacy")
++        binding, correlation = row.get("binding"), row.get("correlation")
++        if not isinstance(mapping, str) or mapping not in {"legacy", "external"}:
++            raise ValueError("Invalid Assist routing binding")
++        if mapping == "external":
++            for value in (binding, correlation):
++                if (
++                    not isinstance(value, str)
++                    or len(value) != 64
++                    or any(c not in "0123456789abcdef" for c in value)
++                ):
++                    raise ValueError("Invalid Assist routing binding")
++        elif (
++            phase not in {"idle", "sending", "running", "waiting", "uncertain"}
++            or binding is not None
++            or correlation is not None
++        ):
++            raise ValueError("Legacy correlation cannot invent routing authority")
++        # Old rows remain unbound and must not be imported into a new alias. A
++        # restart during submission cannot establish whether the server accepted it.
+         result[key] = Session(
+-            conversation, job, "uncertain" if phase == "sending" else phase, cursor
++            conversation,
++            job,
++            "uncertain"
++            if phase == "sending"
++            else "idle"
++            if phase == "preparing"
++            else phase,
++            cursor,
++            mapping,
++            binding,
++            correlation,
+         )
+     return result
+diff --git a/integrations/home-assistant/assist/custom_components/plowshare/requests.py b/integrations/home-assistant/assist/custom_components/plowshare/requests.py
+new file mode 100644
+index 00000000..9356f719
+--- /dev/null
++++ b/integrations/home-assistant/assist/custom_components/plowshare/requests.py
+@@ -0,0 +1,195 @@
++"""Typed HA inputs and truthful results at the public SDK boundary.
++
++HA system content is preserved inside an ordinary task/user envelope. These
++records never select platform credentials, projects, agents or tool grants.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from dataclasses import dataclass, field
++from typing import Literal
++
++from .const import MAX_TEXT
++from .models import required_text
++
++MAX_CONTEXT_BYTES = 256 * 1024
++MAX_ENVELOPE_BYTES = 320 * 1024
++
++
++def _text(value: object, maximum: int, *, empty: bool = False) -> str:
++    if not isinstance(value, str) or (not empty and not value.strip()):
++        raise ValueError("HA request text must be a string")
++    try:
++        size = len(value.encode("utf-8"))
++    except UnicodeError as error:
++        raise ValueError("HA request text must be valid Unicode") from error
++    if size > maximum or any(ord(c) < 32 and c not in "\n\r\t" for c in value):
++        raise ValueError("HA request text exceeds its resource boundary")
++    return value
++
++
++def correlation_key(value: object) -> str:
++    if (
++        not isinstance(value, str)
++        or len(value) != 64
++        or any(c not in "0123456789abcdef" for c in value)
++    ):
++        raise ValueError("A caller-partitioned HA correlation key is required")
++    return value
++
++
++def digest(parts: tuple[str | None, ...]) -> str:
++    return hashlib.sha256(
++        json.dumps(parts, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
++    ).hexdigest()
++
++
++@dataclass(frozen=True)
++class HaRequestContext:
++    """Prepared text and bounded provenance, without a native-role claim.
++
++    Identity fields partition work only. They are not sent as model prose and do
++    not impersonate a Plowshare user. HA authenticates them before constructing
++    the request; the configured SDK credential retains platform authority.
++    """
++
++    system_text: str = ""
++    language: str | None = None
++    user_id: str | None = field(default=None, repr=False)
++    device_id: str | None = field(default=None, repr=False)
++    satellite_id: str | None = field(default=None, repr=False)
++
++    def __post_init__(self) -> None:
++        _text(self.system_text, MAX_CONTEXT_BYTES, empty=True)
++        for value in (
++            self.language,
++            self.user_id,
++            self.device_id,
++            self.satellite_id,
++        ):
++            if value is not None:
++                required_text(value)
++
++    def identity(self) -> tuple[str | None, ...]:
++        return self.user_id, self.device_id, self.satellite_id
++
++
++@dataclass(frozen=True)
++class ConversationRequest:
++    key: str
++    text: str
++    context: HaRequestContext = field(default_factory=HaRequestContext)
++
++    def __post_init__(self) -> None:
++        correlation_key(self.key)
++        _text(self.text, MAX_TEXT * 4)
++        if len(self.text) > MAX_TEXT or type(self.context) is not HaRequestContext:
++            raise ValueError("Unsupported HA conversation input")
++
++
++@dataclass(frozen=True)
++class TaskRequest:
++    """One HA invocation; callers mint a fresh key for every new invocation.
++
++    Repeating an invocation key can reconcile its retained receipt, but this is
++    not a public indefinite idempotency API. HA supplies no durable task retry
++    identity. Entity callers must not resubmit old, evicted invocation keys.
++    """
++
++    key: str
++    instructions: str
++    context: HaRequestContext = field(default_factory=HaRequestContext)
++
++    def __post_init__(self) -> None:
++        correlation_key(self.key)
++        _text(self.instructions, MAX_TEXT * 4)
++        if (
++            len(self.instructions) > MAX_TEXT
++            or type(self.context) is not HaRequestContext
++        ):
++            raise ValueError("Unsupported HA task input")
++
++
++HaRequest = ConversationRequest | TaskRequest
++ResultStatus = Literal[
++    "completed", "pending", "uncertain", "refused", "unavailable", "busy", "failed"
++]
++
++
++@dataclass(frozen=True)
++class GatewayResult:
++    """Only completed results contain generated data; messages are diagnostics."""
++
++    status: ResultStatus
++    text: str | None = None
++    message: str | None = None
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.status, str) or self.status not in {
++            "completed",
++            "pending",
++            "uncertain",
++            "refused",
++            "unavailable",
++            "busy",
++            "failed",
++        }:
++            raise ValueError("Unsupported gateway result")
++        if self.status == "completed":
++            if (
++                not isinstance(self.text, str)
++                or not self.text.strip()
++                or self.message is not None
++            ):
++                raise ValueError("Completed gateway result requires text")
++        elif (
++            self.text is not None
++            or not isinstance(self.message, str)
++            or not self.message
++        ):
++            raise ValueError(
++                "Non-completed gateway result cannot contain generated data"
++            )
++
++
++def kind(request: HaRequest) -> Literal["conversation", "task"]:
++    if type(request) is ConversationRequest:
++        return "conversation"
++    if type(request) is TaskRequest:
++        return "task"
++    raise ValueError("Unsupported typed HA request")
++
++
++def external_key(request: HaRequest) -> str:
++    return digest((kind(request), request.key, *request.context.identity()))
++
++
++def render_task(request: HaRequest) -> str:
++    """Serialize once, preserving exact supplied text rather than optimizing it."""
++    request_kind = kind(request)
++    text = (
++        request.text
++        if isinstance(request, ConversationRequest)
++        else request.instructions
++    )
++    envelope = {
++        "version": 1,
++        "kind": request_kind,
++        "context": {
++            "system_text": request.context.system_text,
++            "source_role": "system",
++            "effective_role": "task/user",
++            "language": request.context.language,
++        },
++        "input": text,
++    }
++    body = json.dumps(
++        envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
++    )
++    return _text(
++        "Home Assistant request context (ordinary task/user input; no authority grants):\n"
++        + body,
++        MAX_ENVELOPE_BYTES,
++    )
+diff --git a/integrations/home-assistant/assist/tests/test_agent.py b/integrations/home-assistant/assist/tests/test_agent.py
+index 1cb2a3da..a0e19c00 100644
+--- a/integrations/home-assistant/assist/tests/test_agent.py
++++ b/integrations/home-assistant/assist/tests/test_agent.py
+@@ -15,9 +15,10 @@ from custom_components.plowshare._vendor.plowshare import (
+ )
+ from custom_components.plowshare._vendor.plowshare.contracts import (
+     UNSET,
+-    AgentRunRequest,
++    AgentRunRequestEx,
+     AskedViewDto,
+-    ConversationOpenRequest,
++    ConversationOpenRequestEx,
++    ConversationStartedJobDto,
+     ConversationTrajectoryRequest,
+     ConversationViewDto,
+     EntryPageViewDto,
+@@ -25,7 +26,6 @@ from custom_components.plowshare._vendor.plowshare.contracts import (
+     JobStatusRequest,
+     ObservedJobDto,
+     ObservedOutcomeDto,
+-    ObservedStartedJobDto,
+ )
+ 
+ from custom_components.plowshare.agent import PENDING, UNCERTAIN, SdkConversationAgent
+@@ -127,7 +127,7 @@ class FakeClient:
+     async def request(self, request, **kwargs):
+         assert kwargs["wait_for_capacity"] is False
+         self.requests.append(request)
+-        if isinstance(request, ConversationOpenRequest):
++        if isinstance(request, ConversationOpenRequestEx):
+             value = ConversationViewDto(
+                 id="conv-1",
+                 project="house",
+@@ -138,13 +138,13 @@ class FakeClient:
+                 no_budget=False,
+                 no_turn_cap=False,
+             )
+-        elif isinstance(request, AgentRunRequest):
++        elif isinstance(request, AgentRunRequestEx):
+             self.submitted.set()
+             if self.error is not None:
+                 raise self.error
+             if self.hold is not None:
+                 await self.hold.wait()
+-            value = ObservedStartedJobDto(id="job-1", conversation="conv-1")
++            value = ConversationStartedJobDto(id="job-1", conversation="conv-1")
+         elif isinstance(request, JobStatusRequest):
+             value = self.statuses.get(request.job) or (
+                 self.status
+@@ -167,7 +167,9 @@ class FakeClient:
+                 )
+         else:
+             value = ()
+-        return Reply("OK", None, value)
++        return Reply(
++            "ACCEPTED" if isinstance(request, AgentRunRequestEx) else "OK", None, value
++        )
+ 
+     async def close(self):
+         self.closed = True
+@@ -187,6 +189,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+             sessions,
+             save,
+             AsyncMock(return_value=client),
++            profile_id="fixture-entry:conversation",
+         )
+         return agent, client, snapshots
+ 
+@@ -196,13 +199,15 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         second = await agent.ask(KEY, "And outside?")
+         self.assertEqual(first.text, "The office is 22 degrees.")
+         self.assertFalse(second.error)
+-        runs = [r for r in client.requests if isinstance(r, AgentRunRequest)]
++        runs = [r for r in client.requests if isinstance(r, AgentRunRequestEx)]
+         self.assertEqual(
+-            [r.task for r in runs], ["What is the temperature?", "And outside?"]
++            [json.loads(r.task.split("\n", 1)[1])["input"] for r in runs],
++            ["What is the temperature?", "And outside?"],
+         )
+-        self.assertEqual([r.conversation for r in runs], ["conv-1", "conv-1"])
++        self.assertEqual(len({r.external_conversation for r in runs}), 1)
++        self.assertEqual(len({r.source for r in runs}), 1)
+         self.assertEqual(
+-            sum(isinstance(r, ConversationOpenRequest) for r in client.requests), 1
++            sum(isinstance(r, ConversationOpenRequestEx) for r in client.requests), 1
+         )
+         self.assertTrue(any(v[KEY]["phase"] == "sending" for v in snapshots))
+         self.assertTrue(client.closed)
+@@ -217,7 +222,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         answer = await agent.ask(KEY, "Turn the light on")
+         self.assertEqual(answer.text, "The light is on.")
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+         reads = [
+             r for r in client.requests if isinstance(r, ConversationTrajectoryRequest)
+@@ -261,7 +266,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         answer = await agent.ask(KEY, "Why is the office warm?")
+         self.assertEqual(answer.text, "The office is warm because the heater is on.")
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+ 
+     async def test_relay_wait_survives_restart_and_reuses_accepted_job(self):
+@@ -272,7 +277,11 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         saved = decode_sessions(encode_sessions(agent.sessions))
+         self.assertEqual(saved[KEY].phase, "waiting")
+         restored = SdkConversationAgent(
+-            SETTINGS, saved, AsyncMock(), AsyncMock(return_value=client)
++            SETTINGS,
++            saved,
++            AsyncMock(),
++            AsyncMock(return_value=client),
++            profile_id="fixture-entry:conversation",
+         )
+         client.entries = (
+             *client.entries,
+@@ -282,7 +291,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+             (await restored.ask(KEY, "Did it work?")).text, "The light is on."
+         )
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+ 
+     async def test_stalled_cleanup_keeps_admission_until_physical_drain(self):
+@@ -304,14 +313,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         self.assertEqual((await agent.ask(KEY, "Turn on the light")).text, PENDING)
+         saved = decode_sessions(encode_sessions(agent.sessions))
+         restored = SdkConversationAgent(
+-            SETTINGS, saved, AsyncMock(), AsyncMock(return_value=client)
++            SETTINGS,
++            saved,
++            AsyncMock(),
++            AsyncMock(return_value=client),
++            profile_id="fixture-entry:conversation",
+         )
+         client.status = job(text="The light is on.")
+         self.assertEqual(
+             (await restored.ask(KEY, "Is it done?")).text, "The light is on."
+         )
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+ 
+     async def test_lost_acknowledgment_is_retained_and_never_replayed(self):
+@@ -321,16 +334,16 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         client.error = None
+         self.assertEqual((await agent.ask(KEY, "Try again")).text, UNCERTAIN)
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+         self.assertEqual(
+             decode_sessions(encode_sessions(agent.sessions))[KEY].phase, "uncertain"
+         )
+ 
+-    async def test_known_non_submission_and_refusal_do_not_wedge_session(self):
++    async def test_known_non_submission_and_capacity_refusal_do_not_wedge_session(self):
+         for error in (
+             TransportError(Delivery.NOT_SUBMITTED, "fixture"),
+-            Refusal("FORBIDDEN", "private detail"),
++            Refusal("CAPACITY_EXHAUSTED", "private detail"),
+         ):
+             with self.subTest(error=type(error).__name__):
+                 agent, client, _ = self.make()
+@@ -352,7 +365,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
+         self.assertEqual(agent.sessions[KEY].phase, "uncertain")
+         self.assertTrue(client.closed)
+         self.assertEqual(
+-            sum(isinstance(r, AgentRunRequest) for r in client.requests), 1
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
+         )
+ 
+     async def test_failure_or_budget_stop_never_speaks_partial_model_prose(self):
+diff --git a/integrations/home-assistant/assist/tests/test_gateway.py b/integrations/home-assistant/assist/tests/test_gateway.py
+new file mode 100644
+index 00000000..9912c46f
+--- /dev/null
++++ b/integrations/home-assistant/assist/tests/test_gateway.py
+@@ -0,0 +1,499 @@
++"""Shared SDK gateway contract, isolation and uncertain physical ownership."""
++
++import asyncio
++import json
++import unittest
++from dataclasses import replace
++from unittest.mock import AsyncMock, patch
++
++import support  # noqa: F401
++from custom_components.plowshare._vendor.plowshare import (
++    Delivery,
++    Refusal,
++    Reply,
++    TransportError,
++)
++from custom_components.plowshare._vendor.plowshare.contracts import (
++    AgentListRequest,
++    AgentRunRequestEx,
++    AgentViewDto,
++    ConversationOpenRequestEx,
++    ConversationStartedJobDto,
++    JobStatusRequest,
++    ObservedJobDto,
++)
++from test_agent import KEY, SETTINGS, FakeClient, entry, job, publication
++
++from custom_components.plowshare.agent import SdkConversationAgent
++from custom_components.plowshare.models import decode_sessions, encode_sessions
++from custom_components.plowshare.requests import (
++    MAX_CONTEXT_BYTES,
++    ConversationRequest,
++    GatewayResult,
++    HaRequestContext,
++    TaskRequest,
++    digest,
++    render_task,
++)
++
++PROFILE = "fixture-installation/config-entry:conversation"
++OTHER_KEY = digest(("another-invocation",))
++
++
++def conversation(key=KEY, context=None):
++    return ConversationRequest(key, "What is happening?", context or HaRequestContext())
++
++
++def task(key=KEY):
++    return TaskRequest(key, "Summarize the supplied data.")
++
++
++class GatewayTests(unittest.IsolatedAsyncioTestCase):
++    def make(
++        self, settings=SETTINGS, sessions=None, profile=PROFILE, client=None, save=None
++    ):
++        client = client or FakeClient()
++        sessions = sessions if sessions is not None else {}
++        snapshots = []
++
++        async def committed():
++            snapshots.append(encode_sessions(sessions))
++
++        agent = SdkConversationAgent(
++            settings,
++            sessions,
++            save or committed,
++            AsyncMock(return_value=client),
++            profile_id=profile,
++        )
++        return agent, client, snapshots
++
++    async def test_all_enabled_agents_validated_from_one_project_snapshot(self):
++        agent, client, _ = self.make()
++
++        async def available(request, **kwargs):
++            client.requests.append(request)
++            return Reply(
++                "OK",
++                None,
++                tuple(
++                    AgentViewDto(
++                        name=name,
++                        bot=False,
++                        calls=(),
++                        description="",
++                        model=None,
++                        orchestrations=(),
++                        preferred=False,
++                        scopes=(),
++                        served=True,
++                        tools=(),
++                        withheld=(),
++                    )
++                    for name in ("house_coordinator", "reader", "task")
++                ),
++            )
++
++        client.request = available
++        await agent.validate(("house_coordinator", "reader", "task"))
++        self.assertEqual(len(client.requests), 1)
++        self.assertIsInstance(client.requests[0], AgentListRequest)
++        self.assertEqual(client.requests[0].project, SETTINGS.project)
++        client.requests.clear()
++        with self.assertRaises(ValueError):
++            await agent.validate(("reader", "missing"))
++        self.assertEqual(len(client.requests), 1)
++        self.assertFalse(any(isinstance(r, AgentRunRequestEx) for r in client.requests))
++        for names in ((" ",), ["reader"], ("reader",) * 17):
++            with self.assertRaises(ValueError):
++                await agent.validate(names)
++
++    async def test_prepared_text_preserved_in_existing_task_field(self):
++        agent, client, snapshots = self.make()
++        system = '  Résumé "home"\r\n\tα 🏠  '
++        context = HaRequestContext(
++            system, "en", "private-user", "private-device", "private-satellite"
++        )
++        result = await agent.converse(conversation(context=context))
++        self.assertEqual(result.status, "completed")
++        runs = [r for r in client.requests if isinstance(r, AgentRunRequestEx)]
++        opens = [r for r in client.requests if isinstance(r, ConversationOpenRequestEx)]
++        self.assertEqual(len(runs), 1)
++        self.assertEqual(len(opens), 1)
++        self.assertEqual(
++            (runs[0].source, runs[0].external_conversation),
++            (opens[0].source, opens[0].external_conversation),
++        )
++        self.assertRegex(runs[0].source, r"^ha\.conversation\.[0-9a-f]{64}$")
++        envelope = json.loads(runs[0].task.split("\n", 1)[1])
++        self.assertEqual(envelope["context"]["system_text"], system)
++        self.assertEqual(envelope["context"]["effective_role"], "task/user")
++        self.assertEqual(envelope["input"], "What is happening?")
++        self.assertNotIn("private-user", runs[0].task)
++        self.assertNotIn("private-device", runs[0].task)
++        self.assertNotIn("private-satellite", runs[0].task)
++        self.assertNotIn(system, json.dumps(snapshots))
++        self.assertNotIn("fixture-token", json.dumps(snapshots))
++        self.assertFalse(
++            any(
++                r.operation
++                in {"conversation.open", "agent.run", "conversation.alias.resolve"}
++                for r in client.requests
++            )
++        )
++
++    async def test_accidentally_reused_key_cannot_join_other_identity(self):
++        agent, client, _ = self.make()
++        for context in (
++            HaRequestContext("alice instructions", user_id="alice", device_id="one"),
++            HaRequestContext("bob instructions", user_id="bob", device_id="one"),
++            HaRequestContext("other device", user_id="alice", device_id="two"),
++        ):
++            self.assertEqual(
++                (await agent.converse(conversation(context=context))).status,
++                "completed",
++            )
++        opens = [r for r in client.requests if isinstance(r, ConversationOpenRequestEx)]
++        self.assertEqual(len({r.external_conversation for r in opens}), 3)
++        self.assertEqual(len(agent.sessions), 3)
++
++    async def test_conversation_and_task_have_separate_core_sources(self):
++        agent, client, _ = self.make()
++        await agent.converse(conversation())
++        await agent.generate(task())
++        opens = [r for r in client.requests if isinstance(r, ConversationOpenRequestEx)]
++        self.assertEqual(len(opens), 2)
++        self.assertNotEqual(opens[0].source, opens[1].source)
++        self.assertNotEqual(
++            opens[0].external_conversation, opens[1].external_conversation
++        )
++
++    async def test_task_result_and_retained_terminal_receipt_are_distinct_from_pending_prose(
++        self,
++    ):
++        agent, client, _ = self.make()
++        first = await agent.generate(task())
++        self.assertEqual(first.status, "completed")
++        self.assertIsNone(first.message)
++        row = next(iter(agent.sessions.values()))
++        self.assertEqual((row.phase, row.job), ("complete", "job-1"))
++        saved = decode_sessions(encode_sessions(agent.sessions))
++        restored, _, _ = self.make(sessions=saved, client=client)
++        self.assertEqual((await restored.generate(task())).text, first.text)
++        self.assertEqual(
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++        )
++
++    async def test_pending_task_restart_reconciles_exact_original_job(self):
++        agent, client, _ = self.make(settings=replace(SETTINGS, response_timeout=0.02))
++        client.status = ObservedJobDto(
++            id="job-1", conversation="conv-1", state="RUNNING"
++        )
++        result = await agent.generate(task())
++        self.assertEqual(result.status, "pending")
++        self.assertIsNone(result.text)
++        restored, _, _ = self.make(
++            sessions=decode_sessions(encode_sessions(agent.sessions)), client=client
++        )
++        client.status = job(text="Completed original task")
++        result = await restored.generate(task())
++        self.assertEqual(
++            (result.status, result.text), ("completed", "Completed original task")
++        )
++        self.assertEqual(
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++        )
++
++    async def test_identical_instructions_in_distinct_invocations_can_run_concurrently(
++        self,
++    ):
++        first, second = FakeClient(), FakeClient()
++        first.hold = second.hold = asyncio.Event()
++        agent, _, _ = self.make()
++        agent.connect = AsyncMock(side_effect=[first, second])
++        one = asyncio.create_task(agent.generate(task()))
++        two = asyncio.create_task(agent.generate(task(OTHER_KEY)))
++        await asyncio.wait_for(
++            asyncio.gather(first.submitted.wait(), second.submitted.wait()), 1
++        )
++        first.hold.set()
++        results = await asyncio.gather(one, two)
++        self.assertEqual([r.status for r in results], ["completed", "completed"])
++        run_one = next(r for r in first.requests if isinstance(r, AgentRunRequestEx))
++        run_two = next(r for r in second.requests if isinstance(r, AgentRunRequestEx))
++        self.assertNotEqual(
++            run_one.external_conversation, run_two.external_conversation
++        )
++
++    async def test_fifth_physical_request_refused_before_dispatch(self):
++        clients = [FakeClient() for _ in range(4)]
++        release = asyncio.Event()
++        for client in clients:
++            client.hold = release
++        agent, _, _ = self.make()
++        agent.connect = AsyncMock(side_effect=clients)
++        calls = [
++            asyncio.create_task(agent.generate(task(digest((str(i),)))))
++            for i in range(4)
++        ]
++        await asyncio.wait_for(
++            asyncio.gather(*(client.submitted.wait() for client in clients)), 1
++        )
++        self.assertEqual(
++            (await agent.generate(task(digest(("fifth",))))).status, "busy"
++        )
++        self.assertEqual(agent.connect.await_count, 4)
++        release.set()
++        self.assertEqual(
++            [result.status for result in await asyncio.gather(*calls)],
++            ["completed"] * 4,
++        )
++
++    async def test_routing_token_and_profile_changes_fence_old_work_before_connect(
++        self,
++    ):
++        agent, client, _ = self.make(settings=replace(SETTINGS, response_timeout=0.02))
++        client.status = ObservedJobDto(
++            id="job-1", conversation="conv-1", state="RUNNING"
++        )
++        await agent.converse(conversation())
++        saved = encode_sessions(agent.sessions)
++        for settings, profile in (
++            (replace(SETTINGS, origin="https://other.example.invalid"), PROFILE),
++            (replace(SETTINGS, token="rotated-token"), PROFILE),
++            (replace(SETTINGS, project="other"), PROFILE),
++            (replace(SETTINGS, agent="other"), PROFILE),
++            (SETTINGS, "different-installation/profile"),
++        ):
++            with self.subTest(profile=profile, project=settings.project):
++                changed, _, _ = self.make(settings, decode_sessions(saved), profile)
++                result = await changed.converse(conversation())
++                self.assertEqual(result.status, "uncertain")
++                self.assertIsNone(result.text)
++                changed.connect.assert_not_awaited()
++                self.assertEqual(encode_sessions(changed.sessions), saved)
++
++    async def test_unbound_legacy_journals_are_never_bypassed(self):
++        for phase in ("idle", "sending", "uncertain", "running", "waiting"):
++            with self.subTest(phase=phase):
++                value = {
++                    KEY: {
++                        "conversation": "old-conversation",
++                        "job": "old-job" if phase in {"running", "waiting"} else None,
++                        "phase": phase,
++                        "cursor": 0,
++                    }
++                }
++                sessions = decode_sessions(value)
++                agent, _, _ = self.make(sessions=sessions)
++                before = encode_sessions(sessions)
++                self.assertEqual(
++                    (await agent.converse(conversation())).status, "uncertain"
++                )
++                self.assertTrue((await agent.ask(KEY, "Retry")).error)
++                agent.connect.assert_not_awaited()
++                self.assertEqual(encode_sessions(sessions), before)
++
++    async def test_missing_installation_identity_never_uses_universal_namespace(self):
++        agent, client, _ = self.make(profile=None)
++        self.assertEqual((await agent.generate(task())).status, "refused")
++        agent.connect.assert_not_awaited()
++        self.assertEqual(client.requests, [])
++
++    async def test_failed_durable_intent_prevents_alias_or_run_mutation(self):
++        agent, client, _ = self.make(
++            save=AsyncMock(side_effect=OSError("private failure"))
++        )
++        result = await agent.generate(task())
++        self.assertEqual(result.status, "uncertain")
++        self.assertFalse(
++            any(
++                isinstance(r, (ConversationOpenRequestEx, AgentRunRequestEx))
++                for r in client.requests
++            )
++        )
++        self.assertNotIn("private failure", result.message)
++        self.assertEqual(next(iter(agent.sessions.values())).phase, "uncertain")
++
++    async def test_ambiguous_ex_refusal_never_replays_after_restart(self):
++        for code in ("ARCHIVE_UNAVAILABLE", "FORBIDDEN", "INTERNAL", "UNAVAILABLE"):
++            with self.subTest(code=code):
++                agent, client, _ = self.make()
++                client.error = Refusal(code, "private provider details")
++                first = await agent.generate(task())
++                self.assertEqual(first.status, "uncertain")
++                restored, _, _ = self.make(
++                    sessions=decode_sessions(encode_sessions(agent.sessions)),
++                    client=client,
++                )
++                client.error = None
++                self.assertEqual((await restored.generate(task())).status, "uncertain")
++                self.assertNotIn("private", first.message)
++                self.assertEqual(
++                    sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++                )
++
++    async def test_foreign_run_receipt_is_retained_uncertain_not_polled_or_replayed(
++        self,
++    ):
++        client = FakeClient()
++        request = client.request
++
++        async def foreign(value, **kwargs):
++            reply = await request(value, **kwargs)
++            if isinstance(value, AgentRunRequestEx):
++                return Reply(
++                    "ACCEPTED",
++                    None,
++                    ConversationStartedJobDto(
++                        id="foreign-job", conversation="foreign-conversation"
++                    ),
++                )
++            return reply
++
++        client.request = foreign
++        agent, _, _ = self.make(client=client)
++        self.assertEqual((await agent.generate(task())).status, "uncertain")
++        self.assertEqual((await agent.generate(task())).status, "uncertain")
++        self.assertFalse(any(isinstance(r, JobStatusRequest) for r in client.requests))
++        self.assertEqual(
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++        )
++
++    async def test_failed_sdk_close_quarantines_its_physical_owner(self):
++        agent, client, _ = self.make()
++        client.close = AsyncMock(
++            side_effect=TransportError(Delivery.UNKNOWN, "private cleanup")
++        )
++        self.assertEqual((await agent.generate(task())).status, "completed")
++        await asyncio.sleep(0)
++        self.assertEqual((await agent.generate(task())).status, "busy")
++        with patch("custom_components.plowshare.agent.CLEANUP_TIMEOUT", 0.01):
++            self.assertFalse(await agent.async_close())
++        self.assertEqual(
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++        )
++
++    async def test_cancelled_sdk_close_does_not_free_physical_owner(self):
++        agent, client, _ = self.make()
++
++        async def cancelled():
++            raise asyncio.CancelledError
++
++        client.close = cancelled
++        with self.assertRaises(asyncio.CancelledError):
++            await agent.generate(task())
++        await asyncio.sleep(0)
++        self.assertEqual((await agent.generate(task())).status, "busy")
++        with patch("custom_components.plowshare.agent.CLEANUP_TIMEOUT", 0.01):
++            self.assertFalse(await agent.async_close())
++
++    async def test_unload_wait_is_finite_and_never_cancels_accepted_work(self):
++        agent, client, _ = self.make()
++        client.hold = asyncio.Event()
++        pending = asyncio.create_task(agent.generate(task()))
++        await asyncio.wait_for(client.submitted.wait(), 1)
++        with patch("custom_components.plowshare.agent.CLEANUP_TIMEOUT", 0.01):
++            self.assertFalse(await agent.async_close())
++        self.assertFalse(pending.done())
++        client.hold.set()
++        self.assertEqual((await pending).status, "completed")
++        self.assertTrue(await agent.async_close())
++        self.assertEqual((await agent.generate(task(OTHER_KEY))).status, "busy")
++
++    async def test_correlated_task_completion_retains_final_job_without_old_trajectory(
++        self,
++    ):
++        agent, client, _ = self.make()
++        client.status = job(text="Evidence requested")
++        client.entries = (
++            *publication(),
++            entry(3, identity="reply-job", text="The light is on."),
++        )
++        first = await agent.generate(task())
++        self.assertEqual(first.text, "The light is on.")
++        row = next(iter(agent.sessions.values()))
++        self.assertEqual((row.phase, row.job), ("complete", "reply-job"))
++        client.entries = ()
++        second = await agent.generate(task())
++        self.assertEqual(second.text, first.text)
++        self.assertEqual(
++            sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 1
++        )
++
++    async def test_saturated_journal_keeps_every_unsettled_record(self):
++        settings = replace(SETTINGS, response_timeout=0.02)
++        agent, client, _ = self.make(settings=settings)
++        client.status = ObservedJobDto(
++            id="job-1", conversation="conv-1", state="RUNNING"
++        )
++        with patch("custom_components.plowshare.agent.MAX_SESSIONS", 2):
++            await agent.generate(task())
++            await agent.generate(task(OTHER_KEY))
++            saved = encode_sessions(agent.sessions)
++            result = await agent.generate(task(digest(("third",))))
++            self.assertEqual(result.status, "busy")
++            self.assertEqual(encode_sessions(agent.sessions), saved)
++            self.assertEqual(
++                sum(isinstance(r, AgentRunRequestEx) for r in client.requests), 2
++            )
++
++
++class GatewayBoundaryTests(unittest.TestCase):
++    def test_invalid_context_request_and_result_invariants(self):
++        for text in (None, "bad\x00text", "x" * (MAX_CONTEXT_BYTES + 1), "\ud800"):
++            with (
++                self.subTest(text_type=type(text).__name__),
++                self.assertRaises(ValueError),
++            ):
++                HaRequestContext(text)
++        for cls in (ConversationRequest, TaskRequest):
++            for key, text, context in (
++                ("not-partitioned", "hello", HaRequestContext()),
++                (KEY, "", HaRequestContext()),
++                (KEY, "hello", {}),
++            ):
++                with self.assertRaises(ValueError):
++                    cls(key, text, context)
++        for status in ("pending", "uncertain", "refused", "failed"):
++            with self.assertRaises(ValueError):
++                GatewayResult(status, text="Pending is not generated data")
++        with self.assertRaises(ValueError):
++            GatewayResult("completed", text="")
++
++    def test_codec_rejects_malformed_routing_metadata_without_type_errors(self):
++        base = {
++            "conversation": "conversation",
++            "job": None,
++            "phase": "idle",
++            "cursor": 0,
++            "mapping": "external",
++            "binding": "a" * 64,
++            "correlation": "b" * 64,
++        }
++        for name, value in (
++            ("mapping", []),
++            ("mapping", {}),
++            ("binding", []),
++            ("binding", "bad"),
++            ("correlation", None),
++        ):
++            row = {**base, name: value}
++            with (
++                self.subTest(name=name, value_type=type(value).__name__),
++                self.assertRaises(ValueError),
++            ):
++                decode_sessions({KEY: row})
++        preparing = decode_sessions({KEY: {**base, "phase": "preparing"}})
++        self.assertEqual(preparing[KEY].phase, "idle")
++        self.assertNotIn("system_text", json.dumps(encode_sessions(preparing)))
++
++    def test_serialization_has_no_native_role_or_credential_field(self):
++        payload = render_task(
++            conversation(context=HaRequestContext("precise source text"))
++        )
++        decoded = json.loads(payload.split("\n", 1)[1])
++        self.assertEqual(decoded["context"]["effective_role"], "task/user")
++        self.assertNotIn("messages", decoded)
++        self.assertNotIn("agent", decoded)
++        self.assertNotIn("project", decoded)
+diff --git a/integrations/home-assistant/assist/tests/test_socket.py b/integrations/home-assistant/assist/tests/test_socket.py
+index ac5c7ca3..a68982c1 100644
+--- a/integrations/home-assistant/assist/tests/test_socket.py
++++ b/integrations/home-assistant/assist/tests/test_socket.py
+@@ -13,7 +13,7 @@ from websockets.asyncio.server import serve
+ from custom_components.plowshare.agent import UNCERTAIN, SdkConversationAgent
+ from custom_components.plowshare.models import Settings, session_key
+ 
+-CONVERSATION = "11111111-1111-4111-8111-111111111111"
++CONVERSATION = "cnv_fixture_home_conversation"
+ JOB = "22222222-2222-4222-8222-222222222222"
+ 
+ 
+@@ -21,6 +21,7 @@ class Peer:
+     def __init__(self):
+         self.frames = []
+         self.lost_ack = False
++        self.refusal_code = None
+         self.authorization = None
+ 
+     async def handle(self, socket):
+@@ -37,13 +38,14 @@ class Peer:
+                 row = json.loads(text)
+                 self.frames.append(row)
+                 operation = row["type"]
++                code = "OK"
+                 if operation == "transport.dispatch":
+                     payload = {
+                         "mode": "concurrent-v1",
+                         "maxPending": 64,
+                         "maxIdBytes": 128,
+                     }
+-                elif operation == "conversation.open":
++                elif operation == "conversation.open.ex":
+                     payload = {
+                         "id": CONVERSATION,
+                         "project": "house",
+@@ -64,7 +66,8 @@ class Peer:
+                         "oldest": None,
+                         "more": None,
+                     }
+-                elif operation == "agent.run":
++                elif operation == "agent.run.ex":
++                    code = self.refusal_code or "ACCEPTED"
+                     if self.lost_ack:
+                         await socket.close()
+                         continue
+@@ -73,6 +76,8 @@ class Peer:
+                         "conversation": CONVERSATION,
+                         "agent": "house_coordinator",
+                     }
++                    if self.refusal_code:
++                        payload = None
+                 elif operation == "job.status":
+                     payload = {
+                         "id": JOB,
+@@ -91,7 +96,7 @@ class Peer:
+                         "id": row["id"],
+                         "type": operation,
+                         "protocol_version": "plowshare-v1",
+-                        "payload": {"code": "OK", "payload": payload},
++                        "payload": {"code": code, "payload": payload},
+                     }
+                 ).encode()
+                 sending.append(asyncio.create_task(packets.send(response, socket.send)))
+@@ -101,9 +106,10 @@ class Peer:
+ 
+ 
+ class SocketTests(unittest.IsolatedAsyncioTestCase):
+-    async def run_case(self, lost_ack):
++    async def run_case(self, lost_ack, refusal_code=None):
+         peer = Peer()
+         peer.lost_ack = lost_ack
++        peer.refusal_code = refusal_code
+         async with serve(
+             peer.handle, "127.0.0.1", 0, subprotocols=[PROTOCOL]
+         ) as server:
+@@ -115,23 +121,41 @@ class SocketTests(unittest.IsolatedAsyncioTestCase):
+                 "house_coordinator",
+             )
+             settings = replace(settings, response_timeout=2)
+-            agent = SdkConversationAgent(settings, {}, AsyncMock())
++            agent = SdkConversationAgent(
++                settings, {}, AsyncMock(), profile_id="fixture-entry:conversation"
++            )
+             key = session_key("chat", "alice", None, None, False)
+             first = await agent.ask(key, "How warm is the office?")
+-            if lost_ack:
++            if lost_ack or refusal_code:
+                 self.assertEqual(first.text, UNCERTAIN)
+                 self.assertEqual((await agent.ask(key, "Try again")).text, UNCERTAIN)
+             else:
+                 self.assertFalse(first.error, first.text)
+                 self.assertEqual(first.text, "The office is 22 degrees.")
+             self.assertEqual(peer.authorization, "Bearer fixture-token")
+-            runs = [row for row in peer.frames if row["type"] == "agent.run"]
++            runs = [row for row in peer.frames if row["type"] == "agent.run.ex"]
+             self.assertEqual(len(runs), 1)
+-            self.assertEqual(runs[0]["payload"]["conversation"], CONVERSATION)
+-            self.assertEqual(runs[0]["payload"]["task"], "How warm is the office?")
++            self.assertEqual(runs[0]["payload"]["project"], "house")
++            opens = [
++                row for row in peer.frames if row["type"] == "conversation.open.ex"
++            ]
++            self.assertEqual(len(opens), 1)
++            self.assertEqual(
++                runs[0]["payload"]["externalConversation"],
++                opens[0]["payload"]["externalConversation"],
++            )
++            self.assertEqual(
++                runs[0]["payload"]["source"], opens[0]["payload"]["source"]
++            )
++            self.assertNotIn("conversation", runs[0]["payload"])
++            envelope = json.loads(runs[0]["payload"]["task"].split("\n", 1)[1])
++            self.assertEqual(envelope["input"], "How warm is the office?")
+ 
+     async def test_actual_sdk_segmented_round_trip(self):
+         await self.run_case(False)
+ 
+     async def test_actual_sdk_disconnect_after_submission_never_replays(self):
+         await self.run_case(True)
++
++    async def test_actual_sdk_ambiguous_ex_refusal_never_replays(self):
++        await self.run_case(False, "ARCHIVE_UNAVAILABLE")
+diff --git a/docs/reviews/home-assistant-ha-05-v2-implementation.md b/docs/reviews/home-assistant-ha-05-v2-implementation.md
+new file mode 100644
+index 00000000..a6b82656
+--- /dev/null
++++ b/docs/reviews/home-assistant-ha-05-v2-implementation.md
+@@ -0,0 +1,177 @@
++# HA-05 shared SDK gateway implementation — v2
++
++Implementer: `/root/ha_gateway_sdk_implementer`.
++Status: v2 implementation and coordinator checks passed; ready for independent v2 review. Not yet accepted.
++No build, runtime test, package installation or live action was run by the
++implementer. This report does not establish node completion or runtime enablement.
++
++## Public contract and scope
++
++The implementation changes only the HA adapter's Python gateway/models, a new
++`requests.py` typed boundary, and its gateway/SDK fixture tests. No Plowshare
++core, SDK, shared protocol, schema or Java source is changed. Component setup,
++configuration, entity lifecycle, installation packaging and publication guards
++remain owned by later deliverables and are unchanged by this implementation.
++
++`GatewayPort` exposes `converse(ConversationRequest)` and `generate(TaskRequest)`.
++Both use immutable `HaRequestContext` and return `GatewayResult`. Only
++`status == "completed"` carries generated `.text`; all non-completions carry
++safe `.message` diagnostics. The existing `ask(key, text) -> Answer` remains a
++Conversation presentation wrapper. AI Task consumers must use `generate`, never
++interpret the legacy pending sentence as completed data.
++
++Prepared HA system text, language and current input are deterministically
++serialized into the existing public SDK `task` string. Source text is preserved
++without whitespace/Unicode normalization or cache optimization. The envelope
++explicitly says task/user semantics. It does not promise a native system role or
++special compaction retention, change the selected agent, or confer tool grants.
++Typed user/device/satellite provenance partitions identity but is excluded from
++model prose. Unsupported input and resource-bound violations fail before SDK
++mutation. Generated answer prose is returned intact.
++
++## Namespace, routing and old state
++
++New work requires an explicit constructor `profile_id` combining stable
++installation/config-entry identity and the selected profile. There is no
++universal submission namespace fallback. Omitting it permits the read-only
++validation method only. Settings retain the explicit server origin, credential,
++project and selected agent; request DTOs cannot choose those routing values.
++
++The public source is lower-case `ha.<kind>.<profile digest>`, and the visible
++external ID hashes request kind, supplied caller-partitioned key and HA identity.
++Conversation and task sources are distinct. Stable local lookup is independent
++of mutable connection/agent settings. A retained routing digest binds origin,
++credential identity, project, agent, profile and kind. It contains no plaintext
++credential. A changed credential is conservatively treated as a changed route:
++no public API is invented to assert that two tokens represent the same account.
++Old receipts cannot silently resume or submit on the changed route.
++
++A bounded retained-correlation scan prevents changing profile lookup from
++bypassing old work. Original four-field state rows decode as unbound legacy
++records and remain quarantined, including idle records with old history. Neither
++typed intake nor `ask` imports their internal ID into a new alias or creates a
++replacement run. Explicit operator migration/inspection or a new HA conversation
++is required; no history-continuation claim is made for a newly created alias.
++
++New state stores only internal conversation/job receipts, phase/cursor and routing
++hashes. The core owns external-ID mapping. `preparing` denotes pre-mutation
++connect/read work and restarts idle; `sending` restarts uncertain. Unknown and
++pending rows, and all unbound legacy rows, are never evicted. At the bounded
++journal limit, only known external idle or completed records can make room.
++
++Task completion retains the exact final job receipt, including a final job
++produced by correlated Relay follow-up. Re-reading a retained completion uses
++that job's public status rather than requiring old trajectory to survive archive
++or compaction. Terminal receipt retention is bounded, not an indefinite public
++idempotency API. HA Task callers must mint a fresh internal invocation key for
++each new HA invocation and must not expose arbitrary old-key replay; HA supplies
++no durable caller task retry key. Identical instructions in distinct invocations
++are distinct work. Pending/uncertain identities remain fenced.
++
++## Mutation, recovery and physical ownership
++
++The durable save callback must commit intent or raise within its owning budget.
++The current HA `Store.async_save` is not claimed to provide that guarantee:
++setup/storage owners must supply verified persistence before runtime enablement.
++A shared writer must serialize snapshot commits across profile gateways. The
++gateway saves intent before alias-open and run transmission, retains accepted
++receipts before polling, and never reconstructs success from interim prose.
++
++New sessions call `conversation.open.ex` once to establish the alias, then
++`agent.run.ex` resolves that existing selector inside the normal operation. No
++client alias-resolve RPC or direct core access is added. Existing retained jobs
++are checked instead of submitting a new utterance. Only completed `ANSWERED`
++output is data; Relay publication acknowledgements, reasoning, tool previews and
++failed/capped partial prose are not completed results.
++
++A negative Ex reply alone is not no-effect proof. Archive unavailability and
++post-handler authority fences may follow admission/commit. Sending state therefore
++becomes uncertain after ambiguous refusals, including `ARCHIVE_UNAVAILABLE` and
++`FORBIDDEN`. Only proven pre-handler `CAPACITY_EXHAUSTED` or the SDK's
++`Delivery.NOT_SUBMITTED` clears sending. No automatic mutation retry is performed.
++Cancellation and caller wait expiry preserve receipt/uncertainty and do not cancel
++accepted server work. Diagnostics do not disclose exception payloads.
++
++Admission is per qualified request identity, with four physical SDK owners per
++gateway. Unrelated invocations can proceed concurrently. Close has a separate
++finite wait; delayed cleanup retains its slot, and failed/cancelled close is
++quarantined rather than treated as physical settlement. `async_close() -> bool`
++stops intake and waits finitely without cancelling accepted calls. A false result
++requires the HA lifecycle owner to retain the gateway and refuse disposal/reload.
++Each control/storage read has its existing explicit finite budget; the separate
++response wait is not an invented two-second job lifetime.
++
++`validate(required_agents=())` validates either the selected agent or a bounded
++explicit tuple of enabled profile agents against one public project catalogue
++snapshot, without opening aliases or model work.
++
++## Pre-freeze independent findings addressed
++
++The independent reviewer identified these issues while implementation was in
++progress; author corrections and owning cases were added before candidate freeze:
++
++- Failed/cancelled SDK close must retain physical ownership.
++- A completed correlated task must retain its final job receipt.
++- Malformed stored mapping types must raise the codec's safe `ValueError`.
++- Ambiguous negative Ex replies must not reset sending and permit replacement.
++
++The real segmented SDK fixture now uses Open-Ex `OK`, Run-Ex `ACCEPTED`, a valid
++`cnv_` conversation result shape, the ordinary envelope task field, lost-ack
++no-replay and an actual ambiguous Ex negative reply. It does not weaken SDK result
++validation or claim actual server authorization, model execution or devices.
++
++## Coordinator verification
++
++The coordinator ran the explicit Assist check script using its isolated Python
++3.14 / Home Assistant 2026.9.4 environment. Ruff lint, Ruff format check and all
++48 isolated Assist tests passed; unittest reported 0.926 seconds. The cases
++include the actual segmented public SDK Ex round trip, lost acknowledgement and
++valid `ARCHIVE_UNAVAILABLE` reply, existing Relay/restart behavior, typed gateway
++lifecycle/identity cases and actual HA prototype guard tests. No model provider,
++live HA instance, device, PostgreSQL or deployment operation was involved.
++
++An initial check stopped at two Ruff I001 import-order findings before running
++the suite. The coordinator applied only mechanical import sorting/formatting,
++then reran the complete check successfully. No test was excluded or suppressed.
++The successful log is `/private/tmp/ha-05-check-v2.log`, SHA-256
++`e2d37c4fec4fcfd1013c486098e56b32eedfa7ceb83fbbae28acd281492d2475`.
++
++The v1 formatted source passed those checks. Following the narrow interface-only
++addition described below, the coordinator ran the complete Assist check again:
++Ruff lint, Ruff format check and all 48 cases passed in 0.921 seconds. The current
++log is `/private/tmp/ha-05-check-v3.log`, SHA-256
++`74f8e999db47e98e4b91d6b8977245b2c523acb45a69bf5dcdf315a91ef7d377`.
++No test was excluded. Source remains frozen for independent v2 review. Successful
++lower-level tests do not enable component intake or packaging; the unchanged
++runtime publication guards remain in place until HA-11's integrated work.
++Subsequent entity/setup owners must implement verified durable persistence and
++retain unsettled gateways through unload as specified above. Repository-wide
++and integrated whole-component checks belong to the later validation node.
++
++### Formatted source hashes
++
++| Owned file | SHA-256 |
++| --- | --- |
++| `integrations/home-assistant/assist/custom_components/plowshare/agent.py` | `0bea26471ab9511271a26c6a6cb6b585205e73889dc55c02da583b264cf7171c` |
++| `integrations/home-assistant/assist/custom_components/plowshare/models.py` | `1289cc93024ba4d05fe0e86db854afefabb561e79e61e202b4eb48dc2389262f` |
++| `integrations/home-assistant/assist/custom_components/plowshare/requests.py` | `15a6cd457b02c7236e52d77a56a7cd47357b91409524fa569e2b50ed8ba3ba23` |
++| `integrations/home-assistant/assist/tests/test_agent.py` | `0e11cd5d5c9f0d82760d43457f2d24fc33234f44922337c6569597f3e43ce92c` |
++| `integrations/home-assistant/assist/tests/test_gateway.py` | `a3484daa56e8d8e02af8acd990c0e16b3fe156b8206cbd224803342f7b6f0e3a` |
++| `integrations/home-assistant/assist/tests/test_socket.py` | `93e0cef063178106cf12c3fd7ea08b92d49434c81f9bbbaa7c548852bcde8c38` |
++
++## Shared runtime interface handoff for v2
++
++At the coordinator's request, `agent.py` now declares the adapter-only
++`@runtime_checkable ProfileRuntime` Protocol. Its read-only `conversation` and
++`task` properties expose `GatewayPort | None`; disabled profiles are absent.
++`async_close() -> bool` retains the existing unsettled-owner lifecycle contract.
++HA-07 owns the concrete runtime/journal, while HA-06 may consume and test this
++structural interface without importing its sibling's unreviewed implementation.
++No gateway logic, SDK/core API, state format or authority behavior changed.
++
++No tests or builds were run by the implementer after this source addition.
++The coordinator recheck above covers the changed source. The final `agent.py`
++SHA-256 is `0bea26471ab9511271a26c6a6cb6b585205e73889dc55c02da583b264cf7171c`.
++The original v1 candidate, implementation report and review remain unchanged
++historical exact-source evidence. Only this new v2 note is updated for the new
++interface and current verification.
+diff --git a/docs/home-assistant-delivery-state.json b/docs/home-assistant-delivery-state.json
+index be85469d..3d8d6064 100644
+--- a/docs/home-assistant-delivery-state.json
++++ b/docs/home-assistant-delivery-state.json
+@@ -11,7 +11,7 @@
+     "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
+   },
+   "scope": {
+-    "current_request": "Commit reviewed changes and open a pull request; keep prompt-dependent features gated",
++    "current_request": "Correct misinterpreted caching/fidelity gate. Only core extension is external-to-internal conversation ID mapping via existing SDK; supported HA adapter work must not depend on cache optimization or native system-role parity.",
+     "runtime_implementation_dispatched": true,
+     "merge_authorized": false,
+     "deployment_authorized": false,
+@@ -21,11 +21,19 @@
+       "Preserve HA prompt/context as supplied; assess cache impact without rewriting it.",
+       "2026-11-17: user authorized execution with Start it; merge, deployment, live effects and backend measurements retain their explicit gates.",
+       "User explicitly chose Leave prompt-dependent features gated. No external system-context API or weaker task-text substitution authorized.",
+-      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only."
++      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only.",
++      "2026-11-22: user authorized outbound-only implementation and plan/ledger reconciliation. PR300 is already merged. No new publication/target merge/deployment/live authorization and no prompt/context extension. Prior exact-source review artifacts remain immutable.",
++      "2026-11-22 continuation: separate PLAT-SQL-01 test-only deadline/cleanup fixture diagnosis and correction independently approved; outbound validation v2 independently approved after full green check. No runtime/API/SDK/schema extension or prompt gate satisfaction.",
++      "2026-11-22 clarification: user rejects changing Plowshare to accommodate HA. Use existing SDK; unsupported HA semantics are adapter limitations. Native prompt mapping choice requested; no core extension or operational action authorized.",
++      "2026-11-22: user explicitly clarified prompt fidelity gate concerned caching awareness, not a new native system-role requirement. Retire that prerequisite; preserve supplied HA text using existing SDK task semantics. No additional prompt-mapping user-choice gate or core extension."
+     ],
+     "commit_authorized": true,
+     "push_authorized": true,
+-    "pull_request_authorized": true
++    "pull_request_authorized": true,
++    "outbound_implementation_authorized": true,
++    "outbound_publication_authorized": false,
++    "outbound_target_merge_authorized": false,
++    "outbound_deployment_authorized": false
+   },
+   "status_values": [
+     "planned",
+@@ -39,15 +47,23 @@
+   ],
+   "gates": {
+     "prompt_public_path_verified": {
+-      "status": "not_satisfied",
++      "status": "retired",
+       "evidence": [
+         {
+           "kind": "user_decision",
+           "at": "2026-11-16T21:45:20.262205+00:00",
+           "decision": "Leave prompt-dependent features gated"
++        },
++        {
++          "kind": "user_clarification",
++          "at": "2026-11-22T09:30:32.668163+00:00",
++          "decision": "Retire the misapplied caching/native-fidelity delivery prerequisite; only core extension is external-ID mapping via SDK."
+         }
+       ],
+-      "updated_at": null
++      "updated_at": null,
++      "retired_at": "2026-11-22T09:30:32.668163+00:00",
++      "reason": "User clarified that the fidelity gate concerned caching awareness. Accommodating external prompt behavior must not require Plowshare changes or block supported integration. Native-role support is not claimed.",
++      "superseded_by": "SCOPE-01"
+     },
+     "cache_backend_measurement_authorized": {
+       "status": "not_satisfied",
+@@ -134,11 +150,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T23:15:30.186477+00:00"
++      "updated_at": "2026-11-16T23:15:30.186477+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "AUDIT-01",
+@@ -187,11 +209,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:33:50.055430+00:00"
++      "updated_at": "2026-11-16T21:33:50.055430+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-01",
+@@ -263,11 +291,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.065667+00:00"
++      "updated_at": "2026-11-16T21:45:20.065667+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-02",
+@@ -360,11 +394,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T22:49:50.733679+00:00"
++      "updated_at": "2026-11-16T22:49:50.733679+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03A",
+@@ -460,11 +500,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:53:04.215754+00:00"
++      "updated_at": "2026-11-17T01:53:04.215754+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03",
+@@ -688,11 +734,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T04:36:25.467849+00:00"
++      "updated_at": "2026-11-17T04:36:25.467849+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-04",
+@@ -834,14 +886,20 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+       "updated_at": "2026-11-17T04:47:09.041004+00:00",
+       "implementation_collaborators": [
+         "/root/ha_sdk_implementer/native_ex"
+-      ]
++      ],
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "FIDELITY-01",
+@@ -918,11 +976,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:50:46.630922+00:00"
++      "updated_at": "2026-11-16T21:50:46.630922+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-01",
+@@ -1033,11 +1097,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T00:50:36.944378+00:00"
++      "updated_at": "2026-11-17T00:50:36.944378+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-02",
+@@ -1147,11 +1217,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:56:50.815783+00:00"
++      "updated_at": "2026-11-17T01:56:50.815783+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-03",
+@@ -1221,11 +1297,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:16:05.933445+00:00"
++      "updated_at": "2026-11-17T01:16:05.933445+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-04",
+@@ -1301,51 +1383,111 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:18:03.593694+00:00"
++      "updated_at": "2026-11-17T02:18:03.593694+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-05",
+       "title": "Shared typed request gateway",
+       "dependencies": [
+         "CORE-04",
+-        "FIDELITY-01"
+-      ],
+-      "gates": [
+-        "prompt_public_path_verified"
++        "SCOPE-01"
+       ],
++      "gates": [],
+       "implementer_role": "ha_gateway_implementer",
+       "reviewer_role": "ha_gateway_reviewer",
+-      "implementation_agent_id": null,
+-      "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "implementation_agent_id": "/root/ha_gateway_sdk_implementer",
++      "review_agent_id": "/root/ha_gateway_sdk_reviewer",
++      "status": "in_review",
+       "owned_paths": [
+         "integrations/home-assistant/assist/custom_components/plowshare/agent.py",
+         "integrations/home-assistant/assist/custom_components/plowshare/models.py",
+-        "integrations/home-assistant/assist/tests/<gateway-tests>"
++        "integrations/home-assistant/assist/custom_components/plowshare/requests.py",
++        "integrations/home-assistant/assist/tests/test_agent.py",
++        "integrations/home-assistant/assist/tests/test_gateway.py",
++        "integrations/home-assistant/assist/tests/test_socket.py",
++        "docs/reviews/home-assistant-ha-05-v2-implementation.md"
++      ],
++      "candidate_revision": {
++        "id": "ha-05-v1",
++        "manifest_path": "docs/reviews/home-assistant-ha-05-v1-candidate.json",
++        "manifest_sha256": "cf53c511c3d7f2615e9f8eb60032dec6521ac75ada1638b2ea02225377f4241e"
++      },
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        },
++        {
++          "kind": "independent_interface_preflight",
++          "reviewer": "/root/ha_gateway_sdk_reviewer",
++          "result": "APPROVE_FOR_IMPLEMENTATION_ONLY",
++          "contract": "Typed conversation/task requests/results, exact supplied text in existing SDK task envelope, stable explicit profile/caller correlation, separate stored route binding, Ex-only new sessions, legacy quarantine, per-key bounded physical admission, truthful save callback and cleanup. Final code/test review pending."
++        },
++        {
++          "kind": "downstream_preparation",
++          "agent": "/root/ha_conversation_sdk_implementer",
++          "state": "read_only_until_HA-05_accepted",
++          "contract": "Explicit read_only_agent/control agent/task_agent profile selection; one catalogue snapshot for config validation; real HA ChatLog preparation and returned IDs."
++        },
++        {
++          "kind": "coordinator_full_assist_checks",
++          "result": "PASS",
++          "cases": 48,
++          "test_duration": "0.926s",
++          "ruff_lint": "PASS",
++          "ruff_format_check": "PASS",
++          "log_sha256": "e2d37c4fec4fcfd1013c486098e56b32eedfa7ceb83fbbae28acd281492d2475",
++          "actual_sdk_segmented_cases": 3,
++          "component_setup_enabled": false,
++          "protected_core_protocol_sdk_shared_runtime_files_unchanged": 4042
++        },
++        {
++          "kind": "independent_exact_revision_review",
++          "candidate": {
++            "id": "ha-05-v1",
++            "manifest_path": "docs/reviews/home-assistant-ha-05-v1-candidate.json",
++            "manifest_sha256": "cf53c511c3d7f2615e9f8eb60032dec6521ac75ada1638b2ea02225377f4241e"
++          },
++          "verdict": "APPROVE",
++          "report_path": "docs/reviews/home-assistant-ha-05-v1-review.md",
++          "report_sha256": "81698e448074132e998622f3c0efc2c291760a4c25cad56b2fd7fb91ab057f65",
++          "scope": "v1 only; not node closure because shared ProfileRuntime interface is being added in v2."
++        },
++        {
++          "kind": "coordinator_final_shared_interface_checks",
++          "result": "PASS",
++          "cases": 48,
++          "test_duration": "0.921s",
++          "ruff_lint": "PASS",
++          "ruff_format_check": "PASS",
++          "log_sha256": "74f8e999db47e98e4b91d6b8977245b2c523acb45a69bf5dcdf315a91ef7d377",
++          "shared_runtime_contract": "ProfileRuntime Protocol, no runtime composition or setup enablement."
++        }
+       ],
+-      "candidate_revision": null,
+-      "evidence": [],
+       "findings": [],
+       "review": {
+-        "state": "not_started",
+-        "verdict": null,
+-        "candidate_digest": null,
+-        "report_path": null,
+-        "report_sha256": null,
+-        "approved_at": null
++        "state": "in_review",
++        "verdict": null
+       },
+       "milestones": {
+-        "implementation": "not_started",
++        "implementation": "ready",
+         "verified_and_reviewed": false,
+         "merged": false,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T10:23:39.706805+00:00"
+     },
+     {
+       "id": "HA-06",
+@@ -1353,14 +1495,12 @@
+       "dependencies": [
+         "HA-05"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_conversation_implementer",
+       "reviewer_role": "ha_conversation_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "integrations/home-assistant/assist/custom_components/plowshare/conversation.py",
+         "integrations/home-assistant/assist/custom_components/plowshare/config.py",
+@@ -1368,7 +1508,13 @@
+         "integrations/home-assistant/assist/tests/<conversation-tests>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1385,7 +1531,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "HA-07",
+@@ -1393,14 +1539,12 @@
+       "dependencies": [
+         "HA-05"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_ai_task_implementer",
+       "reviewer_role": "ha_ai_task_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "integrations/home-assistant/assist/custom_components/plowshare/<ai_task-platform>",
+         "integrations/home-assistant/assist/custom_components/plowshare/__init__.py",
+@@ -1408,7 +1552,13 @@
+         "integrations/home-assistant/assist/tests/<ai-task-tests>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1425,7 +1575,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "HA-08",
+@@ -1433,20 +1583,24 @@
+       "dependencies": [
+         "HA-07"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_structured_implementer",
+       "reviewer_role": "ha_structured_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "integrations/home-assistant/assist/custom_components/plowshare/<typed-output-spec-and-validator>",
+         "integrations/home-assistant/assist/tests/<structured-output-tests>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1463,7 +1617,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "HA-09",
+@@ -1514,11 +1668,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:20:47.982417+00:00"
++      "updated_at": "2026-11-17T02:20:47.982417+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-10",
+@@ -1529,21 +1689,25 @@
+         "HA-07",
+         "HA-09"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_profiles_implementer",
+       "reviewer_role": "ha_profiles_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "integrations/home-assistant/examples/application/",
+         "integrations/home-assistant/examples/config.json",
+         "integrations/home-assistant/src/test/java/<example-loader-tests>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1560,7 +1724,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "HA-11",
+@@ -1571,14 +1735,12 @@
+         "HA-08",
+         "HA-10"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_package_implementer",
+       "reviewer_role": "ha_package_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "integrations/home-assistant/assist/scripts/package.py",
+         "integrations/home-assistant/assist/README.md",
+@@ -1587,7 +1749,13 @@
+         "integrations/home-assistant/assist/tests/<install-and-migration-tests>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1604,7 +1772,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "VERIFY-01",
+@@ -1619,21 +1787,25 @@
+         "HA-10",
+         "HA-11"
+       ],
+-      "gates": [
+-        "prompt_public_path_verified"
+-      ],
++      "gates": [],
+       "implementer_role": "ha_verification_implementer",
+       "reviewer_role": "ha_verification_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "docs/reviews/home-assistant-integrated-validation.md",
+         "integrations/home-assistant/<only-new-cross-boundary-fixtures>",
+         "test-support/<only-required-contract-fixtures>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1650,11 +1822,11 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "PERF-01",
+-      "title": "Faithful HA prefix-cache impact report",
++      "title": "Optional HA prefix-cache impact assessment",
+       "dependencies": [
+         "FIDELITY-01",
+         "HA-06",
+@@ -1662,7 +1834,6 @@
+         "VERIFY-01"
+       ],
+       "gates": [
+-        "prompt_public_path_verified",
+         "cache_backend_measurement_authorized"
+       ],
+       "implementer_role": "ha_performance_implementer",
+@@ -1675,7 +1846,17 @@
+         "integrations/home-assistant/assist/<bounded-investigation-fixtures-if-needed>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        },
++        {
++          "kind": "scope_correction",
++          "note": "Not a release prerequisite; any actual backend measurement still needs its existing authorization."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1692,29 +1873,33 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00",
++      "optional": true
+     },
+     {
+       "id": "RELEASE-01",
+       "title": "Release readiness and rollout runbook",
+       "dependencies": [
+-        "VERIFY-01",
+-        "PERF-01"
+-      ],
+-      "gates": [
+-        "prompt_public_path_verified"
++        "VERIFY-01"
+       ],
++      "gates": [],
+       "implementer_role": "ha_release_implementer",
+       "reviewer_role": "ha_release_reviewer",
+       "implementation_agent_id": null,
+       "review_agent_id": null,
+-      "status": "awaiting_gate",
++      "status": "planned",
+       "owned_paths": [
+         "docs/reviews/home-assistant-release-readiness.md",
+         "integrations/home-assistant/<rollout-and-rollback-runbook>"
+       ],
+       "candidate_revision": null,
+-      "evidence": [],
++      "evidence": [
++        {
++          "kind": "user_scope_correction",
++          "node": "SCOPE-01",
++          "note": "Cache awareness/native prompt-role equivalence is not a supported-adapter delivery prerequisite. Existing SDK only; no capability falsely marked available."
++        }
++      ],
+       "findings": [],
+       "review": {
+         "state": "not_started",
+@@ -1731,7 +1916,7 @@
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.262205+00:00"
++      "updated_at": "2026-11-22T09:30:32.668163+00:00"
+     },
+     {
+       "id": "DEPLOY-01",
+@@ -1807,37 +1992,626 @@
+         "live_validated": false
+       },
+       "updated_at": "2026-11-16T21:45:20.262205+00:00"
+-    }
+-  ],
+-  "history": [
+-    {
+-      "date": "2026-11-17",
+-      "actor": "/root/ha_plan_implementer",
+-      "event": "plan_created_ready_for_independent_review",
+-      "node": "PLAN-00",
+-      "note": "No feature node is accepted; root must seal exact candidate and obtain independent reviewer APPROVE."
+     },
+     {
+-      "date": "2026-11-17",
+-      "actor": "/root",
+-      "event": "independent_review_dispatched",
+-      "node": "PLAN-00",
+-      "candidate": "ha-plan-00-v1",
+-      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+-      "reviewer": "/root/ha_plan_reviewer"
++      "id": "OUT-PLAN-01",
++      "title": "Current-main reconciliation and outbound host contract",
++      "dependencies": [
++        "PLAN-00",
++        "AUDIT-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root",
++      "reviewer_role": "/root/ha_outbound_plan_reviewer",
++      "implementation_agent_id": "/root",
++      "review_agent_id": "/root/ha_outbound_plan_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-outbound-host-contract.md"
++      ],
++      "candidate_revision": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "candidate": {
++            "id": "out-plan-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++            "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++          },
++          "verdict": "CHANGES_REQUIRED",
++          "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++          "report_sha256": "6069223c639ac40b0f2db9484805cb9f5aea61d8b84ef6b24fae6d421175e16f"
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_plan_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++          "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++          "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++          "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPLAN-R1",
++          "severity": "P1",
++          "correction": "Share Application execution principal/tokenEnv/SDK connection across read and control; retain separate logical providers/prefixes/journals/exact tool policy. No core workaround.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        },
++        {
++          "id": "OUTPLAN-R2",
++          "severity": "P3",
++          "correction": "Clarify empty access.accounts vs nonempty exact toolScopes/toolGrants; declaration/placeholder does not issue live authority.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:28:54.029830+00:00"
+     },
+     {
+-      "date": "2026-11-17",
+-      "actor": "/root",
+-      "event": "node_accepted_after_independent_approval",
+-      "node": "PLAN-00",
+-      "candidate": "ha-plan-00-v1",
+-      "reviewer": "/root/ha_plan_reviewer",
+-      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
+-      "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673"
++      "id": "OUT-PACK-01",
++      "title": "Standalone outbound provider host and package",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_pack_implementer",
++      "review_agent_id": "/root/ha_outbound_pack_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md",
++        "integrations/home-assistant/TOOL-PROVIDER.md",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "evidence": [
++        {
++          "kind": "interim_package_check",
++          "result": "PASS",
++          "duration": "38s",
++          "tasks": 93,
++          "command": "./gradlew format formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "2a72fac626811ebb7cdd7763be99b59d8ef0b90edc08d4aebed2311f289c9130",
++          "note": "Before final startup-owner guard correction; not final-source verification."
++        },
++        {
++          "kind": "interim_package_check",
++          "result": "FAIL",
++          "duration": "37s",
++          "tests": 163,
++          "failed": 1,
++          "log_sha256": "f10ad524c1888c2ac98acdf4bc0d854c7c17ec5ae07fde22ca9fd0e56d0dd7e5",
++          "finding": "New factory startup-ownership fixture used macOS temporary path with /var symbolic-link ancestor; production startup correctly refused before connections. Fixture must use canonical temporary directory; symlink protection retained."
++        },
++        {
++          "kind": "current_compiled_package_check",
++          "result": "PASS",
++          "tests": 163,
++          "duration": "33s",
++          "tasks": 72,
++          "command": "./gradlew formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "bb2a764d751c9b55746b6b2d4f213f926ea487809d9cc8afb91364c5cc1af83e",
++          "format_log_sha256": "f8dfde4ea435e7d1312b2566c16881ce3dc177d833d68ae4662d7b33b5a2065c",
++          "note": "Java/source fixed and frozen; pending final operator prerequisite prose and artifact copy refresh."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_pack_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++          "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++          "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++          "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPACK-PRE1",
++          "severity": "P1",
++          "source": "independent reviewer",
++          "correction": "Register process shutdown owner before any resource opening; hook registration failure opens nothing; partial startup keeps exact cleanup owner.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-PRE2",
++          "severity": "P2",
++          "source": "independent reviewer",
++          "correction": "Publish closed-latch completion before successful shared-cleanup future so returned close cannot race finished observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-COORD1",
++          "severity": "P1",
++          "source": "coordinator source review",
++          "correction": "Published startup owner must fence cleanup while factory still owns HA/SDK/journal opening, including slow filesystem work; shared resources cannot close before late provider acquisition settles. Use stable provider count for shutdown observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:56:58.858956+00:00"
+     },
+     {
+-      "at": "2026-11-16T21:28:26.998393+00:00",
++      "id": "OUT-PROFILE-01",
++      "title": "Read-only and explicit-control Application templates",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_profiles_implementer",
++      "review_agent_id": "/root/ha_outbound_profiles_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++          "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++          "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++          "verdict": "APPROVE"
++        },
++        {
++          "kind": "compiled_profile_validation",
++          "result": "PASS",
++          "tests": 12,
++          "log_sha256": "446d2160b3ea97e74742bffc099271e80d5a8e3fd560887f99c37bb93c502490",
++          "context": "24configurationcases also passed; later joint installed distribution validation remains OUT-VERIFY."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++          "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++          "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPROFILE-VAL1",
++          "severity": "P2",
++          "source": "independent validation implementer and reviewer",
++          "correction": "Three source-relative README links escape installed payload; use canonical repository URLs for source-only Assist/tool-scope/observation references, retaining shipped local provider-host link.",
++          "disposition": "resolved by original author in exact v2 and independently APPROVED with refreshed installed-link proof"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T00:02:16.951451+00:00"
++    },
++    {
++      "id": "OUT-VERIFY-01",
++      "title": "Integrated outbound-only validation",
++      "dependencies": [
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "PLAT-SQL-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_validation_v2_implementer",
++      "review_agent_id": "/root/ha_outbound_validation_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py",
++        "docs/reviews/home-assistant-outbound-validation-v2.md",
++        "docs/reviews/home-assistant-outbound-validation-v2-source.json",
++        "docs/reviews/home-assistant-outbound-validation-v2-package-evidence.json"
++      ],
++      "candidate_revision": {
++        "id": "out-verify-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
++        "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd"
++      },
++      "evidence": [
++        {
++          "kind": "independent_preflight_finding",
++          "id": "OUTPROFILE-VAL1",
++          "note": "Validation fixture authoring may continue independently; integrated proof/acceptance waits profile source amendment and independent approval. No feature byte edits by validation agents."
++        },
++        {
++          "kind": "installed_consumer",
++          "result": "PASS",
++          "checks": 8,
++          "artifacts": 44,
++          "log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "report_sha256": "4c04546f9239457de46bad071bd9d0b5839f5ccfaa705c62ae80a876c923bfad"
++        },
++        {
++          "kind": "interim_repository_check",
++          "result": "FAIL",
++          "duration": "4m36s",
++          "server_tests": 8627,
++          "failed": 1,
++          "failure": "Existing ScopedSqlWorkBudgetTest cleanupBlocked.await(1s), fetch=false; core source unchanged. Isolated investigation and final recheck pending.",
++          "log_sha256": "9b0c0235a254e072bc16c1a8b09ce5555cf0d4a2783f10da2fb6e5a4e75ef0b2"
++        },
++        {
++          "kind": "current_outbound_validation",
++          "ha_tests": 166,
++          "ha_failures": 0,
++          "sdk_wire_cases": 3,
++          "installed_checks": 8,
++          "artifact_files": 44,
++          "repository_check": "FAIL",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "consumer_log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "note": "Final validation implementation/evidence ready, acceptance explicitly blocked by OUTVERIFY-GLOBAL1. Empty-directory no-mutation assertion strengthened and independently probed."
++        },
++        {
++          "kind": "independent_review",
++          "verdict": "CHANGES_REQUIRED",
++          "reviewer_agent_id": "/root/ha_outbound_validation_reviewer",
++          "candidate": {
++            "id": "out-verify-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-out-verify-01-v1-candidate.json",
++            "manifest_sha256": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392"
++          },
++          "report_path": "docs/reviews/home-assistant-out-verify-01-v1-review.md",
++          "report_sha256": "6593c21ee4d4e6cb5265c103c6b4d07b49a714e12c400b5f8851726ea88cede9"
++        },
++        {
++          "kind": "coordinator_current_checks",
++          "repository_check": "PASS",
++          "full_server_cases": 8627,
++          "failures": 0,
++          "ha_cases": 166,
++          "ha_task": "UP-TO-DATE on unchanged source",
++          "sdk_contract_operations": 296,
++          "sdk_canonical_dto_cases": 1012,
++          "consumer_checks": 8,
++          "artifact_files": 44,
++          "full_log_sha256": "ec7f3206cc00104e046eb3b5ea852eb0d89d37f4d89b344c440c284ee10fee3b",
++          "platform_dependency": "PLAT-SQL-01 v1 independently accepted; v2 validation review pending"
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_validation_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
++          "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
++          "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
++          "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTVERIFY-R1",
++          "severity": "P1",
++          "source": "independent reviewer",
++          "requirement": "Required repository-wide check must pass",
++          "correction": "Resolve the failing ScopedSqlWorkBudgetTest late-query/fetch timing assertions in the owning platform scope; rerun full check without exclusions and independently re-review OUT-VERIFY.",
++          "disposition": "RESOLVED: separately scoped PLAT-SQL-01 test-only fixture correction independently accepted; full repository check passed without exclusions; exact OUT-VERIFY v2 independently APPROVED."
++        },
++        {
++          "id": "OUTVERIFY-R2",
++          "severity": "P2",
++          "source": "independent reviewer",
++          "correction": "Installed no-mutation proof must compare directory topology in addition to file hashes.",
++          "disposition": "RESOLVED: original validation author fixed, eight consumer checks passed, independent empty-directory probe confirmed guard."
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
++        "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
++        "approved_at": "2026-11-22T01:42:25.574527+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T01:42:25.574576+00:00",
++      "resolved_verification_blockers": [
++        {
++          "id": "OUTVERIFY-GLOBAL1",
++          "requirement": "Required repository-wide check must pass without exclusions",
++          "result": "FAIL",
++          "command": "./gradlew check :plowshare-integration-home-assistant:installDist --max-workers=2",
++          "server_cases": 8627,
++          "failures": 2,
++          "test": "io.aeyer.plowshare.server.pool.ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied",
++          "variants": [
++            "fetch=false",
++            "fetch=true"
++          ],
++          "location": "ScopedSqlWorkBudgetTest.java:550",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "cause": "unresolved; full runs and isolated method failed, owning class passed; no causal/flake claim",
++          "next_action": "Investigate the SQL cleanup test in its owning platform scope, restore a green full repository check and independently re-review OUT-VERIFY. Do not waive acceptance or modify core to accommodate the adapter.",
++          "resolution": {
++            "status": "RESOLVED",
++            "platform_candidate": {
++              "id": "plat-sql-01-v1",
++              "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
++              "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c"
++            },
++            "full_check_result": "PASS",
++            "full_check_log_sha256": "ec7f3206cc00104e046eb3b5ea852eb0d89d37f4d89b344c440c284ee10fee3b",
++            "independent_validation_review": {
++              "state": "APPROVE",
++              "verdict": "APPROVE",
++              "candidate_digest": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
++              "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
++              "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
++              "approved_at": "2026-11-22T01:42:25.574527+00:00"
++            }
++          }
++        }
++      ],
++      "verification_blockers": []
++    },
++    {
++      "id": "PLAT-SQL-01",
++      "title": "Deterministic SQL deadline and physical cleanup regression fixture",
++      "dependencies": [],
++      "gates": [],
++      "implementer_role": "/root/sql_cleanup_implementer",
++      "reviewer_role": "/root/sql_cleanup_reviewer",
++      "implementation_agent_id": "/root/sql_cleanup_implementer",
++      "review_agent_id": "/root/sql_cleanup_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java",
++        "docs/reviews/home-assistant-plat-sql-01-*"
++      ],
++      "candidate_revision": {
++        "id": "plat-sql-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
++        "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c"
++      },
++      "evidence": [
++        {
++          "kind": "independent_scope_preflight",
++          "reviewer": "/root/sql_cleanup_reviewer",
++          "finding": "No runtime defect established. Instrument finite phase/Future diagnostics before test-only correction; retain tested deadline, execute/fetch, cleanup occupancy and physical ownership assertions."
++        },
++        {
++          "kind": "coordinator_verification",
++          "result": "PASS",
++          "method_cases": 2,
++          "class_cases": 30,
++          "full_server_cases": 8627,
++          "full_server_failures": 0,
++          "full_log_sha256": "ec7f3206cc00104e046eb3b5ea852eb0d89d37f4d89b344c440c284ee10fee3b",
++          "command": "./gradlew check :plowshare-integration-home-assistant:installDist --max-workers=2",
++          "duration": "5m13s",
++          "database_tests_enabled": false,
++          "production_changes": false
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/sql_cleanup_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
++          "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c",
++          "report_path": "docs/reviews/home-assistant-plat-sql-01-v1-review.md",
++          "report_sha256": "81be571f929f49c43e543768aad3c27292ef3565dbc731253a8d1123fce7b5b7",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c",
++        "report_path": "docs/reviews/home-assistant-plat-sql-01-v1-review.md",
++        "report_sha256": "81be571f929f49c43e543768aad3c27292ef3565dbc731253a8d1123fce7b5b7",
++        "approved_at": "2026-11-22T01:37:55.656407+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T01:37:55.656462+00:00",
++      "scope": "Separate owning-platform test-only investigation authorized by continuation. General need is truthful deterministic SQL deadline/physical ownership verification. No runtime/API/schema/SDK capability changes authorized."
++    },
++    {
++      "id": "SCOPE-01",
++      "title": "Correct caching gate and existing-SDK adapter scope",
++      "dependencies": [
++        "OUT-VERIFY-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root",
++      "reviewer_role": "/root/ha_cache_gate_correction_reviewer",
++      "implementation_agent_id": "/root",
++      "review_agent_id": "/root/ha_cache_gate_correction_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-integration-design-and-plan.md",
++        "docs/reviews/home-assistant-existing-sdk-scope-direction.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-cache-gate-correction-v1-*"
++      ],
++      "candidate_revision": {
++        "id": "scope-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
++        "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516"
++      },
++      "evidence": [
++        {
++          "kind": "independent_preflight",
++          "reviewer": "/root/ha_cache_gate_correction_reviewer",
++          "note": "Retire the gate without faking native capability; use SDK task semantics; retain operational authorization, historical evidence and planned feature states."
++        },
++        {
++          "kind": "independent_review",
++          "candidate": {
++            "id": "scope-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-scope-01-v1-candidate.json",
++            "manifest_sha256": "9f7f10e7a95aeb262238e702a0e704dd268cc7ca6d0d2a2026c1af048bc13578"
++          },
++          "verdict": "CHANGES_REQUIRED",
++          "report_path": "docs/reviews/home-assistant-scope-01-v1-review.md",
++          "report_sha256": "7eced4643012d9b8b83dffaaa8a8a17a86c14f771e3cd2974acb18849bfc8866",
++          "findings": [
++            "SCOPE-R1",
++            "SCOPE-R2"
++          ]
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_cache_gate_correction_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
++          "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516",
++          "report_path": "docs/reviews/home-assistant-scope-01-v2-review.md",
++          "report_sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "SCOPE-R1",
++          "severity": "P2",
++          "requirement": "Remove residual native-role mapping decision and stale Ex capability status from active design",
++          "disposition": "RESOLVED: author correction independently approved in SCOPE-01 v2."
++        },
++        {
++          "id": "SCOPE-R2",
++          "severity": "P2",
++          "requirement": "Live checklist must use exact task-envelope input and ordinary documented retention, with cache observations optional",
++          "disposition": "RESOLVED: author correction independently approved in SCOPE-01 v2."
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516",
++        "report_path": "docs/reviews/home-assistant-scope-01-v2-review.md",
++        "report_sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac",
++        "approved_at": "2026-11-22T09:36:47.006389+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T09:36:47.006448+00:00"
++    }
++  ],
++  "history": [
++    {
++      "date": "2026-11-17",
++      "actor": "/root/ha_plan_implementer",
++      "event": "plan_created_ready_for_independent_review",
++      "node": "PLAN-00",
++      "note": "No feature node is accepted; root must seal exact candidate and obtain independent reviewer APPROVE."
++    },
++    {
++      "date": "2026-11-17",
++      "actor": "/root",
++      "event": "independent_review_dispatched",
++      "node": "PLAN-00",
++      "candidate": "ha-plan-00-v1",
++      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
++      "reviewer": "/root/ha_plan_reviewer"
++    },
++    {
++      "date": "2026-11-17",
++      "actor": "/root",
++      "event": "node_accepted_after_independent_approval",
++      "node": "PLAN-00",
++      "candidate": "ha-plan-00-v1",
++      "reviewer": "/root/ha_plan_reviewer",
++      "manifest_sha256": "0aa1ca5c11af741559d1fac0d87e441e7c4f563e50c40dfc3aa82b4b838cb70a",
++      "report_sha256": "5542608b92a045d06a9f4c61836e239f69e7ab498d2a53c4c124a56afe445673"
++    },
++    {
++      "at": "2026-11-16T21:28:26.998393+00:00",
+       "node": "AUDIT-01",
+       "event": "implementation_started",
+       "agent": "/root/ha_audit_implementer",
+@@ -2681,6 +3455,456 @@
+         "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
+       },
+       "note": "Final source matches independent approvals; repository/SDK/package checks pass. 13 accepted and 11 awaiting_gate remain unchanged. No target merge/deployment/live authorization."
++    },
++    {
++      "at": "2026-11-21T23:23:44.569338+00:00",
++      "event": "outbound_amendment_ready_for_review",
++      "author": "/root",
++      "base": {
++        "commit": "6de685f63e060f3003cb93233d2567e004269755",
++        "date": "2026-11-22",
++        "branch": "codex/ha-outbound-delivery",
++        "working_tree_at_start": "clean",
++        "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++      },
++      "nodes_added": [
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "OUT-VERIFY-01"
++      ],
++      "previous_accepted_nodes_merged": 13,
++      "original_gated_nodes_unchanged": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "PERF-01",
++        "RELEASE-01",
++        "DEPLOY-01",
++        "LIVE-01"
++      ],
++      "note": "Current-main targeted review previously passed110 HA tests+86 selected core tests, SDK contract/boundary checks. PythonHA venv absent; no DB/live check. Source dispatch awaits independent OUT-PLAN approval."
++    },
++    {
++      "at": "2026-11-21T23:27:27.634645+00:00",
++      "event": "outbound_plan_changes_required",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++        "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++      },
++      "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++      "findings": [
++        "OUTPLAN-R1",
++        "OUTPLAN-R2"
++      ],
++      "note": "No source dispatch occurred. Common contract corrected to actual public Application provider policy."
++    },
++    {
++      "at": "2026-11-21T23:28:54.029858+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:28:54.031374+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PACK-01",
++      "implementer": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:28:54.032052+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:40:38.721983+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++        "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++        "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++        "approved_at": "2026-11-21T23:40:38.721906+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:44:52.589011+00:00",
++      "event": "outbound_ownership_refined",
++      "node": "OUT-PACK-01",
++      "note": "Narrow current read-provider intro links newhost; explicit lifecycle/Main-test paths refine reviewed packaging scope, no core/SDK/Assist changes."
++    },
++    {
++      "at": "2026-11-21T23:56:58.858987+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PACK-01",
++      "candidate": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:56:58.860522+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-VERIFY-01",
++      "implementer": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:58:46.806621+00:00",
++      "event": "outbound_profile_reopened_by_validation",
++      "node": "OUT-PROFILE-01",
++      "finding": "OUTPROFILE-VAL1",
++      "note": "Installed artifact boundary exposes three broken source-relative documentation links. Original frozen evidence retained; exact owner/reviewer amendment required."
++    },
++    {
++      "at": "2026-11-21T23:59:33.390530+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-22T00:02:16.951491+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      }
++    },
++    {
++      "at": "2026-11-22T00:28:48.798929+00:00",
++      "event": "outbound_node_changes_required",
++      "node": "OUT-VERIFY-01",
++      "candidate": {
++        "id": "out-verify-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v1-candidate.json",
++        "manifest_sha256": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392"
++      },
++      "review": {
++        "state": "CHANGES_REQUIRED",
++        "verdict": "CHANGES_REQUIRED",
++        "candidate_digest": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v1-review.md",
++        "report_sha256": "6593c21ee4d4e6cb5265c103c6b4d07b49a714e12c400b5f8851726ea88cede9",
++        "approved_at": null
++      },
++      "note": "Implementation/evidence complete; acceptance deliberately withheld because required full repository check is not green. Scoped166HA tests/3SDK cases/8installed checks pass. No source/API/SDK/Assist or gate workaround."
++    },
++    {
++      "at": "2026-11-22T01:24:03.011668+00:00",
++      "event": "platform_test_blocker_scope_started",
++      "node": "PLAT-SQL-01",
++      "scope": "Separate owning-platform test-only investigation authorized by continuation. General need is truthful deterministic SQL deadline/physical ownership verification. No runtime/API/schema/SDK capability changes authorized."
++    },
++    {
++      "at": "2026-11-22T01:37:55.656492+00:00",
++      "event": "outbound_node_accepted",
++      "node": "PLAT-SQL-01",
++      "candidate": {
++        "id": "plat-sql-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-plat-sql-01-v1-candidate.json",
++        "manifest_sha256": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "cb9ba0d4f6e8956aee0040af507e0d0dadf26fb17e232fc6183e45c51e28ea0c",
++        "report_path": "docs/reviews/home-assistant-plat-sql-01-v1-review.md",
++        "report_sha256": "81be571f929f49c43e543768aad3c27292ef3565dbc731253a8d1123fce7b5b7",
++        "approved_at": "2026-11-22T01:37:55.656407+00:00"
++      }
++    },
++    {
++      "at": "2026-11-22T01:37:55.657375+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-VERIFY-01",
++      "implementer": "/root/ha_outbound_validation_v2_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ]
++    },
++    {
++      "at": "2026-11-22T01:42:25.574606+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-VERIFY-01",
++      "candidate": {
++        "id": "out-verify-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
++        "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
++        "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
++        "approved_at": "2026-11-22T01:42:25.574527+00:00"
++      }
++    },
++    {
++      "at": "2026-11-22T01:42:25.575494+00:00",
++      "event": "outbound_only_delivery_accepted",
++      "accepted_nodes": [
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "PLAT-SQL-01",
++        "OUT-VERIFY-01"
++      ],
++      "validation_candidate": {
++        "id": "out-verify-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v2-candidate.json",
++        "manifest_sha256": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "87f0f706137a5084a07349522e289494af69382602ebddbd9d16e3939f3937cd",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v2-review.md",
++        "report_sha256": "61a47ebd404df6921922a9f5499b4355d4ba8d393faa6a542af4512bc8d5105f",
++        "approved_at": "2026-11-22T01:42:25.574527+00:00"
++      },
++      "all_original_gates_preserved": true,
++      "published": false,
++      "deployed": false,
++      "live_validated": false
++    },
++    {
++      "at": "2026-11-22T02:39:41.943864+00:00",
++      "event": "all_ungated_work_marked_complete",
++      "request": "Do all works and mark them",
++      "completed_node_ids": [
++        "PLAN-00",
++        "AUDIT-01",
++        "CORE-01",
++        "CORE-02",
++        "CORE-03A",
++        "CORE-03",
++        "CORE-04",
++        "FIDELITY-01",
++        "HA-01",
++        "HA-02",
++        "HA-03",
++        "HA-04",
++        "HA-09",
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "OUT-VERIFY-01",
++        "PLAT-SQL-01"
++      ],
++      "awaiting_gate_node_ids": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "PERF-01",
++        "RELEASE-01",
++        "DEPLOY-01",
++        "LIVE-01"
++      ],
++      "unfinished_ungated_node_ids": [],
++      "gate_override": false,
++      "evidence": "completion_audit"
++    },
++    {
++      "at": "2026-11-22T09:21:46.113729+00:00",
++      "event": "existing_sdk_only_scope_direction_recorded",
++      "source": "User: none of these are major blockers; not changing the system to suit HA",
++      "document": "docs/reviews/home-assistant-existing-sdk-scope-direction.md",
++      "runtime_changes": false,
++      "gates_silently_satisfied": false
++    },
++    {
++      "at": "2026-11-22T09:30:32.668163+00:00",
++      "event": "cache_fidelity_gate_correction_prepared",
++      "node": "SCOPE-01",
++      "retired_gate": "prompt_public_path_verified",
++      "replanned_nodes": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "RELEASE-01"
++      ],
++      "optional_measurement_node": "PERF-01",
++      "operational_authorization_gates_changed": false,
++      "runtime_guard_changes": false,
++      "mapping_choice_gate_withdrawn": true
++    },
++    {
++      "at": "2026-11-22T09:34:00.878097+00:00",
++      "event": "scope_correction_v1_findings_corrected",
++      "node": "SCOPE-01",
++      "findings": [
++        "SCOPE-R1",
++        "SCOPE-R2"
++      ],
++      "note": "Native-role decision and mandatory live cache measurement removed; Ex mapping marked already implemented. v1 artifacts preserved; new v2 review required."
++    },
++    {
++      "at": "2026-11-22T09:34:49.720835+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "SCOPE-01",
++      "implementer": "/root",
++      "reviewer_role": "/root/ha_cache_gate_correction_reviewer",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-integration-design-and-plan.md",
++        "docs/reviews/home-assistant-existing-sdk-scope-direction.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-cache-gate-correction-v1-*"
++      ]
++    },
++    {
++      "at": "2026-11-22T09:36:47.006478+00:00",
++      "event": "outbound_node_accepted",
++      "node": "SCOPE-01",
++      "candidate": {
++        "id": "scope-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
++        "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516",
++        "report_path": "docs/reviews/home-assistant-scope-01-v2-review.md",
++        "report_sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac",
++        "approved_at": "2026-11-22T09:36:47.006389+00:00"
++      }
++    },
++    {
++      "at": "2026-11-22T09:36:47.007716+00:00",
++      "event": "caching_gate_correction_accepted",
++      "node": "SCOPE-01",
++      "candidate": {
++        "id": "scope-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
++        "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516",
++        "report_path": "docs/reviews/home-assistant-scope-01-v2-review.md",
++        "report_sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac",
++        "approved_at": "2026-11-22T09:36:47.006389+00:00"
++      },
++      "retired_gate": "prompt_public_path_verified",
++      "runtime_changes": false,
++      "mapping_choice_prerequisite": false,
++      "only_core_extension": "External-to-internal conversation-ID mapping via existing Ex SDK support, already implemented."
++    },
++    {
++      "at": "2026-11-22T09:54:51.603413+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "HA-05",
++      "implementer": "/root/ha_gateway_sdk_implementer",
++      "reviewer_role": "ha_gateway_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/assist/custom_components/plowshare/agent.py",
++        "integrations/home-assistant/assist/custom_components/plowshare/models.py",
++        "integrations/home-assistant/assist/tests/<gateway-tests>"
++      ]
++    },
++    {
++      "at": "2026-11-22T09:54:51.604609+00:00",
++      "event": "remaining_ha_sdk_only_delivery_started",
++      "user_request": "Start remaining HA integration work with independent implementers and reviewers; no more core changes.",
++      "allowed_scope": "HA adapter implementations, scoped tests, profiles, packaging, integrated verification and release documentation only.",
++      "deployment_or_live_actions_authorized": false
++    },
++    {
++      "at": "2026-11-22T10:11:21.956609+00:00",
++      "event": "ha_gateway_interface_preflight_completed",
++      "node": "HA-05",
++      "independent_reviewer": "/root/ha_gateway_sdk_reviewer",
++      "runtime_dependency_environment": "Isolated pinned HA 2026.9.4 imports Conversation and AI Task; no live HA endpoint used.",
++      "setup_storage_handoff": "HA-07 must supply verified durable local persistence; HA Store async_save alone is not durable acknowledgment."
++    },
++    {
++      "at": "2026-11-22T10:20:48.248190+00:00",
++      "event": "ha_gateway_v1_review_preserved_before_shared_interface_v2",
++      "node": "HA-05",
++      "new_contract": "Runtime-checkable ProfileRuntime with conversation/task ports and async_close ownership; HA-07 composes actual journal/runtime."
+     }
+   ],
+   "publication_guard": {
+@@ -2728,5 +3952,154 @@
+     "evidence": "docs/reviews/home-assistant-publication-verification.json",
+     "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+     "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
++  },
++  "current_baseline": {
++    "commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "working_tree_at_start": "clean",
++    "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++  },
++  "outbound_amendment": {
++    "date": "2026-11-22",
++    "host_contract": "docs/reviews/home-assistant-outbound-host-contract.md",
++    "original_gated_nodes_preserved": [
++      "HA-05",
++      "HA-06",
++      "HA-07",
++      "HA-08",
++      "HA-10",
++      "HA-11",
++      "VERIFY-01",
++      "PERF-01",
++      "RELEASE-01",
++      "DEPLOY-01",
++      "LIVE-01"
++    ],
++    "current_contract": "Actual SQL-unit two-second default, nested transaction deadline; accepted workflow duration warns without outcome replacement. Provider IO/poll/cleanup retain finite owner budgets.",
++    "independent_review_required_before_source_dispatch": true,
++    "node_ids": [
++      "OUT-PLAN-01",
++      "OUT-PACK-01",
++      "OUT-PROFILE-01",
++      "OUT-VERIFY-01"
++    ],
++    "platform_test_followups": [
++      "PLAT-SQL-01"
++    ],
++    "gating_record_scope": "Original gate preservation describes outbound-only acceptance before SCOPE-01; later user clarification retires the misapplied prompt gate."
++  },
++  "outbound_delivery_summary": {
++    "as_of_date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "plan": "accepted",
++    "packaging": "accepted",
++    "profiles": "accepted",
++    "integrated_validation": "accepted",
++    "ha_tests": 166,
++    "ha_test_failures": 0,
++    "public_sdk_wire_cases": 3,
++    "installed_consumer_checks": 8,
++    "installed_artifact_files": 44,
++    "repository_check": "PASS: 8627 server cases, zero failures; full check/installDist 5m13s",
++    "remaining_action": "Outbound branch accepted. SCOPE-01 v2 independently approved; eight adapter/validation/release deliverables are planned without the caching/native-fidelity gate. Measurements remain optional; deployment/live actions retain separate authorization.",
++    "all_original_capability_gates_unsatisfied": false,
++    "published": false,
++    "merged": false,
++    "deployed": false,
++    "live_validated": false,
++    "platform_sql_fixture": "accepted",
++    "ha_task_evidence": "166 passing cases retained on unchanged UP-TO-DATE test task",
++    "sdk_contract_operations": 296,
++    "sdk_canonical_dto_cases": 1012,
++    "accepted_nodes": 19,
++    "awaiting_gate_nodes": 3,
++    "open_outbound_blockers": 0,
++    "all_ungated_work_complete": false,
++    "outbound_branch_complete": true,
++    "original_gated_nodes_preserved_at_outbound_acceptance": 11,
++    "prompt_gate_current_status": "retired_by_user_clarification"
++  },
++  "completion_audit": {
++    "checked_at": "2026-11-22T02:39:41.943807+00:00",
++    "scope": "All ungated work in the HA delivery graph",
++    "result": "complete",
++    "completed_node_ids": [
++      "PLAN-00",
++      "AUDIT-01",
++      "CORE-01",
++      "CORE-02",
++      "CORE-03A",
++      "CORE-03",
++      "CORE-04",
++      "FIDELITY-01",
++      "HA-01",
++      "HA-02",
++      "HA-03",
++      "HA-04",
++      "HA-09",
++      "OUT-PLAN-01",
++      "OUT-PACK-01",
++      "OUT-PROFILE-01",
++      "OUT-VERIFY-01",
++      "PLAT-SQL-01"
++    ],
++    "awaiting_gate_node_ids": [
++      "HA-05",
++      "HA-06",
++      "HA-07",
++      "HA-08",
++      "HA-10",
++      "HA-11",
++      "VERIFY-01",
++      "PERF-01",
++      "RELEASE-01",
++      "DEPLOY-01",
++      "LIVE-01"
++    ],
++    "unfinished_ungated_node_ids": [],
++    "completion_rule": "Each completed deliverable has independent APPROVE evidence and verified_and_reviewed=true. Accepted is the graph completion state; merged, deployed and live-validated milestones remain distinct.",
++    "evidence_check": "Current outbound and separate SQL-fixture candidate source/review/snapshot/diff hashes reverified; OUT-PLAN source amendment is covered by the independently accepted PLAT-SQL-01 candidate. Original merged delivery ancestry verified.",
++    "original_eleven_gated_nodes_and_four_gate_records_unchanged": true,
++    "new_test_runs": false,
++    "new_commit_or_publication": false,
++    "deployment_or_live_actions": false,
++    "historical_scope_note": "Applies to the graph before the user clarified the caching gate. Current planned work is recorded in current_delivery_summary; this prior audit is not current whole-delivery completion."
++  },
++  "existing_sdk_scope_direction": {
++    "recorded_at": "2026-11-22T09:21:46.113729+00:00",
++    "path": "docs/reviews/home-assistant-existing-sdk-scope-direction.md",
++    "state": "accepted_sdk_only_scope_without_cache_gate",
++    "core_changes_authorized": false,
++    "original_capability_gate_marked_satisfied": false,
++    "independently_reviewed_amendment_required_before_dispatch": true,
++    "adapter_mapping_choice_pending": false,
++    "mapping": "Preserve supplied text in a typed adapter envelope serialized into existing SDK task input; document actual task/user semantics and existing retention behavior; no native-role claim.",
++    "independently_reviewed_amendment": "SCOPE-01",
++    "independent_review": {
++      "path": "docs/reviews/home-assistant-scope-01-v2-review.md",
++      "sha256": "46652e4f313072f3b41367bb22586862dc60309733743c0a4a1eca3933207dac"
++    }
++  },
++  "current_delivery_summary": {
++    "scope_amendment": "SCOPE-01",
++    "state": "implementing_remaining_sdk_only_adapter",
++    "accepted_nodes": 19,
++    "planned_nodes": 7,
++    "awaiting_gate_nodes": 3,
++    "in_review_or_implementing_nodes": 1,
++    "core_extension_scope": "External conversation ID mapping via existing Ex SDK operations only; already accepted.",
++    "native_prompt_or_cache_prerequisite": false,
++    "adapter_features_implemented_by_this_correction": false,
++    "runtime_publication_guards_changed": false,
++    "remaining_action": "Implement and independently review the planned SDK-only HA gateway, Conversation/AI Task features, component packaging and integrated validation/release. No caching/native-fidelity or mandatory prompt-mapping choice prerequisite."
++  },
++  "historical_plan_sources": {
++    "previous_plan_path": "docs/reviews/home-assistant-cache-gate-correction-v1-previous-plan.md",
++    "sha256": "ee2b26a0554a1c74a7a3925ba05e46a7ddfd4dec105d9f1203c4938974cba749",
++    "previous_state_path": "docs/reviews/home-assistant-cache-gate-correction-v1-previous-state.json",
++    "previous_state_sha256": "a62d461ad84e89049310116a95c1b9c56bda65dfe6091e578adea846b6f84b4a",
++    "reason": "Preserve the exact plan source bound by PLAT-SQL-01 and the outbound acceptance before the reviewed scope correction. Earlier manifests/reviews remain immutable; implementation sources remain unchanged."
+   }
+ }

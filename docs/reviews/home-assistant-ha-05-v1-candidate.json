@@ -1,0 +1,46 @@
+{
+  "candidate_id": "ha-05-v1",
+  "node": "HA-05",
+  "created_at": "2026-11-22T10:17:43.554253+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_gateway_sdk_implementer",
+  "reviewer_agent_id": "/root/ha_gateway_sdk_reviewer",
+  "files": {
+    "integrations/home-assistant/assist/custom_components/plowshare/agent.py": "2db31a187324faf2a7a2585e96c468e942fcfc9f030206d722822adbb59891e1",
+    "integrations/home-assistant/assist/custom_components/plowshare/models.py": "1289cc93024ba4d05fe0e86db854afefabb561e79e61e202b4eb48dc2389262f",
+    "integrations/home-assistant/assist/custom_components/plowshare/requests.py": "15a6cd457b02c7236e52d77a56a7cd47357b91409524fa569e2b50ed8ba3ba23",
+    "integrations/home-assistant/assist/tests/test_agent.py": "0e11cd5d5c9f0d82760d43457f2d24fc33234f44922337c6569597f3e43ce92c",
+    "integrations/home-assistant/assist/tests/test_gateway.py": "a3484daa56e8d8e02af8acd990c0e16b3fe156b8206cbd224803342f7b6f0e3a",
+    "integrations/home-assistant/assist/tests/test_socket.py": "93e0cef063178106cf12c3fd7ea08b92d49434c81f9bbbaa7c548852bcde8c38",
+    "docs/reviews/home-assistant-ha-05-implementation.md": "c443d22a779c09760028c50b0ffd8f786100b7f2468c371c4c319a4b5cc903d6"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-ha-05-v1-state.json",
+    "sha256": "7c9ef4f7c442725cfb067179fb64fc3973d9dbfb27bcd717aace1ae3142b90c0"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-05-v1.diff",
+    "sha256": "0a46246e7a891d246bb97a7be56286e0c83a86657566c754134ffbf9d644b318"
+  },
+  "dependencies": {
+    "CORE-04": {
+      "id": "ha-core-04-v1",
+      "manifest_path": "docs/reviews/home-assistant-core-04-v1-candidate.json",
+      "manifest_sha256": "9a0afecb2fc6d4840119bac0bbda08c6e3e32c475fbc3a966cccc7a1dd910da0"
+    },
+    "SCOPE-01": {
+      "id": "scope-01-v2",
+      "manifest_path": "docs/reviews/home-assistant-scope-01-v2-candidate.json",
+      "manifest_sha256": "ec5279dccc4897a1c44e564346cae39f364495d8df53beb9bce18b9ff6c19516"
+    }
+  },
+  "structural_validation": {
+    "nodes": 30,
+    "edges": 56,
+    "acyclic": true,
+    "independent_roles": true,
+    "retired_gate_consumers": 0,
+    "release_requires_cache_measurement": false
+  },
+  "limits": "No deployment/live operations or prompt/context gate satisfaction. Independent review required."
+}

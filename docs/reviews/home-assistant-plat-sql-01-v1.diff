@@ -1,0 +1,1659 @@
+diff --git a/plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java b/plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java
+index 6030ab95..e3189f1e 100644
+--- a/plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java
++++ b/plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java
+@@ -37,6 +37,7 @@ import java.sql.SQLFeatureNotSupportedException;
+ import java.time.Duration;
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.Executors;
+@@ -46,6 +47,7 @@ import java.util.concurrent.TimeoutException;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicLong;
+ import java.util.concurrent.atomic.AtomicReference;
++import java.util.function.Consumer;
+ import javax.sql.DataSource;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.params.ParameterizedTest;
+@@ -442,8 +444,14 @@ class ScopedSqlWorkBudgetTest {
+ 
+   @ParameterizedTest
+   @ValueSource(booleans = {false, true})
+-  void lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied(boolean fetch)
+-      throws Exception {
++  void queryAndFetchRefreshInheritedNetworkDeadlineWhenPhysicalCleanupWorkerIsOccupied(
++      boolean fetch) throws Exception {
++    long fixtureStarted = System.nanoTime();
++    var phases = new ConcurrentLinkedQueue<String>();
++    Consumer<String> phase =
++        value ->
++            phases.add(
++                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - fixtureStarted) + "ms " + value);
+     DataSource source = mock(DataSource.class);
+     Connection first = mock(Connection.class);
+     Connection second = mock(Connection.class);
+@@ -452,15 +460,14 @@ class ScopedSqlWorkBudgetTest {
+     when(source.getConnection()).thenReturn(first, second);
+     when(second.prepareStatement("late")).thenReturn(statement);
+     AtomicInteger socketTimeout = new AtomicInteger(1000);
++    AtomicInteger initialTimeout = new AtomicInteger();
+     AtomicInteger captured = new AtomicInteger();
+     CountDownLatch cleanupBlocked = new CountDownLatch(1);
+     CountDownLatch cleanupRelease = new CountDownLatch(1);
+-    CountDownLatch prepared = new CountDownLatch(1);
+-    CountDownLatch startLate = new CountDownLatch(1);
+     CountDownLatch socketRead = new CountDownLatch(1);
+-    AtomicLong operationEnd = new AtomicLong();
+     doAnswer(
+             invocation -> {
++              phase.accept("first abort entered");
+               cleanupBlocked.countDown();
+               assertTrue(cleanupRelease.await(2, TimeUnit.SECONDS));
+               return null;
+@@ -470,6 +477,7 @@ class ScopedSqlWorkBudgetTest {
+     doAnswer(
+             invocation -> {
+               socketTimeout.set(invocation.getArgument(1));
++              phase.accept("second network timeout " + socketTimeout.get());
+               return null;
+             })
+         .when(second)
+@@ -479,8 +487,10 @@ class ScopedSqlWorkBudgetTest {
+             invocation -> {
+               if (!fetch) {
+                 captured.set(socketTimeout.get());
++                phase.accept("raw execute timeout " + captured.get());
+                 socketRead.countDown();
+-                platformRead(socketTimeout.get());
++                platformRead(socketTimeout.get() + 1);
++                phase.accept("raw execute completed");
+               }
+               return rows;
+             });
+@@ -488,74 +498,108 @@ class ScopedSqlWorkBudgetTest {
+         .thenAnswer(
+             invocation -> {
+               captured.set(socketTimeout.get());
++              phase.accept("raw fetch timeout " + captured.get());
+               socketRead.countDown();
+-              platformRead(socketTimeout.get());
++              platformRead(socketTimeout.get() + 1);
++              phase.accept("raw fetch completed");
+               return true;
+             });
+     var settings =
+         new SqlWorkBudgetProperties(Duration.ofSeconds(1), Duration.ofMillis(100), 4, 2, 8, 1);
++    // Setup has its own finite allowance. Neither cold lease setup nor a scheduled wakeup must
++    // land inside the tested 120ms window. The SQL query ceiling and cleanup budget stay unchanged.
++    Duration setupBudget = Duration.ofSeconds(5);
+     try (var budget = fakeBudget(settings, null);
+-        var calls = Executors.newSingleThreadExecutor();
+-        var scheduler = Executors.newSingleThreadScheduledExecutor()) {
++        var calls = Executors.newSingleThreadExecutor()) {
+       try {
+         assertThrows(
+             ReadFailedException.class,
+             () ->
+                 budget.within(
+-                    Duration.ofMillis(100),
++                    setupBudget,
+                     () -> {
+-                      try (Connection held = budget.decorate(source).getConnection()) {
+-                        assertFalse(held.isClosed());
+-                        platformRead(150);
+-                        return "late";
++                      try {
++                        Connection held = budget.decorate(source).getConnection();
++                        // Intentionally leave the aborted handle owned: finish must retain it
++                        // until the one physical cleanup worker passes the release barrier.
++                        held.abort(Runnable::run);
++                        throw ReadFailedException.queryCancelled(null);
+                       } catch (SQLException failed) {
+-                        throw new IllegalStateException(failed);
++                        throw new AssertionError(failed);
+                       }
+                     }));
+-        assertTrue(cleanupBlocked.await(1, TimeUnit.SECONDS));
++        assertTrue(cleanupBlocked.await(1, TimeUnit.SECONDS), phases::toString);
++        verify(first, never()).close();
+         var pending =
+             calls.submit(
+-                () -> {
+-                  operationEnd.set(System.nanoTime() + Duration.ofMillis(400).toNanos());
+-                  return budget.within(
+-                      Duration.ofMillis(400),
+-                      () -> {
+-                        try (Connection connection = budget.decorate(source).getConnection();
+-                            PreparedStatement selected = connection.prepareStatement("late")) {
+-                          ResultSet values = fetch ? selected.executeQuery() : null;
+-                          prepared.countDown();
++                () ->
++                    budget.within(
++                        setupBudget,
++                        () -> {
+                           try {
+-                            assertTrue(startLate.await(1, TimeUnit.SECONDS));
+-                          } catch (InterruptedException interrupted) {
+-                            Thread.currentThread().interrupt();
+-                          }
+-                          if (fetch) {
+-                            try (values) {
+-                              return values.next();
++                            Connection connection = budget.decorate(source).getConnection();
++                            PreparedStatement selected = connection.prepareStatement("late");
++                            ResultSet values = fetch ? selected.executeQuery() : null;
++                            initialTimeout.set(socketTimeout.get());
++                            assertTrue(initialTimeout.get() > 150, phases::toString);
++                            var owningScope = ScopedSqlWorkBudget.current();
++                            // Nested SQL units narrow the existing Scope.end. Both execute and
++                            // an already-open result must re-clamp at Query.check, the same path
++                            // that subtracts elapsed time from an aging scope's absolute deadline.
++                            try {
++                              return budget.within(
++                                  Duration.ofMillis(120),
++                                  () -> {
++                                    assertSame(owningScope, ScopedSqlWorkBudget.current());
++                                    // Close before restoring the setup deadline: canceled SQL must
++                                    // not wait again using the longer fixture setup allowance.
++                                    try (connection;
++                                        selected) {
++                                      if (fetch) {
++                                        try (values) {
++                                          return values.next();
++                                        }
++                                      }
++                                      try (var result = selected.executeQuery()) {
++                                        return result.next();
++                                      }
++                                    } catch (SQLException failed) {
++                                      throw new AssertionError(failed);
++                                    }
++                                  });
++                            } finally {
++                              phase.accept("narrowed scope and resource close finished");
+                             }
++                          } catch (SQLException failed) {
++                            throw new AssertionError(failed);
+                           }
+-                          try (var result = selected.executeQuery()) {
+-                            return result.next();
+-                          }
+-                        } catch (SQLException failed) {
+-                          throw new AssertionError(failed);
+-                        }
+-                      });
+-                });
+-        assertTrue(prepared.await(1, TimeUnit.SECONDS));
+-        scheduler.schedule(
+-            startLate::countDown,
+-            Math.max(0, operationEnd.get() - System.nanoTime() - Duration.ofMillis(120).toNanos()),
+-            TimeUnit.NANOSECONDS);
+-        assertTrue(socketRead.await(1, TimeUnit.SECONDS));
+-        assertTrue(captured.get() <= 150, "late I/O must not retain checkout's longer timeout");
+-        assertInstanceOf(
+-            ReadFailedException.class,
+-            assertThrows(ExecutionException.class, () -> pending.get(250, TimeUnit.MILLISECONDS))
+-                .getCause());
++                        }));
++        if (!socketRead.await(1, TimeUnit.SECONDS)) {
++          try {
++            pending.get(10, TimeUnit.MILLISECONDS);
++          } catch (ExecutionException | TimeoutException failed) {
++            throw new AssertionError("SQL fixture phases: " + phases, failed);
++          }
++          throw new AssertionError("SQL fixture phases: " + phases);
++        }
++        assertTrue(captured.get() > 0 && captured.get() <= 120, phases::toString);
++        assertTrue(captured.get() < initialTimeout.get(), phases::toString);
++        // This observes worker settlement; it is not the SQL deadline. A host can deschedule the
++        // socket fixture past its requested sleep, while the applied network limit stays <=120ms.
++        var failure =
++            assertInstanceOf(
++                ReadFailedException.class,
++                assertThrows(
++                        ExecutionException.class,
++                        () -> pending.get(1, TimeUnit.SECONDS),
++                        phases::toString)
++                    .getCause());
++        assertEquals(ReadFailedException.Reason.DEADLINE_EXCEEDED, failure.reason());
++        assertEquals(1, cleanupRelease.getCount());
++        verify(first, never()).close();
+         verify(second, never()).abort(any());
++        verify(second, never()).close();
+       } finally {
+-        startLate.countDown();
+         cleanupRelease.countDown();
+       }
+     }
+diff --git a/docs/reviews/home-assistant-plat-sql-01-implementation.md b/docs/reviews/home-assistant-plat-sql-01-implementation.md
+new file mode 100644
+index 00000000..4defe99f
+--- /dev/null
++++ b/docs/reviews/home-assistant-plat-sql-01-implementation.md
+@@ -0,0 +1,135 @@
++# PLAT-SQL-01: deterministic SQL cleanup-lane regression fixture
++
++Status: implementation and coordinator-run verification ready for independent review; not yet accepted.
++
++## Scope and finding
++
++This is a separately scoped platform test correction. It changes only
++`ScopedSqlWorkBudgetTest.java`; production SQL infrastructure, public contracts,
++SDKs, database schema and integration behavior are unchanged. Home Assistant
++prompt/context-dependent capabilities remain gated.
++
++The failing mock test waited for a scheduled gate to open during the final 120 ms
++of a 400 ms SQL scope. Diagnostic instrumentation exposed the pending worker's
++exception instead of reporting only a missing raw-socket latch. In the reproduced
++`fetch=false` failure, the gate opened after the owning deadline:
++
++| Diagnostic event | Milliseconds since fixture start |
++| --- | ---: |
++| Second scope requested | 1047 |
++| Second scope action entered | 1048 |
++| Second connection acquired | 1049 |
++| Raw prepare invoked | 1051 |
++| Prepared barrier observed by main | 1057 |
++| Approximate requested deadline | 1447 |
++| Scheduled gate opened and worker resumed | 1473 |
++
++The requested deadline was recorded immediately before entering `within(400ms)`;
++the actual scope began approximately one millisecond later. The gate therefore
++opened approximately 25 ms after expiry. The pending future failed with
++`ReadFailedException: Read deadline expired before a result was available` through
++`Scope.failure` -> `Scope.check` -> `Lease.check` -> statement `State.check`, before
++the raw execute mock. This is correct production fencing, rather than evidence
++that a live query failed to refresh its network deadline. The `fetch=true`
++diagnostic case passed. These observations establish the late scheduler wakeup;
++they do not establish why the scheduler woke late or a cold-reflection cause.
++
++A second diagnostic identified a separate harness observation failure after the
++first correction. The test's 250 ms future wait expired while the fake socket was
++still sleeping: with an applied timeout of 118 ms, raw execute ran from 695 ms to
++945 ms (250 ms); with an applied timeout of 119 ms, raw fetch ran from 10 ms to
++279 ms (269 ms). The fixture requested timeout plus one millisecond, but its
++thread resumed substantially later. This establishes host descheduling/oversleep
++in the mock socket, without attributing its cause. Independently, source tracing
++showed that restoring the five-second setup deadline before connection closure
++could add the allowed 100 ms cleanup wait behind the occupied worker. That source
++path is separate from the observed oversleep; neither is a missing network clamp.
++
++A previous full check failed at the first cleanup latch instead. The original
++fixture assumed that a first lease would be acquired before its 100 ms setup
++scope expired. Its precise failure cause remains unproven; the corrected fixture
++removes that incidental setup race as well.
++
++## Correction and retained assertions
++
++The first already-borrowed lease is explicitly aborted. Its scope then exits
++with a deliberate typed cancellation, retaining the aborted handle until the
++single physical cleanup worker passes the fixture's release barrier. The fixture
++observes entry into raw `abort`, verifies the first raw `close` has not occurred,
++and keeps the release barrier closed through the second operation's assertions.
++Other existing tests retain expiry-to-cleanup and materialization coverage.
++
++Connection and statement setup have a separate finite five-second fixture
++allowance. The configured query ceiling remains one second and cleanup budget
++remains 100 ms. Once the second statement is prepared, a nested 120 ms SQL unit
++narrows the **same Scope object** immediately before the operation under test.
++For materialization, the result set was already opened under the longer deadline.
++The fixture asserts the previously applied timeout exceeds 150 ms, then checks
++that raw execute/fetch sees a positive timeout no greater than 120 ms and strictly
++smaller than the earlier timeout. The fake socket crosses its configured timeout
++by one millisecond to guarantee that its otherwise successful result is late.
++The future must fail with `ReadFailedException` reason `DEADLINE_EXCEEDED`; neither
++second raw abort nor close can execute while the first cleanup operation occupies
++the sole worker. Connection and statement closure occur inside the narrowed
++scope, before its outer setup deadline is restored. The future has a separate
++finite one-second **observation allowance**, replacing 250 ms in response to the
++measured fake-socket oversleep. This does not increase the 120 ms SQL budget or
++the asserted applied network timeout. The fixture proves deadline clamping and
++rejection of late results; it does not prove an upper bound on physical wall time
++when the host does not schedule the worker promptly.
++Finite latch/future observation reports the phase timeline and underlying worker
++failure if the raw-I/O barrier is not reached.
++
++This intentionally replaces natural same-scope elapsed aging with inherited
++deadline narrowing. It does not claim to exercise a scheduler waking inside a
++deadline window. Both paths use the existing `Query.check` calculation: select
++the earlier query end and current `Scope.end`, then have `networkDeadline`
++subtract current monotonic time. The fetch variant specifically proves that an
++already-created Query consults the narrowed scope; the execute variant proves
++refresh after checkout. No injectable production clock or new timer API is added.
++
++## Diagnostic evidence
++
++The following temporary coordinator artifacts preserve the diagnostic source and
++failure; they are local evidence locations, not production configuration. Raw
++test dumps are not copied into the repository.
++
++| Artifact | SHA-256 |
++| --- | --- |
++| `/private/tmp/ha-sql-diagnostic-source.java` | `8bd36d0666888973935b88eb089151cf92d4b6d5ea075dc1053f00c08082a706` |
++| `/private/tmp/ha-sql-diagnostic.xml` | `b7c71cb259501f87af5f9009e11e496dfcc24bfe6ba4dcdcace585959af332b3` |
++| `/private/tmp/ha-sql-diagnostic.log` | `1abc0eaf7ae5d06f342f3a3d8f6b98527bb9ecfe34d0f7936e2ec9616ec13bd1` |
++| `/private/tmp/ha-sql-terminal-diagnostic-source.java` | `5abf57e074632d0aa54bdaae07f9a6bc9bb726772dac15f0dba6a87ab0eccebb` |
++| `/private/tmp/ha-sql-terminal-diagnostic.xml` | `7208f64a18b16b21864a031664bbb249a00eeb8aac0274136c998e18bffe26e1` |
++| `/private/tmp/ha-sql-terminal-diagnostic.log` | `4abc60805009eb2f3977dff62f487ed12493fbd79809320e95dd29d42e255b11` |
++
++## Verification
++
++No implementer-run Gradle or real-database tests. The coordinator serializes
++formatting, selected mock-test verification and required repository checks.
++
++| Coordinator check | Actual outcome | Evidence SHA-256 |
++| --- | --- | --- |
++| Final `format` | PASS | `/private/tmp/ha-sql-fixture-format-v2.log`: `c3fd79afddae7d415197d18f5bbe8b53f0c8cd5eddca0477d0d08c5e822eacec` |
++| Corrected parameterized method and `formatCheck` | PASS, two cases; five seconds, 65 tasks | `/private/tmp/ha-sql-fixture-method-final.log`: `b35176af7775ec6277935b790688de0af198ed4dd6003a313edc03d63a6fd124` |
++| Entire `ScopedSqlWorkBudgetTest` mock class | PASS, 30 cases; nine seconds, 22 tasks | `/private/tmp/ha-sql-fixture-class-final.log`: `42f8d6b88786aca6e20dafbd1c51b49e60d7dd9d931acee8a4de5bcce89f18c8` |
++| Unexcluded repository `check` and outbound `installDist` | PASS; five minutes 13 seconds, 144 tasks (29 executed, one from cache, 114 up-to-date) | `/private/tmp/ha-outbound-integrated-v2-check.log`: `ec7f3206cc00104e046eb3b5ea852eb0d89d37f4d89b344c440c284ee10fee3b` |
++
++The corresponding retained method XML hash is
++`cba645ac94296020e1aa8a2eb7cab6f4e5fec5907502f693278285081af86b6a`
++(`/private/tmp/ha-sql-fixture-method-final.xml`); the class XML hash is
++`d5d6bc0bcaef61eff31499cc03685a8ed83831defcc4be07b99cbbbea5b68e21`
++(`/private/tmp/ha-sql-fixture-class-final.xml`). Both XML files report zero
++failures and errors. The formatted corrected Java source SHA-256 is
++`1804bc5e331d9f5eb05a660120981f9656b4cb09b1cf491bbb332973b38fac00`.
++
++The full check reports 8,627 server cases with zero failures, errors or skips.
++Its owning-class XML retains 30 cases with zero failures, errors or skips;
++`/private/tmp/ha-sql-fixture-full-final.xml` has SHA-256
++`fd418a4545ecb4ae43a08354f9d486ec4b37d96c77bfdf1aa968784fb45673b9`.
++Home Assistant XML retains 166 passing cases with zero failures, errors or skips;
++that test task was up-to-date for unchanged adapter source in this full run.
++The corrected Java source hash above remains unchanged after verification.
++These are mock/default checks; no real database, live Home Assistant deployment,
++model invocation or physical-device acceptance is claimed. Independent approval
++is still required before marking this deliverable accepted.
+diff --git a/docs/home-assistant-delivery-plan.md b/docs/home-assistant-delivery-plan.md
+index 1da007b6..ad5d003c 100644
+--- a/docs/home-assistant-delivery-plan.md
++++ b/docs/home-assistant-delivery-plan.md
+@@ -1,6 +1,7 @@
+ # Home Assistant package delivery graph
+ 
+ Created: 17 November 2026. Coordinator: `/root` (this chat's primary agent).
++Last reconciled: 22 November 2026 against main `6de685f63e060f3003cb93233d2567e004269755`.
+ Approval and current delivery progress are recorded in the linked ledger.
+ The node table below is the initial planning snapshot, not a live status board.
+ Baseline commit: `2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e` **plus the existing dirty working tree**. A commit ID alone
+@@ -51,6 +52,49 @@ Its [scoped design](reviews/home-assistant-ex-sql-budget-design.md) and this gra
+ amendment require independent plan approval before code dispatch. This amendment
+ does not claim a universal deadline fix or change unrelated unscoped operations.
+ 
++## 22 November outbound-only amendment
++
++The user authorized updating this graph/ledger and implementing independently
++reviewed outbound-only packaging, profiles and validation. PR #300 merged the
++original thirteen accepted deliverables as `16dec24b`; their merge milestones now
++reflect that fact. Historical manifests, reports and frozen ledger snapshots are
++immutable. Acceptance records remain evidence for their exact candidates, not a
++claim that every subsequent main revision was independently reviewed by those
++original agents.
++
++Current main owns the timeout contract: actual SQL queries/transactions have a
++configurable two-second default limit; nested statements share their transaction's
++remaining budget. Independent transactions, hooks, common authorization, durable
++job admission and reply delivery do not inherit an aggregate two-second workflow
++lifetime. Slow accepted workflows warn without cancellation or replacement.
++CORE-02/03A/03 acceptance text below is reconciled to that current contract; old
++reports retain the older requirements as historical evidence. Adapter/provider
++IO, polling and cleanup keep their own explicit finite resource budgets.
++
++The new branch consists of OUT-PLAN-01, OUT-PACK-01, OUT-PROFILE-01 and
++OUT-VERIFY-01. OUT-PLAN-01 freezes the common operator contract and independent
++review before source dispatch. Packaging and profiles may then proceed in parallel
++with disjoint ownership. Validation starts after both are independently accepted.
++This branch has no prompt-fidelity dependency because it invokes existing
++Plowshare agents/tools rather than offering an HA model endpoint. It neither
++satisfies nor removes any original gate/dependency.
++
++All eleven original awaiting-gate nodes remain awaiting_gate. HA-05–08, HA-10–11,
++VERIFY-01, PERF-01 and RELEASE-01 remain blocked on faithful prompt/context support;
++DEPLOY-01 and LIVE-01 retain release dependencies and their separate operational
++authorizations. No external system-context API, task-text substitute, prompt
++rewriting, Assist enablement or installable HA custom component is authorized.
++Prefix caching remains impact assessment of integrator-supplied prompts. Outbound
++source/artifacts may be prepared and tested locally; this amendment authorizes no
++new publication, target-branch merge, deployment, HA restart or live model/device
++operation.
++
++The named provider host is isolated from the legacy runtime's event workflows.
++It admits no routes, scripts, causal-feedback configuration or selected event
++subscriptions. It does not synthesize cross-host effect correlation. Operators
++must retain the existing documented separation from legacy feedback-dependent
++workflows; a future shared correlation owner requires its own reviewed scope.
++
+ ## Independence and closure protocol
+ 
+ 1. Root dispatches a ready node to its named implementer role only after its
+@@ -146,6 +190,21 @@ flowchart TD
+   D1 --> D2["HA-02 Discovery/reads"]
+   D2 --> D3["HA-03 Read ToolProvider"]
+   D3 --> D4["HA-04 Action provider"]
++  P --> OP["OUT-PLAN-01 Outbound amendment"]
++  A --> OP
++  OP --> OH["OUT-PACK-01 Provider host/package"]
++  D3 --> OH
++  D4 --> OH
++  EV --> OH
++  C4 --> OH
++  OP --> OT["OUT-PROFILE-01 Outbound profiles"]
++  D3 --> OT
++  D4 --> OT
++  EV --> OT
++  C4 --> OT
++  OH --> OV["OUT-VERIFY-01 Outbound validation"]
++  OT --> OV
++  SQ["PLAT-SQL-01 SQL cleanup fixture"] --> OV
+   C4 --> G["HA-05 Shared gateway"]
+   F --> G
+   PG{{"Verified prompt public path"}} -.-> G
+@@ -253,15 +312,15 @@ Implement a narrow typed resolver/repository and a new migration enforcing the a
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/archive/<new-alias-contract-and-repository>`; `plowshare-server/src/main/resources/db/migration/<new-version>`; `plowshare-server/src/test/java/<selected-alias-tests>`.
+ 
+-**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify shared 2-second default SQL completion deadline, normal <=500 ms queries and <=1-second worst-case ceiling including waits/materialization; inspect real enforcement and report gaps.
++**Acceptance evidence:** Mock service tests cover scope/ownership denial, deleted/archived targets and explicit retention/reset policy. Selected @Tag("full-db") / -PfullDb tests prove uniqueness, concurrent first-open races, rollback and migration constraints. State the database-specific reason before each selected run. Verify each actual SQL query/transaction uses its configured two-second default completion limit, normally completes within 500 ms, and includes acquisition/waits/materialization. Nested SQL shares its transaction remaining time; independent SQL units and the surrounding workflow do not share an aggregate deadline. Inspect owning enforcement and report gaps.
+ 
+ ### CORE-03A — Scoped SQL completion for Ex admission
+ 
+-Implement the independently approved [internal scoped SQL-budget design](reviews/home-assistant-ex-sql-budget-design.md) so all Ex-owned identity/authority, alias, post-target and ordinary run-admission SQL shares one finite completion budget. Keep repositories responsible for SQL and keep ordinary transaction/lifecycle owners intact. The scope starts before admission; it does not open a transaction across the facade, hooks or scheduling. Decorate the repository connection holder and caller-thread authoritative projection leases while preserving the raw primary Hikari source and unscoped compatibility, including pool-admission-disabled composition.
++Retain the internal SQL-budget infrastructure under the current owning contract. Each hard scope covers one actual query or SQL transaction, including acquisition, execution/materialization and bounded physical cleanup. Nested SQL shares the transaction's earlier deadline. Preserve raw primary/pool identity, repository ownership and unscoped compatibility; never hold a connection across hooks, network calls or scheduling. The original design/report records its historical Ex-wide scope and must not override the current contract in ADR 0077 and the persistence/transport guides.
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/pool/<scoped-sql-budget-interface-infrastructure-and-composition>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/ProjectionCacheConfiguration.java` (only necessary lease composition); `plowshare-server/src/main/java/io/aeyer/plowshare/server/cache/<Ex-private-miss-mode-and-atomic-existing-read>`; `plowshare-server/src/test/java/<scoped-budget-and-selected-PostgreSQL-tests>`; `docs/reviews/home-assistant-ex-sql-budget-design.md`; `docs/reviews/<scoped-sql-budget-implementation-evidence>`. CORE-03 owns wiring the accepted interface into its facade and its facade fixtures; coordinate that handoff instead of concurrent edits.
+ 
+-**Acceptance evidence:** Mock/barrier tests prove two-second default shared operation budget, earlier nested deadlines, one-second query ceiling through materialization, admission/acquisition interruption, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, unavailable/uncertain outcomes without replay and bounded shutdown. Verify fixed-label duration/breach/cancellation metrics and no raw SQL/identifiers. Selected tagged PostgreSQL cases prove actual lock/stream cancellation, rollback, acquisition and safe pool reuse only where mocks cannot. Confirm raw primary/pool metrics, shared template/transaction source identity, enabled/disabled admission and unchanged unscoped behavior. Preserve warm authorized hits and existing-fill coalescing; Ex-only private misses use existing uncached loaders so a scoped cancellation never aborts an ordinary shared fill/joiner. Verify current authority and query-count cost without claiming better cache performance. Record driver assumptions and gaps honestly; a logical timeout or SQL-only scope cannot establish whole-call completion for hooks/file loading.
++**Acceptance evidence:** Mock/barrier tests prove finite actual SQL-unit deadlines, earlier nested transaction deadlines, materialization cancellation, transaction and independent lease coverage, bounded physical occupancy, cancellation/close/reuse fencing, preserved caller interrupts, typed query failures with commit uncertainty and bounded cleanup. Backpressure applies before dispatch and must not cancel accepted work; workflow duration warnings cannot replace an accepted job/result. Preserve warm authorized cache hits and existing-fill ownership. Select tagged PostgreSQL tests only for actual locking, cancellation, rollback or pool reuse that mocks cannot establish; retain exact historical evidence separately. A SQL-only scope does not establish universal cancellation or a whole-call deadline for hooks/file loading.
+ 
+ This node is a prerequisite discovered during implementation. Existing CORE-03 semantic work was dispatched against accepted CORE-02; its completion and new scoped-budget wiring now require accepted CORE-03A. Root records that transition in the ledger, not as an implicit approval or a finished facade.
+ 
+@@ -271,7 +330,7 @@ Deliver the canonical wire/request/schema definitions, FrameTypes/dispatch regis
+ 
+ **Owned outputs:** `plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/<Ex-handlers-FrameTypes-and-routing>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/agents/<owning-admission-seams>`; `plowshare-server/src/main/java/io/aeyer/plowshare/server/api/<Ex-request-contracts>`; `plowshare-protocol/<required-shared-contracts>`; `sdk/typescript/src/operations/<canonical-Ex-contracts>`; `scripts/generate-sdk-contracts.mjs`; `sdk/<owning-generated-contract-outputs>`; `plowshare-server/src/test/java/<facade-tests>`.
+ 
+-**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Integrate accepted CORE-03A before the first admission SQL and through final synchronous checks without an outer Spring transaction. Verify remaining non-SQL phase budgets, including hook loading/execution; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
++**Acceptance evidence:** Prove one client request reaches the ordinary lifecycle; include authorization before disclosure, actual target scope validation, incompatible routing, run-on-miss refusal, existing allowance preservation, no repeated log.open, concurrent opens, run exclusion, cancellation and uncertain submission. Assert useful resolved snapshots are reused; repeated reads require an authority freshness/concurrency reason. Use accepted CORE-03A infrastructure at actual repository SQL-unit boundaries without an outer facade transaction or aggregate workflow timeout. Verify bounded intake/reply ownership, existing non-SQL resource budgets and warning-only slow workflow observations; SQL-only enforcement must not become a whole-call deadline claim. Existing non-Ex API tests remain passing.
+ 
+ ### CORE-04 — Shared catalogues and every SDK
+ 
+@@ -439,6 +498,141 @@ Exercise the public deployed package with the agreed permitted targets: scoped d
+ 
+ **Additional gates:** `live_acceptance_authorized`.
+ 
++## Outbound-only deliverables
++
++| Node | Dependencies | Implementer | Independent reviewer |
++| --- | --- | --- | --- |
++| OUT-PLAN-01 | PLAN-00, AUDIT-01 | `/root` | `/root/ha_outbound_plan_reviewer` |
++| OUT-PACK-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_pack_implementer` | `/root/ha_outbound_pack_reviewer` |
++| OUT-PROFILE-01 | OUT-PLAN-01, CORE-04, HA-03, HA-04, HA-09 | `/root/ha_outbound_profiles_implementer` | `/root/ha_outbound_profiles_reviewer` |
++| PLAT-SQL-01 | None (separate platform test scope) | `/root/sql_cleanup_implementer` | `/root/sql_cleanup_reviewer` |
++| OUT-VERIFY-01 | OUT-PACK-01, OUT-PROFILE-01, PLAT-SQL-01 | `/root/ha_outbound_validation_implementer` | `/root/ha_outbound_validation_reviewer` |
++
++These are separate deliverables, not partial acceptance of HA-10/11 or VERIFY-01.
++All use the same frozen-candidate/independent-approval protocol. Validation's
++implementer/reviewer must not have authored either feature implementation. Root
++records actual IDs at dispatch; role reservation is not a running-agent claim.
++
++### OUT-PLAN-01 — Current-main reconciliation and operator contract
++
++**Owned outputs:** this plan, the coordinator-owned ledger and the
++[outbound host contract](reviews/home-assistant-outbound-host-contract.md).
++Reconcile PR #300 merge milestones and current SQL/accepted-work semantics without
++rewriting prior evidence. Add these nodes/edges with no inherited prompt gate.
++Freeze strict CLI/configuration, file ownership, dependencies and evidence limits.
++Independent review must approve exact plan/contract/ledger snapshot before code.
++
++**Acceptance evidence:** JSON/schema consistency, acyclic graph, dependency and
++gate references, independent role identities, all original eleven gated nodes
++unchanged, all four capability gates unsatisfied, historical evidence unchanged,
++and explicit authorization/merge/deployment distinctions. No runtime/DB check is
++required for this documentation node.
++
++### OUT-PACK-01 — Standalone outbound provider host and package
++
++Expose named read and optional explicit control providers using the existing
++public Java SDK and HA adapter. Preserve the legacy executable via delegation;
++new `--provider CONFIG` and `--provider --check CONFIG` select isolated provider
++mode. Strict typed configuration supplies explicit origins, binding/policy,
++credential environment-variable names, project/provider/principal/prefix, private
++journal paths, selected fixed action profiles and finite owning timing budgets.
++Read/control providers share one authenticated SDK connection and the explicit
++Application execution principal, as required by the current provider registry.
++Logical provider names, prefixes, journals and exact grant sets remain separate;
++read grants never authorize control.
++
++Offline `--check` validates complete inputs without credential lookup, network,
++journal creation or catalogue mutation. Provider mode rejects event subscriptions,
++routes/scripts/feedback fields and unsupported recursive model endpoints. The
++supervisor owns finite adapter maintenance, catalogue publication/renewal,
++read-only uncertainty reconciliation and bounded polls/cleanup. Unknown mutation
++outcomes never trigger replay/replacement, silent account fallback or journal
++reset. Fail closed and retain ownership/receipts if physical cleanup cannot settle.
++Use narrow lifecycle interfaces for testable effects, not raw JSON domain APIs.
++
++**Owned outputs:** new HA-specific main/configuration/host interfaces and
++composition under `integrations/home-assistant/src/main/java/`; their new unit
++fixtures; HA `build.gradle.kts`; `PROVIDER-HOST.md`; narrow README links and correct
++explicit `-PfullDb` instructions for existing PostgreSQL harness tests. No edits
++to core, public SDK/shared contracts, legacy runtime behavior, Assist code or
++profile-owned example files.
++
++**Acceptance evidence:** invalid/unknown/null config and identity/path/prefix
++collisions refuse before effects; offline checks need no secrets; read-only has
++no actuator; control opt-in is exact; startup/renew/expiry/uncertainty/restart,
++bounded physical shutdown and legacy invocation preservation use fakes/local
++transports. Build the distribution and inspect its production dependency boundary.
++No live server/HA/model/device operation and no real database test by default.
++
++### OUT-PROFILE-01 — Read-only and explicit-control Application templates
++
++Supply separate outbound-only Application roots and matching provider configs in
++`examples/outbound/readonly` and `examples/outbound/control`. They use local
++`dynamic: true` agents, exact named external tool grants, static provider
++permissions with `bindings: []`, explicit execution/provider principal
++placeholders, empty access grants and separate private journals. No wildcard,
++implicit control, Assist/AI Task, event routes, shared private conversation
++history, built-in tools or automatic authority provisioning. Connection/policy
++belongs in typed configuration, not agent prose.
++
++**Owned outputs:** all `examples/outbound/**`, example-specific operator guidance
++and `OutboundProfilesTest.java`. Packaging host/configuration code is owned by
++OUT-PACK-01; the approved common contract permits parallel work.
++
++**Acceptance evidence:** current real manifest/provider/agent loaders accept both
++complete roots; exact assignments deny wrong agent/principal/project/control;
++missing grants confer no authority; invalid examples fail clearly. Match host
++configurations to the typed parser, exact provider names/prefixes/journals and
++installed files once OUT-PACK-01 is ready. No model fleet or deployment claim from
++parsing a template; placeholders must be replaced in private operator source.
++
++### PLAT-SQL-01 — Deterministic SQL cleanup regression fixture
++
++Continuation authorizes a separate owning-platform test investigation of the
++repository-check blocker. Its general purpose is reliable verification of SQL
++network deadlines and physical cleanup ownership; it adds no adapter capability.
++Diagnose hidden acquisition/worker failures with finite phase/Future evidence
++before correction. Initially own only `ScopedSqlWorkBudgetTest.java` and new
++`docs/reviews/home-assistant-plat-sql-01-*` evidence. No production runtime, public
++API, SDK or schema change is authorized by this test scope.
++
++**Acceptance evidence:** independently review actual diagnostic failure evidence;
++retain the short tested SQL deadline, execute and fetch coverage, observed
++occupied cleanup worker, rejection of late results and exact lease ownership.
++Setup may have its own finite fixture budget; do not loosen the tested boundary,
++exclude tests or retry until green. A fresh method-only JVM, owning class and
++repository `check` must pass on frozen bytes, with formatting checks. Mock JDBC
++is sufficient; no PostgreSQL run is justified. Any discovered runtime defect
++requires an explicitly scoped platform decision before production edits.
++
++### OUT-VERIFY-01 — Integrated outbound-only validation
++
++Assemble exact independently accepted packaging/profile candidates. Verify a fresh
++installed distribution runs offline config validation without credential/network
++or journal side effects, ships only public SDK/runtime production dependencies,
++and includes the approved examples. Exercise host lifecycle and public SDK
++request/recovery contracts over controlled local WebSocket/HA fixtures, retaining
++server-side authorization ownership and distinct delivery/effect/observation states.
++Recheck the Ex SDK contract and existing server authorization tests with mocked
++repositories. Template/source checks cannot establish actual live grant issuance
++or physical device behavior; record those as later operational prerequisites.
++
++**Owned outputs:** new cross-boundary fixtures only under the HA module, and
++`docs/reviews/home-assistant-outbound-validation.md` plus text candidate/source/
++package hash manifests. Feature source corrections return to their original
++implementers and reviewers; validation agents may not self-approve them.
++
++**Acceptance evidence:** current `check`, `formatCheck`, `integrationBoundaryCheck`,
++canonical SDK-contract drift checks and scoped fresh installed-consumer fixtures
++pass against one frozen source. Real SDK transport tests prove public request
++shapes/correlation and no replay after uncertainty; no manual internal-service or
++SQL access from production. Use mocked repositories by default; a selected
++`full-db` test requires an independently stated PostgreSQL-specific assertion,
++not general integration confidence. Guard Assist setup/configuration/packaging
++remains disabled; do not install HA dependencies or enable the component merely
++to claim complete-package validation. Record missing explicit Python/HA checks
++honestly. This node does not close original VERIFY/PERF/RELEASE/DEPLOY/LIVE nodes.
++
+ ## Coordinator scheduling and tracking
+ 
+ There are four concurrent agent slots: root plus at most three workers. The safe
+@@ -447,6 +641,12 @@ a disjoint ready branch. Reviewer slots are reserved before opening more work;
+ root never leaves reviews starved behind unreviewed implementation batches.
+ Roles are reused sequentially only where independence and file ownership hold.
+ 
++Outbound amendment schedule: OUT-PLAN-01 review first, then OUT-PACK-01 and
++OUT-PROFILE-01 on disjoint paths, each with independent review, followed by
++OUT-VERIFY-01. Its initial repository check failed; PLAT-SQL-01 now resolves the
++separate owning-platform test blocker before a new validation candidate. Original
++prompt-dependent waves below remain gated.
++
+ Initial waves after PLAN-00 approval:
+ 
+ 1. AUDIT-01 establishes the exact baseline. No feature node inherits an assumed
+diff --git a/docs/home-assistant-delivery-state.json b/docs/home-assistant-delivery-state.json
+index be85469d..f7aee0dd 100644
+--- a/docs/home-assistant-delivery-state.json
++++ b/docs/home-assistant-delivery-state.json
+@@ -11,7 +11,7 @@
+     "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
+   },
+   "scope": {
+-    "current_request": "Commit reviewed changes and open a pull request; keep prompt-dependent features gated",
++    "current_request": "Update plan/ledger, add independent outbound-only packaging/profiles/validation and implement them; keep prompt-dependent features gated",
+     "runtime_implementation_dispatched": true,
+     "merge_authorized": false,
+     "deployment_authorized": false,
+@@ -21,11 +21,16 @@
+       "Preserve HA prompt/context as supplied; assess cache impact without rewriting it.",
+       "2026-11-17: user authorized execution with Start it; merge, deployment, live effects and backend measurements retain their explicit gates.",
+       "User explicitly chose Leave prompt-dependent features gated. No external system-context API or weaker task-text substitution authorized.",
+-      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only."
++      "User clarified cache boundary: integrator owns bad prompts/low cache reuse; SDK support only for common patterns with explicit semantics and compatibility, never assumed transparent correction. Preserve HA rendering; impact assessment only.",
++      "2026-11-22: user authorized outbound-only implementation and plan/ledger reconciliation. PR300 is already merged. No new publication/target merge/deployment/live authorization and no prompt/context extension. Prior exact-source review artifacts remain immutable."
+     ],
+     "commit_authorized": true,
+     "push_authorized": true,
+-    "pull_request_authorized": true
++    "pull_request_authorized": true,
++    "outbound_implementation_authorized": true,
++    "outbound_publication_authorized": false,
++    "outbound_target_merge_authorized": false,
++    "outbound_deployment_authorized": false
+   },
+   "status_values": [
+     "planned",
+@@ -134,11 +139,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T23:15:30.186477+00:00"
++      "updated_at": "2026-11-16T23:15:30.186477+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "AUDIT-01",
+@@ -187,11 +198,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:33:50.055430+00:00"
++      "updated_at": "2026-11-16T21:33:50.055430+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-01",
+@@ -263,11 +280,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:45:20.065667+00:00"
++      "updated_at": "2026-11-16T21:45:20.065667+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-02",
+@@ -360,11 +383,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T22:49:50.733679+00:00"
++      "updated_at": "2026-11-16T22:49:50.733679+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03A",
+@@ -460,11 +489,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:53:04.215754+00:00"
++      "updated_at": "2026-11-17T01:53:04.215754+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-03",
+@@ -688,11 +723,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T04:36:25.467849+00:00"
++      "updated_at": "2026-11-17T04:36:25.467849+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "CORE-04",
+@@ -834,14 +875,20 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+       "updated_at": "2026-11-17T04:47:09.041004+00:00",
+       "implementation_collaborators": [
+         "/root/ha_sdk_implementer/native_ex"
+-      ]
++      ],
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "FIDELITY-01",
+@@ -918,11 +965,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-16T21:50:46.630922+00:00"
++      "updated_at": "2026-11-16T21:50:46.630922+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-01",
+@@ -1033,11 +1086,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T00:50:36.944378+00:00"
++      "updated_at": "2026-11-17T00:50:36.944378+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-02",
+@@ -1147,11 +1206,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:56:50.815783+00:00"
++      "updated_at": "2026-11-17T01:56:50.815783+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-03",
+@@ -1221,11 +1286,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T01:16:05.933445+00:00"
++      "updated_at": "2026-11-17T01:16:05.933445+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-04",
+@@ -1301,11 +1372,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:18:03.593694+00:00"
++      "updated_at": "2026-11-17T02:18:03.593694+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-05",
+@@ -1514,11 +1591,17 @@
+       "milestones": {
+         "implementation": "ready",
+         "verified_and_reviewed": true,
+-        "merged": false,
++        "merged": true,
+         "deployed": false,
+         "live_validated": false
+       },
+-      "updated_at": "2026-11-17T02:20:47.982417+00:00"
++      "updated_at": "2026-11-17T02:20:47.982417+00:00",
++      "merge_evidence": {
++        "commit": "16dec24b9091c4d9708fb407211585b92007858a",
++        "pull_request": "https://github.com/myrddian/plowshare/pull/300",
++        "verified_ancestor_of": "6de685f63e060f3003cb93233d2567e004269755",
++        "note": "Historical candidate approvals retained; merge does not establish deployed/live status or reapprove later main edits."
++      }
+     },
+     {
+       "id": "HA-10",
+@@ -1807,6 +1890,447 @@
+         "live_validated": false
+       },
+       "updated_at": "2026-11-16T21:45:20.262205+00:00"
++    },
++    {
++      "id": "OUT-PLAN-01",
++      "title": "Current-main reconciliation and outbound host contract",
++      "dependencies": [
++        "PLAN-00",
++        "AUDIT-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root",
++      "reviewer_role": "/root/ha_outbound_plan_reviewer",
++      "implementation_agent_id": "/root",
++      "review_agent_id": "/root/ha_outbound_plan_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "docs/home-assistant-delivery-plan.md",
++        "docs/home-assistant-delivery-state.json",
++        "docs/reviews/home-assistant-outbound-host-contract.md"
++      ],
++      "candidate_revision": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "candidate": {
++            "id": "out-plan-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++            "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++          },
++          "verdict": "CHANGES_REQUIRED",
++          "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++          "report_sha256": "6069223c639ac40b0f2db9484805cb9f5aea61d8b84ef6b24fae6d421175e16f"
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_plan_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++          "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++          "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++          "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPLAN-R1",
++          "severity": "P1",
++          "correction": "Share Application execution principal/tokenEnv/SDK connection across read and control; retain separate logical providers/prefixes/journals/exact tool policy. No core workaround.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        },
++        {
++          "id": "OUTPLAN-R2",
++          "severity": "P3",
++          "correction": "Clarify empty access.accounts vs nonempty exact toolScopes/toolGrants; declaration/placeholder does not issue live authority.",
++          "disposition": "resolved in v2 and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:28:54.029830+00:00"
++    },
++    {
++      "id": "OUT-PACK-01",
++      "title": "Standalone outbound provider host and package",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_pack_implementer",
++      "review_agent_id": "/root/ha_outbound_pack_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md",
++        "integrations/home-assistant/TOOL-PROVIDER.md",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "evidence": [
++        {
++          "kind": "interim_package_check",
++          "result": "PASS",
++          "duration": "38s",
++          "tasks": 93,
++          "command": "./gradlew format formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "2a72fac626811ebb7cdd7763be99b59d8ef0b90edc08d4aebed2311f289c9130",
++          "note": "Before final startup-owner guard correction; not final-source verification."
++        },
++        {
++          "kind": "interim_package_check",
++          "result": "FAIL",
++          "duration": "37s",
++          "tests": 163,
++          "failed": 1,
++          "log_sha256": "f10ad524c1888c2ac98acdf4bc0d854c7c17ec5ae07fde22ca9fd0e56d0dd7e5",
++          "finding": "New factory startup-ownership fixture used macOS temporary path with /var symbolic-link ancestor; production startup correctly refused before connections. Fixture must use canonical temporary directory; symlink protection retained."
++        },
++        {
++          "kind": "current_compiled_package_check",
++          "result": "PASS",
++          "tests": 163,
++          "duration": "33s",
++          "tasks": 72,
++          "command": "./gradlew formatCheck :plowshare-integration-home-assistant:test :plowshare-integration-home-assistant:installDist integrationBoundaryCheck sdkContractCheck",
++          "log_sha256": "bb2a764d751c9b55746b6b2d4f213f926ea487809d9cc8afb91364c5cc1af83e",
++          "format_log_sha256": "f8dfde4ea435e7d1312b2566c16881ce3dc177d833d68ae4662d7b33b5a2065c",
++          "note": "Java/source fixed and frozen; pending final operator prerequisite prose and artifact copy refresh."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_pack_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++          "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++          "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++          "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPACK-PRE1",
++          "severity": "P1",
++          "source": "independent reviewer",
++          "correction": "Register process shutdown owner before any resource opening; hook registration failure opens nothing; partial startup keeps exact cleanup owner.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-PRE2",
++          "severity": "P2",
++          "source": "independent reviewer",
++          "correction": "Publish closed-latch completion before successful shared-cleanup future so returned close cannot race finished observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        },
++        {
++          "id": "OUTPACK-COORD1",
++          "severity": "P1",
++          "source": "coordinator source review",
++          "correction": "Published startup owner must fence cleanup while factory still owns HA/SDK/journal opening, including slow filesystem work; shared resources cannot close before late provider acquisition settles. Use stable provider count for shutdown observation.",
++          "disposition": "resolved on exact v1 packaging candidate and independently APPROVED"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-21T23:56:58.858956+00:00"
++    },
++    {
++      "id": "OUT-PROFILE-01",
++      "title": "Read-only and explicit-control Application templates",
++      "dependencies": [
++        "OUT-PLAN-01",
++        "CORE-04",
++        "HA-03",
++        "HA-04",
++        "HA-09"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_profiles_implementer",
++      "review_agent_id": "/root/ha_outbound_profiles_reviewer",
++      "status": "accepted",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ],
++      "candidate_revision": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "evidence": [
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++          "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++          "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++          "verdict": "APPROVE"
++        },
++        {
++          "kind": "compiled_profile_validation",
++          "result": "PASS",
++          "tests": 12,
++          "log_sha256": "446d2160b3ea97e74742bffc099271e80d5a8e3fd560887f99c37bb93c502490",
++          "context": "24configurationcases also passed; later joint installed distribution validation remains OUT-VERIFY."
++        },
++        {
++          "kind": "independent_review",
++          "reviewer_agent_id": "/root/ha_outbound_profiles_reviewer",
++          "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++          "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++          "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++          "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++          "verdict": "APPROVE"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTPROFILE-VAL1",
++          "severity": "P2",
++          "source": "independent validation implementer and reviewer",
++          "correction": "Three source-relative README links escape installed payload; use canonical repository URLs for source-only Assist/tool-scope/observation references, retaining shipped local provider-host link.",
++          "disposition": "resolved by original author in exact v2 and independently APPROVED with refreshed installed-link proof"
++        }
++      ],
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": true,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T00:02:16.951451+00:00"
++    },
++    {
++      "id": "OUT-VERIFY-01",
++      "title": "Integrated outbound-only validation",
++      "dependencies": [
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "PLAT-SQL-01"
++      ],
++      "gates": [],
++      "implementer_role": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "implementation_agent_id": "/root/ha_outbound_validation_implementer",
++      "review_agent_id": "/root/ha_outbound_validation_reviewer",
++      "status": "changes_required",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ],
++      "candidate_revision": {
++        "id": "out-verify-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v1-candidate.json",
++        "manifest_sha256": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392"
++      },
++      "evidence": [
++        {
++          "kind": "independent_preflight_finding",
++          "id": "OUTPROFILE-VAL1",
++          "note": "Validation fixture authoring may continue independently; integrated proof/acceptance waits profile source amendment and independent approval. No feature byte edits by validation agents."
++        },
++        {
++          "kind": "installed_consumer",
++          "result": "PASS",
++          "checks": 8,
++          "artifacts": 44,
++          "log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "report_sha256": "4c04546f9239457de46bad071bd9d0b5839f5ccfaa705c62ae80a876c923bfad"
++        },
++        {
++          "kind": "interim_repository_check",
++          "result": "FAIL",
++          "duration": "4m36s",
++          "server_tests": 8627,
++          "failed": 1,
++          "failure": "Existing ScopedSqlWorkBudgetTest cleanupBlocked.await(1s), fetch=false; core source unchanged. Isolated investigation and final recheck pending.",
++          "log_sha256": "9b0c0235a254e072bc16c1a8b09ce5555cf0d4a2783f10da2fb6e5a4e75ef0b2"
++        },
++        {
++          "kind": "current_outbound_validation",
++          "ha_tests": 166,
++          "ha_failures": 0,
++          "sdk_wire_cases": 3,
++          "installed_checks": 8,
++          "artifact_files": 44,
++          "repository_check": "FAIL",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "consumer_log_sha256": "9ba2e64ef4b56cdb32f9814610694f5baf163d23d7ed3bde283e1fc59487e836",
++          "note": "Final validation implementation/evidence ready, acceptance explicitly blocked by OUTVERIFY-GLOBAL1. Empty-directory no-mutation assertion strengthened and independently probed."
++        },
++        {
++          "kind": "independent_review",
++          "verdict": "CHANGES_REQUIRED",
++          "reviewer_agent_id": "/root/ha_outbound_validation_reviewer",
++          "candidate": {
++            "id": "out-verify-01-v1",
++            "manifest_path": "docs/reviews/home-assistant-out-verify-01-v1-candidate.json",
++            "manifest_sha256": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392"
++          },
++          "report_path": "docs/reviews/home-assistant-out-verify-01-v1-review.md",
++          "report_sha256": "6593c21ee4d4e6cb5265c103c6b4d07b49a714e12c400b5f8851726ea88cede9"
++        }
++      ],
++      "findings": [
++        {
++          "id": "OUTVERIFY-R1",
++          "severity": "P1",
++          "source": "independent reviewer",
++          "requirement": "Required repository-wide check must pass",
++          "correction": "Resolve the failing ScopedSqlWorkBudgetTest late-query/fetch timing assertions in the owning platform scope; rerun full check without exclusions and independently re-review OUT-VERIFY.",
++          "disposition": "OPEN: two variants failed in final full run; class-only pass does not substitute; cause unresolved; no core workaround authorized by adapter task."
++        },
++        {
++          "id": "OUTVERIFY-R2",
++          "severity": "P2",
++          "source": "independent reviewer",
++          "correction": "Installed no-mutation proof must compare directory topology in addition to file hashes.",
++          "disposition": "RESOLVED: original validation author fixed, eight consumer checks passed, independent empty-directory probe confirmed guard."
++        }
++      ],
++      "review": {
++        "state": "CHANGES_REQUIRED",
++        "verdict": "CHANGES_REQUIRED",
++        "candidate_digest": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v1-review.md",
++        "report_sha256": "6593c21ee4d4e6cb5265c103c6b4d07b49a714e12c400b5f8851726ea88cede9",
++        "approved_at": null
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T00:28:48.798857+00:00",
++      "verification_blockers": [
++        {
++          "id": "OUTVERIFY-GLOBAL1",
++          "requirement": "Required repository-wide check must pass without exclusions",
++          "result": "FAIL",
++          "command": "./gradlew check :plowshare-integration-home-assistant:installDist --max-workers=2",
++          "server_cases": 8627,
++          "failures": 2,
++          "test": "io.aeyer.plowshare.server.pool.ScopedSqlWorkBudgetTest.lateQueryAndFetchClampNetworkTimeEvenWhenPhysicalCleanupWorkerIsOccupied",
++          "variants": [
++            "fetch=false",
++            "fetch=true"
++          ],
++          "location": "ScopedSqlWorkBudgetTest.java:550",
++          "log_sha256": "567b7f2f01926aa0821b77286708e3e7823d33ba7c02ae3a47a7226c55ff97b8",
++          "cause": "unresolved; full runs and isolated method failed, owning class passed; no causal/flake claim",
++          "next_action": "Investigate the SQL cleanup test in its owning platform scope, restore a green full repository check and independently re-review OUT-VERIFY. Do not waive acceptance or modify core to accommodate the adapter."
++        }
++      ]
++    },
++    {
++      "id": "PLAT-SQL-01",
++      "title": "Deterministic SQL deadline and physical cleanup regression fixture",
++      "dependencies": [],
++      "gates": [],
++      "implementer_role": "/root/sql_cleanup_implementer",
++      "reviewer_role": "/root/sql_cleanup_reviewer",
++      "implementation_agent_id": "/root/sql_cleanup_implementer",
++      "review_agent_id": "/root/sql_cleanup_reviewer",
++      "status": "in_review",
++      "owned_paths": [
++        "plowshare-server/src/test/java/io/aeyer/plowshare/server/pool/ScopedSqlWorkBudgetTest.java",
++        "docs/reviews/home-assistant-plat-sql-01-*"
++      ],
++      "candidate_revision": null,
++      "evidence": [
++        {
++          "kind": "independent_scope_preflight",
++          "reviewer": "/root/sql_cleanup_reviewer",
++          "finding": "No runtime defect established. Instrument finite phase/Future diagnostics before test-only correction; retain tested deadline, execute/fetch, cleanup occupancy and physical ownership assertions."
++        },
++        {
++          "kind": "coordinator_verification",
++          "result": "PASS",
++          "method_cases": 2,
++          "class_cases": 30,
++          "full_server_cases": 8627,
++          "full_server_failures": 0,
++          "full_log_sha256": "ec7f3206cc00104e046eb3b5ea852eb0d89d37f4d89b344c440c284ee10fee3b",
++          "command": "./gradlew check :plowshare-integration-home-assistant:installDist --max-workers=2",
++          "duration": "5m13s",
++          "database_tests_enabled": false,
++          "production_changes": false
++        }
++      ],
++      "findings": [],
++      "review": {
++        "state": "in_review",
++        "verdict": null
++      },
++      "milestones": {
++        "implementation": "ready",
++        "verified_and_reviewed": false,
++        "merged": false,
++        "deployed": false,
++        "live_validated": false
++      },
++      "updated_at": "2026-11-22T01:36:13.485723+00:00",
++      "scope": "Separate owning-platform test-only investigation authorized by continuation. General need is truthful deterministic SQL deadline/physical ownership verification. No runtime/API/schema/SDK capability changes authorized."
+     }
+   ],
+   "history": [
+@@ -2681,6 +3205,214 @@
+         "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
+       },
+       "note": "Final source matches independent approvals; repository/SDK/package checks pass. 13 accepted and 11 awaiting_gate remain unchanged. No target merge/deployment/live authorization."
++    },
++    {
++      "at": "2026-11-21T23:23:44.569338+00:00",
++      "event": "outbound_amendment_ready_for_review",
++      "author": "/root",
++      "base": {
++        "commit": "6de685f63e060f3003cb93233d2567e004269755",
++        "date": "2026-11-22",
++        "branch": "codex/ha-outbound-delivery",
++        "working_tree_at_start": "clean",
++        "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++      },
++      "nodes_added": [
++        "OUT-PLAN-01",
++        "OUT-PACK-01",
++        "OUT-PROFILE-01",
++        "OUT-VERIFY-01"
++      ],
++      "previous_accepted_nodes_merged": 13,
++      "original_gated_nodes_unchanged": [
++        "HA-05",
++        "HA-06",
++        "HA-07",
++        "HA-08",
++        "HA-10",
++        "HA-11",
++        "VERIFY-01",
++        "PERF-01",
++        "RELEASE-01",
++        "DEPLOY-01",
++        "LIVE-01"
++      ],
++      "note": "Current-main targeted review previously passed110 HA tests+86 selected core tests, SDK contract/boundary checks. PythonHA venv absent; no DB/live check. Source dispatch awaits independent OUT-PLAN approval."
++    },
++    {
++      "at": "2026-11-21T23:27:27.634645+00:00",
++      "event": "outbound_plan_changes_required",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v1-candidate.json",
++        "manifest_sha256": "4e6bc52eb7d37172d576c5ce6d799b144879a22c6f34b0c547df1e1d72d0f314"
++      },
++      "report": "docs/reviews/home-assistant-out-plan-01-v1-review.md",
++      "findings": [
++        "OUTPLAN-R1",
++        "OUTPLAN-R2"
++      ],
++      "note": "No source dispatch occurred. Common contract corrected to actual public Application provider policy."
++    },
++    {
++      "at": "2026-11-21T23:28:54.029858+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PLAN-01",
++      "candidate": {
++        "id": "out-plan-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-plan-01-v2-candidate.json",
++        "manifest_sha256": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "b3d57dbd71d59a91f0a77b582f49e9ef6bb6e59d4a1980eef4a3442689fe1ac3",
++        "report_path": "docs/reviews/home-assistant-out-plan-01-v2-review.md",
++        "report_sha256": "5f18a016d47c90ec8a76fbc6915f379365847dd4ba54558e0d7185f2588da094",
++        "approved_at": "2026-11-21T23:28:54.029777+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:28:54.031374+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PACK-01",
++      "implementer": "/root/ha_outbound_pack_implementer",
++      "reviewer_role": "/root/ha_outbound_pack_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java",
++        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProvider*.java",
++        "integrations/home-assistant/build.gradle.kts",
++        "integrations/home-assistant/PROVIDER-HOST.md",
++        "integrations/home-assistant/README.md"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:28:54.032052+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:40:38.721983+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v1-candidate.json",
++        "manifest_sha256": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "a3b565c0391e21f2df9a5210af0dbef8d9b1096aafc839624b37258af01d6fdc",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v1-review.md",
++        "report_sha256": "5a7ee39f089d636dceda9461bea21c0fe8498937f4c9b02adb83df3b770211ab",
++        "approved_at": "2026-11-21T23:40:38.721906+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:44:52.589011+00:00",
++      "event": "outbound_ownership_refined",
++      "node": "OUT-PACK-01",
++      "note": "Narrow current read-provider intro links newhost; explicit lifecycle/Main-test paths refine reviewed packaging scope, no core/SDK/Assist changes."
++    },
++    {
++      "at": "2026-11-21T23:56:58.858987+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PACK-01",
++      "candidate": {
++        "id": "out-pack-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-pack-01-v1-candidate.json",
++        "manifest_sha256": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "ef835127bb7caaf71b574136adad0e0528a70eee967cd25485f26a44a4b33f7f",
++        "report_path": "docs/reviews/home-assistant-out-pack-01-v1-review.md",
++        "report_sha256": "16ba95920846f520da76fff30e7a765f3972c60c6f563a788568f95478ae827d",
++        "approved_at": "2026-11-21T23:56:58.858900+00:00"
++      }
++    },
++    {
++      "at": "2026-11-21T23:56:58.860522+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-VERIFY-01",
++      "implementer": "/root/ha_outbound_validation_implementer",
++      "reviewer_role": "/root/ha_outbound_validation_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/Outbound*Validation*.java",
++        "docs/reviews/home-assistant-outbound-validation.md",
++        "integrations/home-assistant/scripts/check-outbound-package.py"
++      ]
++    },
++    {
++      "at": "2026-11-21T23:58:46.806621+00:00",
++      "event": "outbound_profile_reopened_by_validation",
++      "node": "OUT-PROFILE-01",
++      "finding": "OUTPROFILE-VAL1",
++      "note": "Installed artifact boundary exposes three broken source-relative documentation links. Original frozen evidence retained; exact owner/reviewer amendment required."
++    },
++    {
++      "at": "2026-11-21T23:59:33.390530+00:00",
++      "event": "outbound_node_dispatched",
++      "node": "OUT-PROFILE-01",
++      "implementer": "/root/ha_outbound_profiles_implementer",
++      "reviewer_role": "/root/ha_outbound_profiles_reviewer",
++      "owned_paths": [
++        "integrations/home-assistant/examples/outbound/**",
++        "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java"
++      ]
++    },
++    {
++      "at": "2026-11-22T00:02:16.951491+00:00",
++      "event": "outbound_node_accepted",
++      "node": "OUT-PROFILE-01",
++      "candidate": {
++        "id": "out-profile-01-v2",
++        "manifest_path": "docs/reviews/home-assistant-out-profile-01-v2-candidate.json",
++        "manifest_sha256": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10"
++      },
++      "review": {
++        "state": "APPROVE",
++        "verdict": "APPROVE",
++        "candidate_digest": "6698b07861e88453ef17242f62bd56313e322a2911ff1d91ef686d9d961e3c10",
++        "report_path": "docs/reviews/home-assistant-out-profile-01-v2-review.md",
++        "report_sha256": "f846b64e252994de5285d24a82628a1cf9940b805bf237cce0f0c2365ba091d4",
++        "approved_at": "2026-11-22T00:02:16.951402+00:00"
++      }
++    },
++    {
++      "at": "2026-11-22T00:28:48.798929+00:00",
++      "event": "outbound_node_changes_required",
++      "node": "OUT-VERIFY-01",
++      "candidate": {
++        "id": "out-verify-01-v1",
++        "manifest_path": "docs/reviews/home-assistant-out-verify-01-v1-candidate.json",
++        "manifest_sha256": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392"
++      },
++      "review": {
++        "state": "CHANGES_REQUIRED",
++        "verdict": "CHANGES_REQUIRED",
++        "candidate_digest": "50da588dd50c08b074eb34d9919231f62557cdb010b50e44ba38ab414c984392",
++        "report_path": "docs/reviews/home-assistant-out-verify-01-v1-review.md",
++        "report_sha256": "6593c21ee4d4e6cb5265c103c6b4d07b49a714e12c400b5f8851726ea88cede9",
++        "approved_at": null
++      },
++      "note": "Implementation/evidence complete; acceptance deliberately withheld because required full repository check is not green. Scoped166HA tests/3SDK cases/8installed checks pass. No source/API/SDK/Assist or gate workaround."
++    },
++    {
++      "at": "2026-11-22T01:24:03.011668+00:00",
++      "event": "platform_test_blocker_scope_started",
++      "node": "PLAT-SQL-01",
++      "scope": "Separate owning-platform test-only investigation authorized by continuation. General need is truthful deterministic SQL deadline/physical ownership verification. No runtime/API/schema/SDK capability changes authorized."
+     }
+   ],
+   "publication_guard": {
+@@ -2728,5 +3460,62 @@
+     "evidence": "docs/reviews/home-assistant-publication-verification.json",
+     "evidence_sha256": "b8d39a706ac23df1e086ff4b0ef97fb177cc360e5441035d2efcb808cdcbdd0c",
+     "source_snapshot_sha256": "9614a6447b8faebc5525b6aa414c711a823b32ec1bcdc51b71a699376f59fa23"
++  },
++  "current_baseline": {
++    "commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "working_tree_at_start": "clean",
++    "original_merge_commit": "16dec24b9091c4d9708fb407211585b92007858a"
++  },
++  "outbound_amendment": {
++    "date": "2026-11-22",
++    "host_contract": "docs/reviews/home-assistant-outbound-host-contract.md",
++    "original_gated_nodes_preserved": [
++      "HA-05",
++      "HA-06",
++      "HA-07",
++      "HA-08",
++      "HA-10",
++      "HA-11",
++      "VERIFY-01",
++      "PERF-01",
++      "RELEASE-01",
++      "DEPLOY-01",
++      "LIVE-01"
++    ],
++    "current_contract": "Actual SQL-unit two-second default, nested transaction deadline; accepted workflow duration warns without outcome replacement. Provider IO/poll/cleanup retain finite owner budgets.",
++    "independent_review_required_before_source_dispatch": true,
++    "node_ids": [
++      "OUT-PLAN-01",
++      "OUT-PACK-01",
++      "OUT-PROFILE-01",
++      "OUT-VERIFY-01"
++    ],
++    "platform_test_followups": [
++      "PLAT-SQL-01"
++    ]
++  },
++  "outbound_delivery_summary": {
++    "as_of_date": "2026-11-22",
++    "branch": "codex/ha-outbound-delivery",
++    "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
++    "plan": "accepted",
++    "packaging": "accepted",
++    "profiles": "accepted",
++    "integrated_validation": "changes_required",
++    "ha_tests": 166,
++    "ha_test_failures": 0,
++    "public_sdk_wire_cases": 3,
++    "installed_consumer_checks": 8,
++    "installed_artifact_files": 44,
++    "repository_check": "FAIL: two existing SQL cleanup test variants; unresolved",
++    "remaining_action": "PLAT-SQL-01 diagnosis and independent acceptance, then fresh full verification and OUT-VERIFY v2 review.",
++    "original_gated_nodes_unchanged": 11,
++    "all_original_capability_gates_unsatisfied": true,
++    "published": false,
++    "merged": false,
++    "deployed": false,
++    "live_validated": false
+   }
+ }

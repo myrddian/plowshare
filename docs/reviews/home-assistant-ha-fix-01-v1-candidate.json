@@ -1,0 +1,56 @@
+{
+  "candidate_id": "ha-fix-01-v1",
+  "node": "HA-FIX-01",
+  "created_at": "2026-11-22T19:06:17.079082+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root/ha_assist_first_turn_implementer",
+  "reviewer_agent_id": "/root/ha_assist_first_turn_reviewer",
+  "coordinator_coauthored_paths": [
+    "docs/home-assistant-delivery-plan.md",
+    "integrations/home-assistant/RELEASE-RUNBOOK.md (native-session clarification only)",
+    "docs/home-assistant-integration-design-and-plan.md (native-session clarification only)"
+  ],
+  "files": {
+    "integrations/home-assistant/assist/custom_components/plowshare/conversation.py": "746df42a7b8f71a44327654cc80d165b8cb8f551464f255b2828f506ef6b8de8",
+    "integrations/home-assistant/assist/custom_components/plowshare/manifest.json": "e572fa360739e045f988bb638ff36dee212518f6191f2194338b702e13015897",
+    "integrations/home-assistant/assist/pyproject.toml": "01c3de637c44fc6a086365dc91e4349cf6b54ecb2ca00a21812f350f2da824af",
+    "integrations/home-assistant/assist/tests/test_assist_pipeline.py": "30a73cd5d7bed02bfec3008d95a10b62dc85637849da30984df27f7647f46226",
+    "integrations/home-assistant/assist/README.md": "4f9845e84c36ec29ad3d750baa1f1cfd47ccdb33eee4635a343411dfe01bf530",
+    "docs/reviews/home-assistant-ha-fix-01-implementation.md": "41062e368a0a46fcbd5a03538a8d742011f68023a6be871c58742ce85969dd4c",
+    "docs/home-assistant-delivery-plan.md": "0621056e914f4818a3e026e2182f9ddc3e9d839643217e52c6ee2378faa40486",
+    "docs/home-assistant-integration-design-and-plan.md": "2a8f9a9e93edef2a726df914066289a06b2fd428deb54832c39f82d8175a9266",
+    "integrations/home-assistant/RELEASE-RUNBOOK.md": "217212652242e1150cdf382fcadb9f12b73fa15bceababa64ec28f168a084b46",
+    "docs/reviews/home-assistant-ha-fix-01-v1-runtime.diff": "791bd94a3e9904a1544bead18d06c3df6ecf5da1093ed32aacedec5ea2668f4d",
+    "docs/reviews/home-assistant-ha-fix-01-v1-evidence.json": "53a9f99af634f839e25385b69887ef4fa7d7dc75520e833fd9ced9bd3250febc"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-ha-fix-01-v1-state.json",
+    "sha256": "9b547f574cc7eebf8396665fb13a61f4033c9d308a1b7f06a537675f195b187e"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-ha-fix-01-v1.diff",
+    "sha256": "ba1103dec44e393aeb1b40814b5268af38d3ad05e4559a3f89f66cd99a9f70d4"
+  },
+  "dependencies": {
+    "HA-06": {
+      "id": "ha-06-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-06-v1-candidate.json",
+      "manifest_sha256": "cf7eac366e2391654667b1b204b11eafee784cfcae92f72ef43882c2897e5434"
+    },
+    "HA-11": {
+      "id": "ha-11-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-11-v1-candidate.json",
+      "manifest_sha256": "df6d5565452fc38b805a471e232de624b4749f9878f1b8de6e387723c726d774"
+    },
+    "VERIFY-01": {
+      "id": "verify-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-verify-01-v1-candidate.json",
+      "manifest_sha256": "b9f3e57fa47090bd8ad2ac876fc6a2211f173ad68ef43bec9cb20138eea9ab0c"
+    }
+  },
+  "artifact": {
+    "path": "integrations/home-assistant/assist/build/plowshare-assist-0.1.1.zip",
+    "sha256": "1ad223a4859e415fd9e2b63344a3736b162a175e753e2fc3f7b8371e049110aa"
+  },
+  "limits": "Adapter-only native first-turn fix. No native-role/cache/core/SDK extension, no source approval claim about live replacement or successful model/device work."
+}

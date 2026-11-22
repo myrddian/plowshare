@@ -1,9 +1,9 @@
 {
   "domain": "plowshare",
   "name": "Plowshare",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "config_flow": true,
-  "dependencies": ["conversation"],
+  "dependencies": ["conversation", "ai_task"],
   "documentation": "https://github.com/myrddian/plowshare/tree/main/integrations/home-assistant/assist",
   "integration_type": "service",
   "iot_class": "local_push",

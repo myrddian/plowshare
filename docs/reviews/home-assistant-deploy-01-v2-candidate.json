@@ -1,0 +1,57 @@
+{
+  "candidate_id": "deploy-01-v2",
+  "node": "DEPLOY-01",
+  "scope": "User-authorized dedicated Production Application and successful read-only Assist connection phase; device-read provider/full voice-device acceptance remains uncompleted.",
+  "created_at": "2026-11-22T19:20:51.716050+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "docs/reviews/home-assistant-production-assist-setup.md": "7397ab7ba03b1d010c6186bd0e2c6ee9b0f743c3542d885812dd4babbf335668"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-deploy-01-v2-state.json",
+    "sha256": "120e3d8705df7457502a26d2e029d374a8d04bfa260f0195f66459503a06eaf2"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-deploy-01-v2.diff",
+    "sha256": "0aa6fceda2f2966d14ddfe53fca5af894d2190ecee52c3b6be4d9366dc2832ed"
+  },
+  "dependencies": {
+    "RELEASE-01": {
+      "id": "release-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-release-01-v1-candidate.json",
+      "manifest_sha256": "c68faa34ed945401db4736fb794bf8d80348097d73801887c91ec61f8db581ff"
+    },
+    "HA-FIX-01": {
+      "id": "ha-fix-01-v1",
+      "manifest_path": "docs/reviews/home-assistant-ha-fix-01-v1-candidate.json",
+      "manifest_sha256": "9eb3354c2682da906c31dd4affbaa36316b573049e6b2b964f6b4ed81f185582"
+    }
+  },
+  "private_evidence": {
+    "/private/tmp/ha-production-20261123/application/plowshare.json": "150ad52be0e49698d61c10bbe91e7e79151444eaa26c60c87bd9abe44e2ad6de",
+    "/private/tmp/ha-production-20261123/application/server/tools.json": "4f9e431e0b808f498ebeb17935d5b32a7a31c20016ea5d404a24e918cd97658f",
+    "/private/tmp/ha-production-20261123/application/agents/house_reader.md": "612adbc35d7f9c334217fe892d98ed6b628c67baad57c88bec421410cc4e1d11",
+    "/private/tmp/ha-production-20261123/application/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "/private/tmp/ha-production-20261123/final-source-sha256.json": "f27db5b8eeeaf88d688e7123631f7fa53402c3d11c17ceaaa468ac888c3caf65",
+    "/private/tmp/ha-production-20261123/final-source-receipt.json": "ef68f99581fc0c33e494f4b33940962beb1e25d6be769215c907c02778bedaa3",
+    "/private/tmp/ha-production-20261123/application-create-response.json": "320f666f7042625519047f5196572ef1639118c454adfd8eb542815f82faa9c7",
+    "/private/tmp/ha-production-20261123/membership-response.json": "f21ee61f36c9c76a59198be49221554ab6bde1c3fc5a75474caf5b52857928d5",
+    "/private/tmp/ha-production-20261123/token-metadata.json": "06dab1c4e702ee3f5c1b16f6b3fc520884899819cf0e90459f1f8b28a4a7fb65",
+    "/private/tmp/ha-production-20261123/agents-service-response.json": "d69f854ed2e12badf825ef39e67588e8bb9028e4bef2bab15d255a2de6842fdc",
+    "/private/tmp/ha-production-20261123/access-service-response.json": "f9cc62329e7b87737427abf1087a1ec618ff9bbbe327f00853c3355894ddda7c",
+    "/private/tmp/ha-production-20261123/credential-storage-receipt.json": "f7d6463e285ea76a3154173fe707fab180e99e215e9f47d8e3db0fe7decebae9",
+    "/private/tmp/ha-production-20261123/connection-evidence.json": "36ff86ee7f44bd25549b4ed45e18922f438a1054439e768bbf170aff93867f54",
+    "/private/tmp/ha-production-20261123/live-jobs-response.json": "662ef5088c9d385b65f63a8ae4532ca8d8bd89d6e1f31e2f8bfcceff99150191",
+    "/private/tmp/ha-production-20261123/preferred-assistant-menu.txt": "03618397bfebe98a6b3cd787642c4d2a9b82cc3c386129ea945cc7998933d520",
+    "/private/tmp/ha-production-20261123/plowshare-pipeline-settings.txt": "f7b746e8607373892c73bf6dfe69619fbd7d3a0e98c734c86f18b17e946f0ea9",
+    "/private/tmp/ha-production-20261123/existing-assist-before.txt": "1a4f6cb9327b86f45309e530e11b074c0f238e1c21123e46e8c00bc52ea7d638",
+    "/private/tmp/ha-production-20261123/assist-connected.jpg": "b5310c4651a599103382171944b511185a5194cf403b7c43c4081b670b3b8fd7",
+    "/private/tmp/ha-production-20261123/assist-connected.txt": "95f9f1d72ea3a02e735191b6bde1651626cde4b820c775651074931fb4342d7d",
+    "/private/tmp/ha-upgrade-011/remote-receipt.json": "debd6523f3e082aade3737e1541c6f0e5ce8be6c5d632569eab303bf8ea5289f",
+    "/private/tmp/ha-upgrade-011/upgrade.sh": "533e7468462de28b413fd14a441192fc6d8e6ae3287183d5f3f75b17b5af0975",
+    "/private/tmp/ha-upgrade-011/transfers.jsonl": "49896c1721349f8e3522d9753347f2f33aee5af82d752110df64018c1015178e"
+  },
+  "limits": "Approval for App/HA entry/Assist pipeline/text round trip only. No authority to mark the absent read provider or whole LIVE-01 complete. No source/core/SDK extension beyond independently approved adapter HA-FIX-01."
+}

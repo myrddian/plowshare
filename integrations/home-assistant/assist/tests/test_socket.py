@@ -13,7 +13,7 @@ from websockets.asyncio.server import serve
 from custom_components.plowshare.agent import UNCERTAIN, SdkConversationAgent
 from custom_components.plowshare.models import Settings, session_key
 
-CONVERSATION = "11111111-1111-4111-8111-111111111111"
+CONVERSATION = "cnv_fixture_home_conversation"
 JOB = "22222222-2222-4222-8222-222222222222"
 
 
@@ -21,6 +21,7 @@ class Peer:
     def __init__(self):
         self.frames = []
         self.lost_ack = False
+        self.refusal_code = None
         self.authorization = None
 
     async def handle(self, socket):
@@ -37,13 +38,14 @@ class Peer:
                 row = json.loads(text)
                 self.frames.append(row)
                 operation = row["type"]
+                code = "OK"
                 if operation == "transport.dispatch":
                     payload = {
                         "mode": "concurrent-v1",
                         "maxPending": 64,
                         "maxIdBytes": 128,
                     }
-                elif operation == "conversation.open":
+                elif operation == "conversation.open.ex":
                     payload = {
                         "id": CONVERSATION,
                         "project": "house",
@@ -64,7 +66,8 @@ class Peer:
                         "oldest": None,
                         "more": None,
                     }
-                elif operation == "agent.run":
+                elif operation == "agent.run.ex":
+                    code = self.refusal_code or "ACCEPTED"
                     if self.lost_ack:
                         await socket.close()
                         continue
@@ -73,6 +76,8 @@ class Peer:
                         "conversation": CONVERSATION,
                         "agent": "house_coordinator",
                     }
+                    if self.refusal_code:
+                        payload = None
                 elif operation == "job.status":
                     payload = {
                         "id": JOB,
@@ -91,7 +96,7 @@ class Peer:
                         "id": row["id"],
                         "type": operation,
                         "protocol_version": "plowshare-v1",
-                        "payload": {"code": "OK", "payload": payload},
+                        "payload": {"code": code, "payload": payload},
                     }
                 ).encode()
                 sending.append(asyncio.create_task(packets.send(response, socket.send)))
@@ -101,9 +106,10 @@ class Peer:
 
 
 class SocketTests(unittest.IsolatedAsyncioTestCase):
-    async def run_case(self, lost_ack):
+    async def run_case(self, lost_ack, refusal_code=None):
         peer = Peer()
         peer.lost_ack = lost_ack
+        peer.refusal_code = refusal_code
         async with serve(
             peer.handle, "127.0.0.1", 0, subprotocols=[PROTOCOL]
         ) as server:
@@ -115,23 +121,41 @@ class SocketTests(unittest.IsolatedAsyncioTestCase):
                 "house_coordinator",
             )
             settings = replace(settings, response_timeout=2)
-            agent = SdkConversationAgent(settings, {}, AsyncMock())
+            agent = SdkConversationAgent(
+                settings, {}, AsyncMock(), profile_id="fixture-entry:conversation"
+            )
             key = session_key("chat", "alice", None, None, False)
             first = await agent.ask(key, "How warm is the office?")
-            if lost_ack:
+            if lost_ack or refusal_code:
                 self.assertEqual(first.text, UNCERTAIN)
                 self.assertEqual((await agent.ask(key, "Try again")).text, UNCERTAIN)
             else:
                 self.assertFalse(first.error, first.text)
                 self.assertEqual(first.text, "The office is 22 degrees.")
             self.assertEqual(peer.authorization, "Bearer fixture-token")
-            runs = [row for row in peer.frames if row["type"] == "agent.run"]
+            runs = [row for row in peer.frames if row["type"] == "agent.run.ex"]
             self.assertEqual(len(runs), 1)
-            self.assertEqual(runs[0]["payload"]["conversation"], CONVERSATION)
-            self.assertEqual(runs[0]["payload"]["task"], "How warm is the office?")
+            self.assertEqual(runs[0]["payload"]["project"], "house")
+            opens = [
+                row for row in peer.frames if row["type"] == "conversation.open.ex"
+            ]
+            self.assertEqual(len(opens), 1)
+            self.assertEqual(
+                runs[0]["payload"]["externalConversation"],
+                opens[0]["payload"]["externalConversation"],
+            )
+            self.assertEqual(
+                runs[0]["payload"]["source"], opens[0]["payload"]["source"]
+            )
+            self.assertNotIn("conversation", runs[0]["payload"])
+            envelope = json.loads(runs[0]["payload"]["task"].split("\n", 1)[1])
+            self.assertEqual(envelope["input"], "How warm is the office?")
 
     async def test_actual_sdk_segmented_round_trip(self):
         await self.run_case(False)
 
     async def test_actual_sdk_disconnect_after_submission_never_replays(self):
         await self.run_case(True)
+
+    async def test_actual_sdk_ambiguous_ex_refusal_never_replays(self):
+        await self.run_case(False, "ARCHIVE_UNAVAILABLE")

@@ -1,0 +1,61 @@
+{
+  "candidate_id": "recover-01-v1",
+  "node": "RECOVER-01",
+  "created_at": "2026-11-22T20:34:20.767950+00:00",
+  "base_commit": "6de685f63e060f3003cb93233d2567e004269755",
+  "implementer_agent_id": "/root",
+  "test_implementation_agent_id": "/root/ha_recovery_implementer",
+  "reviewer_agent_id": "/root/ha_deployment_reviewer",
+  "files": {
+    "integrations/home-assistant/PROVIDER-HOST.md": "5b2f76c9d94874235a167f0f7974908a669387df40833b9599fc880b9613e39e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "d2f82137bc8a95380ed535b82cbb15c638aae193a61758f4086b4f725a769b9c",
+    "docs/reviews/home-assistant-recover-01-test-implementation.md": "f65b6dd6c18837e4a6c64ce2c754d13bc2c1c662e8f165b39182b4fc6c8b8e0c",
+    "docs/reviews/home-assistant-read-provider-recovery.md": "ec4b6412d26aff047f801e8bd500718aab501794575b5ef12ac06e00cf327370"
+  },
+  "ledger_snapshot": {
+    "path": "docs/reviews/home-assistant-recover-01-v1-state.json",
+    "sha256": "26962f8fb421f70cc9fb0fc80b2286795c3f8e6f03677f945f26d918b62ab039"
+  },
+  "working_tree_diff": {
+    "path": "docs/reviews/home-assistant-recover-01-v1.diff",
+    "sha256": "7618ff739378cc5664a8594d0f28045b6b27567c55d54434076b73af6b7dd166"
+  },
+  "dependencies": {
+    "DEPLOY-01": {
+      "id": "deploy-01-v3",
+      "manifest_path": "docs/reviews/home-assistant-deploy-01-v3-candidate.json",
+      "manifest_sha256": "3ebfabc023b65a0acf2faafbfcd5b4aa3faa29b407bd4914f4f17a2e637ebd2d"
+    },
+    "HA-FIX-02": {
+      "id": "ha-fix-02-v2",
+      "manifest_path": "docs/reviews/home-assistant-ha-fix-02-v2-candidate.json",
+      "manifest_sha256": "507b83649e387b25440cf7a1f7c5870b4292807863a5cf15f5d2f9a16dffd1ed"
+    }
+  },
+  "private_evidence": {
+    "/private/tmp/ha-provider-recovery-20261123/runtime-before.json": "16a4f87f0f2985c2febe78e28ea4188fa1e806bf00d084ad9ad3b1849fb2bca5",
+    "/private/tmp/ha-provider-recovery-20261123/validation-evidence.json": "d6be6df45db96191f82ffcee520a5eeae1133163de2696ac27c5d472c036e79c",
+    "/private/tmp/ha-provider-recovery-20261123/recovery-final-check.log": "05a167fc6ea763487cc3cec2fe3ce340932bddf556a2f3291d8c103e75980015",
+    "/private/tmp/ha-provider-recovery-20261123/recovery-test-evidence.json": "8c57ad1669e0225631fdd2890034c3d38c7ee8bfa5f44ad30217ac6530ea5bea",
+    "/private/tmp/ha-provider-recovery-20261123/policy-precondition-refusal.json": "b14ccae79cd71fdd8e587bbe83cd9819122e01208a23d37fc8824b1d7efd336a",
+    "/private/tmp/ha-provider-recovery-20261123/ops-v3/ops-candidate.json": "224f2f74078530f025864648677bed3eb7a2995c7cefacf1deb1d911e2ceb484",
+    "/private/tmp/ha-provider-recovery-20261123/policy-receipt.json": "f91f5b0003c1f50964d5656fbf602cde9ff79cafcb956ab72f0172ae4585d548",
+    "/private/tmp/ha-provider-recovery-20261123/application-exit-receipt.json": "42b5ffc9b8b5e1c70433d06765a93f97c0abdc70a485e001d5362654127dd806",
+    "/private/tmp/ha-provider-recovery-20261123/network-failure-receipt.json": "dee501ef8d32010c10db8bcc6024549557a12ce4cffc8e4650e33e683eac61a4",
+    "/private/tmp/ha-provider-recovery-20261123/job-recovery-check.json": "cd2561bbbb163034a1231b2d39e662cd1973d8103eeddb8a492357a6446d0dea",
+    "/private/tmp/ha-provider-recovery-20261123/jobs-before.json": "f9ac43c02d21aa1d0da8f415fd3e694e4e78482a05cf103a1696cbb460196ee1",
+    "/private/tmp/ha-provider-recovery-20261123/jobs-after.json": "f9ac43c02d21aa1d0da8f415fd3e694e4e78482a05cf103a1696cbb460196ee1",
+    "/private/tmp/ha-provider-recovery-20261123/jobs-after-read.json": "9f237e1be12e4e8a600c90e3d1055cc2c17999d9827fcd6d92dff36de9645f55",
+    "/private/tmp/ha-provider-recovery-20261123/assist-read-attempt.json": "8b220f5ee8be9e4aa71216511b5ffea9db8c3b26d6f4c0b22abb5feb545448fc",
+    "/private/tmp/ha-provider-recovery-20261123/assist-read-response.json": "50e92ca84b6c20e54a5750751a646c333aed7c3ae94d21184b3cc5c6cb7bae45",
+    "/private/tmp/ha-provider-recovery-20261123/validated-job.json": "07e55151a5d1ccfd6cfae1373f940eb4ef144cc664acccbd4a897f34fd3987fc",
+    "/private/tmp/ha-provider-recovery-20261123/read-job-trajectory.json": "e0f616518a415b0484deaa8fcb57125a94119bac8a01b3a5a851fcbfeec427f7",
+    "/private/tmp/ha-provider-recovery-20261123/post-recovery-read-check.json": "a3b1bfcc897ef1f20a7759ad82930d70d24147e931f273428e10f51b547ed6f8",
+    "/private/tmp/ha-provider-recovery-20261123/final-runtime-receipt.json": "b49b4d0829db0f45b90a128443348ebc54613758b3273a4442be36b3665e5153"
+  },
+  "preflight_reviews": {
+    "docs/reviews/home-assistant-recover-01-ops-preflight.md": "4b86994c63e7f5b005c7f879e496d81ff651f149945ffa45ee8b685ea2f4e45e",
+    "docs/reviews/home-assistant-recover-01-ops-v3-preflight.md": "0db5e1043f850800b083e32bc1108eb308f3c062ad8c3cf8151793e99e4ea41d"
+  },
+  "scope": "Sameexistingread-onlycontainer automaticrecovery; no runtime/core/SDK/controls change. Process/networkfailures tested; hostbootpolicy configured, actualhostreboot notperformed. Unconfirmedreceipts remainfenced."
+}

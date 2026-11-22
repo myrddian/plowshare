@@ -3,7 +3,7 @@
 The [integration package design and implementation plan](../../docs/home-assistant-integration-design-and-plan.md)
 describes proposed discovery/control tools, reusable agent capabilities and an HA
 AI Task provider for automations and other integrations. It distinguishes planned
-features from the supported outbound adapter and retained, gated Assist prototype.
+features from the supported outbound adapter and SDK-based Assist component.
 The [delivery graph](../../docs/home-assistant-delivery-plan.md) assigns independent
 implementer/reviewer agents and tracks approval-gated implementation through the
 [coordinator ledger](../../docs/home-assistant-delivery-state.json).
@@ -24,6 +24,13 @@ core integration subsystem.
 
 The executable is
 integrations/home-assistant/build/install/plowshare-integration-home-assistant/bin/plowshare-integration-home-assistant.
+For the separately configured named discovery/read and optional device-control
+providers, use its explicit `--provider` mode and the
+[outbound operator guide](PROVIDER-HOST.md). The guide and
+[outbound profiles](examples/outbound/README.md) ship in the distribution. That
+mode starts no workflows; Assist/AI Task run in the separately installed HA component. Legacy arguments below
+retain the existing manual-alias runtime behavior.
+
 Copy [examples/config.json](examples/config.json) into a private operator directory,
 then replace the example origins, project, entity and action mappings. Set the
 PLOWSHARE_TOKEN and HA_TOKEN environment variables using your normal secret
@@ -192,11 +199,15 @@ mappings, credential references and the integration journal stay in the private
 adapter deployment.
 There is no default live connection or preinstalled HA Application.
 
-The retained [Plowshare Assist prototype](assist/README.md) is gated and cannot
-be packaged or enabled. Its required native HA system-prompt/context handoff is
-not available through the public SDK. Conversation and AI Task features remain
-blocked pending separately authorized implementation and independent review.
-This outbound adapter continues to own selected readings and device actions.
+The separately packaged [Plowshare Assist component](assist/README.md) exposes
+Conversation and optional text/structured AI Task entities through the unchanged
+public Python SDK. HA owns speech-to-text/text-to-speech. It preserves HA's
+prepared prompt/context as ordinary SDK task/user input, without native system-role
+or prefix-cache guarantees. Select explicit read-only/control/task agents from
+[the Application profiles](examples/application/README.md). Component packaging,
+setup and configuration are available for the verified HA 2026.9.4/Python 3.14
+baseline; the target instance version and live voice/device behavior remain
+unverified. This outbound adapter continues to own selected readings/actions.
 
 For custom routing, copy [office.mjs](examples/office.mjs) beside the private config
 and add "script": "office.mjs" to the house binding. It replaces the declarative
@@ -221,7 +232,7 @@ Only HA and inference are simulated in these harness tests; they use no live dev
 Run the real-server acceptance fixtures with Docker available:
 
 ```sh
-./gradlew :plowshare-integration-home-assistant:test --tests '*HarnessPipelineTest'
+./gradlew :plowshare-integration-home-assistant:test -PfullDb --tests '*HarnessPipelineTest'
 ```
 
 Server/Spring/PostgreSQL test dependencies are confined to the test classpath. The
