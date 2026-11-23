@@ -106,7 +106,9 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
   private boolean started;
   private Optional<Observation> pendingGapPublication = Optional.empty();
   private boolean observationPublicationFailed;
-  private static final int MAX_FRAME = 1024 * 1024;
+  // Native replies contain whole registries before policy projection. This message-byte budget
+  // is independent of the smaller selected-resource/row bounds and SDK tool-result envelopes.
+  private static final int MAX_FRAME = 4 * 1024 * 1024;
 
   public HomeAssistantAdapter(AdapterConfiguration settings, String token, Duration timeout) {
     this(settings, token, timeout, Duration.ofSeconds(2), Duration.ofSeconds(2), null);
@@ -210,7 +212,9 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
               public void onMessage(WebSocket ws, String text) {
                 if (!epoch.equals(connectionEpoch) || closed) return;
                 try {
-                  if (text.getBytes(StandardCharsets.UTF_8).length > MAX_FRAME)
+                  // Reject obvious excess before allocating the bounded UTF-8 byte projection.
+                  if (text.length() > MAX_FRAME
+                      || text.getBytes(StandardCharsets.UTF_8).length > MAX_FRAME)
                     throw new IOException("HA frame exceeds limit");
                   JsonNode frame = Json.MAPPER.readTree(text);
                   String type = frame.path("type").asText();
