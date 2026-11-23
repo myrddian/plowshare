@@ -492,6 +492,10 @@ public class PoolProperties {
   @DurationUnit(ChronoUnit.SECONDS)
   private Duration embeddingTimeout = Duration.ofSeconds(30);
 
+  /** Idle retention for embedding HTTP connections. Unset keeps the shared provider pool. */
+  @DurationUnit(ChronoUnit.SECONDS)
+  private Duration embeddingConnectionIdleTimeout;
+
   private int retryMaxAttempts = 2;
 
   /**
@@ -753,6 +757,14 @@ public class PoolProperties {
 
   public void setEmbeddingTimeout(Duration embeddingTimeout) {
     this.embeddingTimeout = embeddingTimeout;
+  }
+
+  public Duration getEmbeddingConnectionIdleTimeout() {
+    return embeddingConnectionIdleTimeout;
+  }
+
+  public void setEmbeddingConnectionIdleTimeout(Duration embeddingConnectionIdleTimeout) {
+    this.embeddingConnectionIdleTimeout = embeddingConnectionIdleTimeout;
   }
 
   public int getRetryMaxAttempts() {

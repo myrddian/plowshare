@@ -124,6 +124,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    */
   private static final int OKHTTP_DEFAULT_MAX_REQUESTS_PER_HOST = 5;
 
+  private static final int OKHTTP_DEFAULT_MAX_IDLE_CONNECTIONS = 5;
+
   /**
    * The endpoint said {@code data: [DONE]}. Sentinels rather than nulls, because {@link
    * BlockingQueue} does not carry nulls.
@@ -198,10 +200,9 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    * not deserve the same wait — a batch of a hundred summaries and a single question are the same
    * endpoint but not the same patience, and a stream's timeout is per chunk rather than per call.
    *
-   * <p>Derived with {@code newBuilder()} rather than built separately, so the three share one
-   * connection pool and one dispatcher. Three independent builders would open three idle connection
-   * pools and three keep-alive threads to a single box, and this class is constructed once per pool
-   * rather than once per process, so that multiplies by however many hosts are declared.
+   * <p>The clients share a dispatcher and, by default, a connection pool. A configured embedding
+   * idle limit gives embeddings their own connection pool because OkHttp applies idle retention to
+   * the pool as a whole. Each transport is constructed for one configured provider pool.
    */
   public OpenAiTransport(PoolProperties props, ObjectMapper mapper) {
     this(props, mapper, Dialect.STANDARD);
@@ -258,24 +259,26 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
             // callCeiling(...) exists to make irrelevant.
             .retryOnConnectionFailure(true)
             .build();
-    // Three clients over one base, so they share its connection pool and
-    // dispatcher, differing only in how long they wait for an answer.
-    //
-    // The shared ConnectionPool's default of 5 is the other 5 in this
-    // picture and is not admission control, so it needs no adjusting
-    // alongside streamCeiling: it caps how many *idle* connections are kept
-    // warm, and a call that finds none simply opens one. Concurrency is
-    // bounded by the dispatcher above and by the pool's lanes, never here.
     this.chatHttp =
         base.newBuilder()
             .readTimeout(props.getChatTimeout())
             .callTimeout(callCeiling(props.getChatTimeout()))
             .build();
-    this.embeddingHttp =
+    OkHttpClient.Builder embeddingClient =
         base.newBuilder()
             .readTimeout(props.getEmbeddingTimeout())
-            .callTimeout(callCeiling(props.getEmbeddingTimeout()))
-            .build();
+            .callTimeout(callCeiling(props.getEmbeddingTimeout()));
+    Duration embeddingIdleTimeout = props.getEmbeddingConnectionIdleTimeout();
+    if (embeddingIdleTimeout != null) {
+      // Retire idle sockets before a short server keep-alive can leave one stale. This also
+      // confines eviction on embedding retry to the embedding connections.
+      embeddingClient.connectionPool(
+          new ConnectionPool(
+              OKHTTP_DEFAULT_MAX_IDLE_CONNECTIONS,
+              embeddingIdleTimeout.toNanos(),
+              TimeUnit.NANOSECONDS));
+    }
+    this.embeddingHttp = embeddingClient.build();
     // A call timeout equal to the read timeout. It bounds getting the
     // response open and nothing after that, which is deliberate on okhttp's
     // side rather than a quirk: RealEventSource.processResponse calls
@@ -2802,11 +2805,8 @@ public final class OpenAiTransport implements LlmTransport, WebSocketOpener {
    * {@inheritDoc}
    *
    * <p>Idempotent without a flag, because both halves already are: {@code ExecutorService.shutdown}
-   * on a terminated executor is a no-op and {@code evictAll} on an empty pool closes nothing. The
-   * three clients share one connection pool and one dispatcher today, so the loop repeats itself
-   * twice — kept anyway, because the day one of them is built independently for a timeout OkHttp
-   * cannot express per call, a loop over all three is already the correct code and a single {@code
-   * chatHttp.close()} would silently leak the other two.
+   * on a terminated executor is a no-op and {@code evictAll} on an empty pool closes nothing.
+   * Visiting each client also handles the optional separate embedding connection pool.
    *
    * <p><b>What this does not do is prevent further use, and the asymmetry that follows is kept on
    * purpose.</b> Nothing here sets a closed flag, so a synchronous call after close still works:

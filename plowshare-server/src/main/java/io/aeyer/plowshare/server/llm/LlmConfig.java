@@ -894,6 +894,16 @@ public class LlmConfig implements EnvironmentAware {
         "embedding-timeout",
         pool.getEmbeddingTimeout(),
         "how long an embedding batch waits for the model");
+    Duration embeddingIdleTimeout = pool.getEmbeddingConnectionIdleTimeout();
+    if (embeddingIdleTimeout != null
+        && (embeddingIdleTimeout.isZero()
+            || embeddingIdleTimeout.isNegative()
+            || embeddingIdleTimeout.compareTo(Duration.ofNanos(Long.MAX_VALUE)) > 0)) {
+      throw new IllegalStateException(
+          "pool '"
+              + pool.getName()
+              + "' embedding-connection-idle-timeout must be positive and fit in nanoseconds");
+    }
     if (pool.getRetryMaxAttempts() < 1) {
       // The exact twin of the lane-sized-to-zero check above, and it was
       // missing while that one was present. OpenAiTransport.executeWithRetry

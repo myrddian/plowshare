@@ -30,6 +30,16 @@ An operator file replaces a shipped profile of the same name completely. The
 New profile names require no resource catalogue change. Edit the files and restart
 the same binary; no JAR/resource/container-image rebuild or live reload is involved.
 
+## Embedding HTTP connections
+
+Set `embedding-connection-idle-timeout: 4s` in an existing `plowshare.llm.pools`
+entry to retire that pool's idle embedding HTTP connections after four seconds.
+Choose a positive duration shorter than the upstream server's idle keep-alive.
+The setting gives embeddings a separate connection pool while preserving chat
+connections and the time allowed for active requests. Pools that omit the setting
+continue to use their shared provider connection pool. The setting takes effect
+at server startup.
+
 ## Version 2 format declarations
 
 An illustrative `reader.yaml`:
