@@ -1,8 +1,11 @@
 plugins { `java-library`; application }
 val okhttpVersion: String by project
+val jacksonVersion: String by project
 dependencies {
     api(project(":plowshare-integrations"))
     implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
+    // Native capability metadata persists and publishes Optional fields outside the server JVM.
+    runtimeOnly("com.fasterxml.jackson.datatype:jackson-datatype-jdk8:$jacksonVersion")
     testImplementation(platform("org.junit:junit-bom:5.11.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("com.squareup.okhttp3:mockwebserver:$okhttpVersion")

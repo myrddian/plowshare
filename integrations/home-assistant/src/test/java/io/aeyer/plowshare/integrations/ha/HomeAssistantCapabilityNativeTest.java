@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.integrations.ha;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -8,12 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.aeyer.plowshare.integrations.Json;
+import io.aeyer.plowshare.integrations.ha.HomeAssistantCapabilities.FieldReadRequest;
 import io.aeyer.plowshare.integrations.ha.HomeAssistantCapabilities.FieldRole;
+import io.aeyer.plowshare.integrations.ha.HomeAssistantCapabilities.FieldSelection;
 import io.aeyer.plowshare.integrations.ha.HomeAssistantCapabilities.Query;
 import io.aeyer.plowshare.integrations.ha.HomeAssistantCapabilities.ResolutionStatus;
 import io.aeyer.plowshare.integrations.ha.HomeAssistantProviderConfiguration.Discovery;
 import io.aeyer.plowshare.integrations.ha.HomeAssistantResources.OperationBudget;
+import io.aeyer.plowshare.protocol.IntegrationPayload.NumberParameter;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -43,6 +49,10 @@ class HomeAssistantCapabilityNativeTest {
 
   private static final class Native extends WebSocketListener {
     final List<JsonNode> requests = new CopyOnWriteArrayList<>();
+    final List<Integer> registryReplyBytes = new CopyOnWriteArrayList<>();
+    final List<Integer> registryReplyCharacters = new CopyOnWriteArrayList<>();
+    volatile int registryRows = 1;
+    volatile String registryPadding = "";
     int selections;
     int stateReads;
     boolean firstSelectionEvent;
@@ -95,7 +105,16 @@ class HomeAssistantCapabilityNativeTest {
         } else if (type.equals("config/entity_registry/list")) {
           var partial = registry();
           partial.remove("aliases");
-          result = Json.MAPPER.createArrayNode().add(partial);
+          var rows = Json.MAPPER.createArrayNode().add(partial);
+          for (int index = 1; index < registryRows; index++) {
+            var unselected =
+                Json.object()
+                    .put("entity_id", "sensor.unselected_" + index)
+                    .put("id", "unselected-registry-" + index);
+            unselected.putObject("options").put("fixture_padding", registryPadding);
+            rows.add(unselected);
+          }
+          result = rows;
         } else if (type.equals("config/entity_registry/get_entries")) {
           var object = Json.object();
           for (JsonNode entity : request.path("entity_ids"))
@@ -142,9 +161,94 @@ class HomeAssistantCapabilityNativeTest {
               .putObject("error")
               .put("code", selectionFailure == null ? "not_allowed" : selectionFailure)
               .put("message", "private-server-message");
-        socket.send(reply.toString());
+        String encoded = reply.toString();
+        if (type.equals("config/entity_registry/list")) {
+          registryReplyBytes.add(encoded.getBytes(StandardCharsets.UTF_8).length);
+          registryReplyCharacters.add(encoded.length());
+        }
+        socket.send(encoded);
       } catch (Exception failure) {
         throw new AssertionError(failure);
+      }
+    }
+  }
+
+  @Test
+  void nativeRegistryAboveOneMiBStillResolvesAndReadsOnlyAdmittedFields() throws Exception {
+    var nativeHa = new Native();
+    nativeHa.registryRows = 1746;
+    nativeHa.registryPadding = "registry-metadata-".repeat(40);
+    try (var server = new MockWebServer()) {
+      server.enqueue(new MockResponse().withWebSocketUpgrade(nativeHa));
+      server.start();
+      var settings = settings(server.url("/").toString());
+      try (var adapter =
+          new HomeAssistantAdapter(settings, "fixture-token", Duration.ofSeconds(2))) {
+        adapter.start(ignored -> {});
+        try (var catalog = open(server, nativeHa, adapter, settings)) {
+          var resolved =
+              catalog.resolve(query("Office"), OperationBudget.start(Duration.ofSeconds(2)));
+          assertEquals(ResolutionStatus.RESOLVED, resolved.status());
+          var resource = resolved.candidates().getFirst();
+          assertEquals("climate.office", resource.entityId());
+          var read =
+              catalog.read(
+                  new FieldReadRequest(
+                      resolved.revision(),
+                      List.of(
+                          new FieldSelection(
+                              resource.resourceId(), List.of("attribute.current_temperature")))),
+                  OperationBudget.start(Duration.ofSeconds(2)));
+          assertEquals(
+              new NumberParameter(new BigDecimal("19.4")),
+              read.readings().getFirst().value().orElseThrow());
+          assertFalse(nativeHa.registryReplyBytes.isEmpty());
+          assertTrue(
+              nativeHa.registryReplyBytes.stream()
+                  .allMatch(size -> size > 1024 * 1024 && size <= 4 * 1024 * 1024));
+          assertFalse(Json.MAPPER.writeValueAsString(resolved).contains("unselected"));
+          assertFalse(
+              nativeHa.requests.stream()
+                  .anyMatch(request -> request.path("type").asText().equals("call_service")));
+        }
+      }
+    }
+  }
+
+  @Test
+  void oversizedUtf8RegistryFencesConnectionWithoutChangingAnchorsOrReplayingReads()
+      throws Exception {
+    var nativeHa = new Native();
+    try (var server = new MockWebServer()) {
+      server.enqueue(new MockResponse().withWebSocketUpgrade(nativeHa));
+      server.start();
+      var settings = settings(server.url("/").toString());
+      try (var adapter =
+          new HomeAssistantAdapter(settings, "fixture-token", Duration.ofSeconds(2))) {
+        adapter.start(ignored -> {});
+        try (var catalog = open(server, nativeHa, adapter, settings)) {
+          catalog.resolve(query("Office"), OperationBudget.start(Duration.ofSeconds(2)));
+          byte[] retained = Files.readAllBytes(directory.resolve("identity/identities.json"));
+          nativeHa.registryRows = 1746;
+          nativeHa.registryPadding = "é".repeat(1300);
+          assertThrows(
+              IOException.class,
+              () -> catalog.resolve(query("Office"), OperationBudget.start(Duration.ofSeconds(2))));
+          int last = nativeHa.registryReplyBytes.size() - 1;
+          assertTrue(nativeHa.registryReplyBytes.get(last) > 4 * 1024 * 1024);
+          assertTrue(nativeHa.registryReplyCharacters.get(last) < 4 * 1024 * 1024);
+          assertFalse(adapter.resourceSource("fixture-check").connection().connected());
+          assertArrayEquals(
+              retained, Files.readAllBytes(directory.resolve("identity/identities.json")));
+          int requests = nativeHa.requests.size();
+          assertThrows(
+              IOException.class,
+              () -> catalog.resolve(query("Office"), OperationBudget.start(Duration.ofSeconds(2))));
+          assertEquals(requests, nativeHa.requests.size());
+          assertFalse(
+              nativeHa.requests.stream()
+                  .anyMatch(request -> request.path("type").asText().equals("call_service")));
+        }
       }
     }
   }
