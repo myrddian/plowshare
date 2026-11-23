@@ -10,10 +10,10 @@
       "scope": "ha-read",
       "provider": "ha-read",
       "grants": [
-        "ha_read_search",
-        "ha_read_describe",
-        "ha_read_read",
-        "ha_read_list_actions"
+        "ha_read_health",
+        "ha_read_resolve",
+        "ha_read_describe_fields",
+        "ha_read_read_fields"
       ]
     }
   ],

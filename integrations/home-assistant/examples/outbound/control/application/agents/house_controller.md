@@ -31,3 +31,9 @@ If a physical check is useful, perform a fresh explicit discovery and one select
 batched read after the receipt. Report the observation's time and availability;
 a matching state does not prove this action caused it. Missing verification stays
 unverified. Do not repeatedly act or poll until a desired state appears.
+
+Use `ha_read_health` for local connection/catalogue observations and
+`ha_read_diagnose` with the discovered alias/revision for entity availability,
+freshness and requested attribute restrictions. An unavailable entity is an HA
+observation; do not guess a battery or network cause. State when the evidence is
+unknown. Diagnostics do not authorize control or additional attributes.

@@ -14,6 +14,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol, TypeVar, runtime_checkable
 from uuid import UUID
 
@@ -29,6 +30,12 @@ from ._vendor.plowshare.contracts import (
     Request,
 )
 from .const import CLEANUP_TIMEOUT, MAX_SESSIONS
+from .diagnostic_models import (
+    CommunicationObservation,
+    CorrelationCounts,
+    FailureCategory,
+    GatewayDiagnostics,
+)
 from .models import Session, Settings, required_text
 from .requests import (
     ConversationRequest,
@@ -127,22 +134,105 @@ class SdkConversationAgent:
         self._settled.set()
         self._drains: dict[str, asyncio.Task[None]] = {}
         self._drain: asyncio.Task[None] | None = None
+        self._last_connection_at: datetime | None = None
+        self._last_successful_request_at: datetime | None = None
+        self._last_failure_at: datetime | None = None
+        self._last_failure_category: FailureCategory | None = None
+        self._last_result_at: datetime | None = None
+        self._last_result_status: str | None = None
+
+    def diagnostics_snapshot(self) -> GatewayDiagnostics:
+        """Observe memory only; a past reply never establishes current connectivity.
+
+        Both profiles share the same bounded correlation store. Its aggregate is
+        labeled explicitly so callers do not sum two views of the same records.
+        No error text, remote content or correlation identities are retained here.
+        """
+        return GatewayDiagnostics(
+            self._closed,
+            len(self._active),
+            len(self._drains),
+            CommunicationObservation(
+                self._last_connection_at,
+                self._last_successful_request_at,
+                self._last_failure_at,
+                self._last_failure_category,
+                self._last_result_at,
+                self._last_result_status,
+            ),
+            CorrelationCounts(
+                len(self.sessions),
+                sum(s.phase in {"running", "waiting"} for s in self.sessions.values()),
+                sum(
+                    s.phase in {"sending", "uncertain"} for s in self.sessions.values()
+                ),
+                sum(s.phase == "preparing" for s in self.sessions.values()),
+            ),
+        )
+
+    def _observe_failure(self, category: FailureCategory) -> None:
+        self._last_failure_at = datetime.now(UTC)
+        self._last_failure_category = category
+
+    async def _connect(self) -> Client:
+        try:
+            client = await self.connect(
+                self.settings.origin,
+                self.settings.token,
+                timeout=self.settings.request_timeout,
+            )
+        except Refusal:
+            self._observe_failure("refusal")
+            raise
+        except TransportError:
+            self._observe_failure("transport")
+            raise
+        except TimeoutError:
+            self._observe_failure("timeout")
+            raise
+        except OSError:
+            self._observe_failure("io")
+            raise
+        self._last_connection_at = datetime.now(UTC)
+        return client
 
     async def _save(self) -> None:
         """The injected owner commits durable intent or raises within its budget."""
-        async with asyncio.timeout(self.settings.request_timeout):
-            await self.save()
+        try:
+            async with asyncio.timeout(self.settings.request_timeout):
+                await self.save()
+        except TimeoutError, OSError:
+            self._observe_failure("storage")
+            raise
 
     async def _request(self, client: Client, request: Request[T]) -> T:
         # Capacity waiting is disabled: no caller timeout supplies replay proof.
-        async with asyncio.timeout(self.settings.request_timeout):
-            return (
-                await client.request(
-                    request,
-                    timeout=self.settings.request_timeout,
-                    wait_for_capacity=False,
-                )
-            ).require_payload()
+        try:
+            async with asyncio.timeout(self.settings.request_timeout):
+                payload = (
+                    await client.request(
+                        request,
+                        timeout=self.settings.request_timeout,
+                        wait_for_capacity=False,
+                    )
+                ).require_payload()
+        except Refusal:
+            self._observe_failure("refusal")
+            raise
+        except TransportError:
+            self._observe_failure("transport")
+            raise
+        except TimeoutError:
+            self._observe_failure("timeout")
+            raise
+        except OSError:
+            self._observe_failure("io")
+            raise
+        except ValueError:
+            self._observe_failure("verification")
+            raise
+        self._last_successful_request_at = datetime.now(UTC)
+        return payload
 
     async def _close(self, client: Client, owner: str) -> None:
         task = asyncio.create_task(client.close())
@@ -205,11 +295,7 @@ class SdkConversationAgent:
         client = None
         try:
             async with asyncio.timeout(self.settings.request_timeout):
-                client = await self.connect(
-                    self.settings.origin,
-                    self.settings.token,
-                    timeout=self.settings.request_timeout,
-                )
+                client = await self._connect()
                 agents = await self._request(
                     client, AgentListRequest(project=self.settings.project)
                 )
@@ -305,6 +391,14 @@ class SdkConversationAgent:
     async def _execute(
         self, request: HaRequest, *, legacy_key: bool = False
     ) -> GatewayResult:
+        result = await self._execute_request(request, legacy_key=legacy_key)
+        self._last_result_at = datetime.now(UTC)
+        self._last_result_status = result.status
+        return result
+
+    async def _execute_request(
+        self, request: HaRequest, *, legacy_key: bool = False
+    ) -> GatewayResult:
         try:
             body = render_task(request)
             source, lookup, binding, correlation = self._routing(request)
@@ -355,11 +449,7 @@ class SdkConversationAgent:
                 # is suspended. A persisted preparing row safely restarts idle.
                 session.phase = "preparing"
             async with asyncio.timeout(self.settings.response_timeout):
-                client = await self.connect(
-                    self.settings.origin,
-                    self.settings.token,
-                    timeout=self.settings.request_timeout,
-                )
+                client = await self._connect()
                 if session.phase == "preparing":
                     if session.conversation is None:
                         # Persist intent before even an alias-opening mutation.
@@ -456,6 +546,7 @@ class SdkConversationAgent:
             if session is not None and session.phase == "uncertain":
                 return GatewayResult("uncertain", message=UNCERTAIN)
             if isinstance(error, ValueError):
+                self._observe_failure("verification")
                 return GatewayResult(
                     "unavailable",
                     message="The retained house-agent result could not be verified. Inspect it in Plowshare.",

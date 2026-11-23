@@ -1,6 +1,6 @@
 # Named Home Assistant read tools
 
-`HomeAssistantReadTools` supplies four SDK declarations for one configured HA
+`HomeAssistantReadTools` supplies the legacy six SDK declarations for one configured HA
 resource binding. `HomeAssistantToolProvider` hosts them through the existing
 public Java `RelayTools.Provider`; Plowshare continues to own agent execution,
 invocations, scope permissions and durable Relay messages. This is a Java
@@ -14,6 +14,8 @@ independent and compatible.
 | `describe` | Alias, source revision, optional attribute offset | One permitted description and up to 16 attribute names |
 | `read` | Source revision, up to 20 aliases and optional attribute names | One fresh batch; only requested, already-permitted primitive attributes |
 | `list_actions` | Alias, revision, optional page offset/limit | Configured action summaries; no execution |
+| `health` | No arguments | Timestamped local HA authenticated-connection flag, local confirmed catalogue lease and last completed SDK communication; end-to-end status remains `NOT_CHECKED` |
+| `diagnose` | Alias, revision, up to 16 requested attributes and optional attribute offset | Fresh availability/freshness observation and up to 16 permitted attribute names; no values or inferred hardware cause |
 
 The prefix is mandatory, lower-case and ends in `_`; configure separate
 non-overlapping prefixes for multiple bindings. Search and action pages contain
@@ -74,7 +76,7 @@ For an Application, serialize `HomeAssistantToolProvider.installation(settings)`
 into its private `server/tools.json`. It declares `bindings: []` and one provider
 with account/prefix/lease. Keep real account values out of tracked examples.
 Separately assign an Application tool scope to the intended `dynamic: true`
-agent, granting exactly the four configured read tool names. Provider discovery
+agent, granting exactly the six configured read tool names. Provider discovery
 and a successful catalogue publication do not create grants. An exact read scope
 does not automatically grant future action tools. See
 [provider scopes](../../docs/tool-scopes.md) for server-owned Application and
@@ -210,3 +212,78 @@ Focused fixtures use fake public SDK transports, actual SDK provider execution a
 temporary local journals. They establish codec/lifecycle behavior and refusal
 before handlers; they do not claim an authenticated live grant/deployment check or
 physical HA device behavior. No action execution is added by this read-tool slice.
+
+## Diagnostic evidence and limits
+
+`diagnose` uses the same policy-filtered discovery and fresh batch reader as `read`.
+A hidden or absent alias returns the same `NOT_VISIBLE` result without a native probe.
+`OBSERVED` with `availability: UNAVAILABLE` means HA returned that entity state;
+it is a successful observation and does not establish dead batteries or a network cause.
+`MISSING`, `INVALID`, source update time, observation time and `stale` remain distinct.
+An old source timestamp alone is not the adapter's `stale` flag.
+
+For the standalone host, requested attribute statuses distinguish
+`NOT_EXPOSED_BY_POLICY`, `PERMITTED_PRESENT`, `PERMITTED_ABSENT` and `UNSUPPORTED`.
+The configured ceiling can include an attribute absent from native metadata. Embedded
+composition without a diagnostics capability reports `NOT_OBSERVED` when it cannot
+establish that ceiling. Permitted names are paged and never reveal attribute values.
+Generic IO failures return sanitized `OBSERVATION_UNAVAILABLE`; this includes revision,
+metadata and connection failures and does not identify HA versus Plowshare as the cause.
+No raw exception, credential, origin, job receipt or prompt is included.
+
+`health` takes an in-memory snapshot without issuing jobs, model calls or network
+probes. HA's connection flag reflects authenticated native startup, but is not a new
+credential check. The SDK timestamp records completed connect/lifecycle operations;
+it is historical evidence, not a current socket or authentication guarantee. A local
+confirmed lease does not prove server/model health. Last successful native HA
+communication is `NOT_OBSERVED` because the resource-source contract supplies no
+communication timestamp. A dead provider cannot answer its own tools; use the HA
+component's independent diagnostics download. Neither diagnostic tool retries an
+uncertain operation, publishes replacement work or enables control.
+
+## Capability-based read mode
+
+Explicit outbound `discovery` configuration selects `HomeAssistantCapabilityTools`
+with the existing local `health` handler. It offers four declarations instead of
+the legacy six; legacy alias-data tools cannot bypass the capability policy.
+Omitting that configuration preserves the original six declarations and behavior.
+
+| Suffix | Input | Result |
+| --- | --- | --- |
+| `health` | No arguments | The unchanged local connection/catalogue observations |
+| `resolve` | Optional text, domain, area, capability and role; bounded offset/limit with revision for later pages | Resource/field candidates and whole-set `NO_MATCH`, `RESOLVED` or `AMBIGUOUS` |
+| `describe_fields` | Opaque resource ID and exact revision; bounded field offset/limit | Permitted typed field descriptions without values |
+| `read_fields` | Exact revision and up to 20 distinct fields across at most 20 resources | Typed field values with separate availability, role, unit, source/update and observation metadata |
+
+Names and aliases are search metadata, not identity. Resource handles follow
+verified registry identity; locator-only references are connection-scoped. The
+adapter resolves name terms across permitted resource/field metadata. Quantity
+and role filters distinguish current temperature from a target setpoint. A
+candidate is a resource/field pair; ambiguity is computed before pagination and
+is never resolved by choosing the first available device. The agent can request
+clarification or report source-qualified readings.
+
+Every nested schema is inline and closed. Invalid, duplicate, foreign or stale
+references fail before values are disclosed. Reads use the owning finite budget,
+preserve unsupported/unknown/unavailable distinctions and do not automatically
+repeat model work or uncertain SDK publications. A schema/type/meaning change
+requires fresh discovery; a changing numeric reading alone does not change the
+schema revision. The existing 15,000-unit result bound asks callers to narrow an
+oversized response rather than truncate it.
+
+A verified catalogue revision mismatch returns an explicit request to resolve
+fresh candidates before another read. Other IO failures retain a sanitized
+unknown-cause observation failure. Neither path automatically resolves, recollects
+or retries work on behalf of the caller.
+
+Fresh HA exposure checks establish a bounded native read-admission/observation
+boundary, not an atomic HA-policy/Plowshare-publication guarantee. Subsequent
+policy changes block new reads after observation. Already accepted immutable SDK
+results retain their original receipt and reconciliation; they are not recollected,
+scrubbed or replayed to obtain another reply.
+
+The [outbound guide](PROVIDER-HOST.md#capability-based-read-discovery) describes
+standard-measurement and explicit field profiles, fixed and follow-Assist
+selection, private identity journals and the required owner/catalogue migration.
+The four exact grants must match this mode; the old read grants confer no access
+to new tool names, and new grants do not make legacy tools discoverable.

@@ -13,7 +13,9 @@
         "ha_read_search",
         "ha_read_describe",
         "ha_read_read",
-        "ha_read_list_actions"
+        "ha_read_list_actions",
+        "ha_read_health",
+        "ha_read_diagnose"
       ]
     },
     {

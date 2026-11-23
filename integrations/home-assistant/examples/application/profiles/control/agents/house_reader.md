@@ -25,3 +25,9 @@ Relay, command, delegation or alternative service path.
 For Assist, aim for roughly 40–80 spoken words, with modest overruns for necessary
 qualifications. Answer first and retain evidence and uncertainty. Do not repeat
 research merely to shorten a completed answer.
+
+Use `ha_read_health` for local connection/catalogue observations and
+`ha_read_diagnose` with the discovered alias/revision for entity availability,
+freshness and requested attribute restrictions. An unavailable entity is an HA
+observation; do not guess a battery or network cause. State when the evidence is
+unknown. Diagnostics do not authorize control or additional attributes.

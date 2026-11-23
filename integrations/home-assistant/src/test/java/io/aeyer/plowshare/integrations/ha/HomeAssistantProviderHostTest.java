@@ -168,6 +168,46 @@ class HomeAssistantProviderHostTest {
   }
 
   @Test
+  void capabilityIdentityLockRemainsOwnedUntilBorrowingProviderPhysicallySettles()
+      throws Exception {
+    var identityPath = directory.toRealPath().resolve("identities");
+    var store =
+        new HomeAssistantCapabilityIdentityStore(identityPath, "a".repeat(64), "b".repeat(64));
+    var read = new Provider("read", new ArrayList<>());
+    var shared =
+        new HomeAssistantProviderHost.Maintenance() {
+          @Override
+          public void maintain() {}
+
+          @Override
+          public void close() throws IOException {
+            store.close();
+          }
+        };
+    var host = new HomeAssistantProviderHost(shared, List.of(read), TIMING, () -> 0);
+    try {
+      host.cycle();
+      read.failClose = true;
+      assertThrows(IOException.class, host::close);
+      assertThrows(
+          IOException.class,
+          () ->
+              new HomeAssistantCapabilityIdentityStore(
+                  identityPath, "a".repeat(64), "b".repeat(64)));
+      read.failClose = false;
+      host.close();
+      try (var reopened =
+          new HomeAssistantCapabilityIdentityStore(identityPath, "a".repeat(64), "b".repeat(64))) {
+        assertEquals("a".repeat(64), reopened.state().owner());
+        assertTrue(Files.isRegularFile(identityPath.resolve("identities.json")));
+      }
+    } finally {
+      read.failClose = false;
+      host.close();
+    }
+  }
+
+  @Test
   void sharedCleanupHasOneRetainedPhysicalTaskAfterCallerExpiry() throws Exception {
     List<String> events = new ArrayList<>();
     CountDownLatch entered = new CountDownLatch(1);

@@ -7,8 +7,8 @@ rewritten by either profile.
 
 | Template | Application and agent | Exact external tool grants |
 | --- | --- | --- |
-| `readonly/` | `home-assistant-readonly` / `house_reader` | `ha_read_search`, `ha_read_describe`, `ha_read_read`, `ha_read_list_actions` |
-| `control/` | `home-assistant-control` / `house_controller` | The four read tools plus `ha_control_describe_action`, `ha_control_execute_action` |
+| `readonly/` | `home-assistant-readonly` / `house_reader` | `ha_read_health`, `ha_read_resolve`, `ha_read_describe_fields`, `ha_read_read_fields` |
+| `control/` | `home-assistant-control` / `house_controller` | Six legacy read tools plus `ha_control_describe_action`, `ha_control_execute_action` |
 
 Each directory has a complete `application/` source root and a matching sibling
 `provider.json`. The Applications have different project and agent names; their
@@ -50,6 +50,20 @@ copying or validating them.
    not a shared journal. Preserve the original configuration and uncertain
    receipts before rotating identities, credentials, policy or routing. Do not
    delete a journal or replay an action to make a changed configuration start.
+
+The read-only template explicitly enables fixed capability discovery with the
+`standard_measurements` profile. It discovers typed measurement fields, including
+climate current versus target temperatures, on the selected entities. Its separate
+identity journal preserves verified registry identity across renames; duplicate
+names remain candidates. Explicit field/entity exclusions override that profile.
+This mode offers four tools and no legacy alias-reading bypass. The control
+template omits discovery and keeps its six legacy read tools plus two controls.
+
+`readonly/provider-assist-exposed.json` is an alternative private starting point,
+not a second provider to run alongside the fixed example. It requires the matching
+HA companion's effective-exposure command and follows HA conversation exposure
+with fresh disclosure checks. Both examples use explicit private identity and
+SDK receipt journals. Neither example activates itself or modifies live access.
 
 The control template's `allowedActions` admits only its configured `lamp_on`
 profile. It is an additional local ceiling, not a tool grant. The read-only

@@ -30,7 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Four read-only SDK tools over one explicitly configured resource binding. Input trees are decoded
+ * Six read-only SDK tools over one explicitly configured resource binding. Input trees are decoded
  * here into the existing typed contracts; neither caller-supplied policies nor arbitrary HA targets
  * cross that boundary. Results retain source revision/provenance and never imply control grants.
  */
@@ -57,6 +57,7 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
   private final ResourceDiscovery discovery;
   private final ResourceReader reader;
   private final int timeoutSeconds;
+  private final HomeAssistantReadDiagnostics diagnostics;
   private final List<RelayTools.Declaration> declarations;
 
   public HomeAssistantReadTools(
@@ -70,6 +71,23 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
       ResourceDiscovery discovery,
       ResourceReader reader,
       Duration requestTimeout) {
+    this(
+        binding,
+        prefix,
+        discovery,
+        reader,
+        requestTimeout,
+        HomeAssistantReadDiagnostics.unobserved());
+  }
+
+  public HomeAssistantReadTools(
+      Binding binding,
+      String prefix,
+      ResourceDiscovery discovery,
+      ResourceReader reader,
+      Duration requestTimeout,
+      HomeAssistantReadDiagnostics diagnostics) {
+    this.diagnostics = Objects.requireNonNull(diagnostics);
     this.binding = Objects.requireNonNull(binding);
     this.prefix = prefix(prefix);
     this.discovery = Objects.requireNonNull(discovery);
@@ -130,6 +148,23 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
            "limit":{"type":"integer","minimum":1,"maximum":20}}
           """
                     .formatted(REVISION_SCHEMA),
+                List.of("alias", "revision")),
+            declaration(
+                "health",
+                "Report local HA connection and provider lease observations; does not prove end-to-end health or retry work.",
+                "{}",
+                List.of()),
+            declaration(
+                "diagnose",
+                "Diagnose one permitted alias without exposing values. UNAVAILABLE is an HA observation, not proof of a hardware cause. Policy exclusions do not imply absence.",
+                """
+          {"alias":{"type":"string","minLength":1,"maxLength":256},
+           "revision":%s,
+           "attributes":{"type":"array","items":{"type":"string","minLength":1,"maxLength":256},
+             "maxItems":16,"uniqueItems":true},
+           "attributeOffset":{"type":"integer","minimum":0,"maximum":257}}
+          """
+                    .formatted(REVISION_SCHEMA),
                 List.of("alias", "revision")));
   }
 
@@ -167,7 +202,21 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
     }
   }
 
-  private sealed interface Request permits Find, Describe, Read, Actions {}
+  private sealed interface Request permits Find, Describe, Read, Actions, Health, Diagnose {}
+
+  private record Health() implements Request {}
+
+  private record Diagnose(
+      Reference reference, Revision revision, Set<String> attributes, int attributeOffset)
+      implements Request {
+    private Diagnose {
+      Objects.requireNonNull(reference);
+      Objects.requireNonNull(revision);
+      attributes = HomeAssistantResources.names(attributes, 16);
+      if (attributeOffset < 0 || attributeOffset > 257)
+        throw new IllegalArgumentException("Invalid HA attribute offset");
+    }
+  }
 
   private record Find(Search search) implements Request {}
 
@@ -201,6 +250,17 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
     }
     Response response =
         switch (request) {
+          case Health ignored -> {
+            var snapshot = diagnostics.snapshot();
+            yield new HealthResult(
+                snapshot.checkedAt().toString(),
+                snapshot.homeAssistantConnection().name(),
+                snapshot.catalogue().name(),
+                snapshot.lastSuccessfulSdkCommunication().map(Object::toString).orElse(null),
+                "NOT_OBSERVED",
+                "NOT_CHECKED");
+          }
+          case Diagnose diagnose -> diagnose(diagnose, budget);
           case Find find -> {
             var page = discovery.search(find.search(), budget);
             yield new SearchResult(
@@ -259,6 +319,15 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
   private Request decode(String tool, Map<String, ToolValue> args) {
     String suffix = tool.substring(prefix.length());
     return switch (suffix) {
+      case "health" -> new Health();
+      case "diagnose" ->
+          new Diagnose(
+              reference(text(args.get("alias"))),
+              revision(args.get("revision")),
+              args.containsKey("attributes")
+                  ? Set.copyOf(strings(args.get("attributes")))
+                  : Set.of(),
+              integer(args, "attributeOffset", 0));
       case "search" ->
           new Find(
               new Search(
@@ -354,6 +423,86 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
     throw new IllegalArgumentException("An array is required");
   }
 
+  private Response diagnose(Diagnose request, OperationBudget budget) throws IOException {
+    // Discovery and the fresh read independently fence the same supplied revision. A missing
+    // descriptor never triggers a native probe that could disclose an unselected entity.
+    try {
+      Optional<Description> found =
+          discovery.describe(request.reference(), request.revision(), budget);
+      if (found.isEmpty())
+        return new DiagnosisResult(
+            "NOT_VISIBLE",
+            request.reference().alias(),
+            null,
+            List.of(),
+            null,
+            List.of(),
+            null,
+            null,
+            null,
+            "NOT_ESTABLISHED");
+      Description description = found.orElseThrow();
+      var batch =
+          reader.read(new ReadRequest(request.revision(), List.of(request.reference())), budget);
+      if (!batch.revision().equals(request.revision())
+          || batch.states().size() != 1
+          || !batch.states().getFirst().reference().equals(request.reference()))
+        return new ErrorResult("HA diagnostic observation could not be verified.");
+      State state = batch.states().getFirst();
+      Optional<Set<String>> configured =
+          diagnostics.permittedAttributes(request.reference(), request.revision());
+      List<String> permitted =
+          configured.orElse(description.readableAttributes()).stream().sorted().toList();
+      if (request.attributeOffset() > permitted.size())
+        return new ErrorResult("HA attribute page is unavailable.");
+      int end = Math.min(permitted.size(), request.attributeOffset() + 16);
+      List<AttributeDiagnosis> attributes =
+          request.attributes().stream()
+              .sorted()
+              .map(
+                  name ->
+                      new AttributeDiagnosis(
+                          name,
+                          configured.isPresent() && !configured.orElseThrow().contains(name)
+                              ? "NOT_EXPOSED_BY_POLICY"
+                              : state.unsupportedAttributes().contains(name)
+                                  ? "UNSUPPORTED"
+                                  : state.attributes().containsKey(name)
+                                      ? "PERMITTED_PRESENT"
+                                      : configured.isPresent()
+                                              && configured.orElseThrow().contains(name)
+                                          ? "PERMITTED_ABSENT"
+                                          : "NOT_OBSERVED"))
+              .toList();
+      return new DiagnosisResult(
+          "OBSERVED",
+          request.reference().alias(),
+          state.availability().name(),
+          permitted.subList(request.attributeOffset(), end),
+          end < permitted.size() ? end : null,
+          attributes,
+          state.sourceUpdatedAt().map(Object::toString).orElse(null),
+          state.observedAt().toString(),
+          state.stale(),
+          "NOT_ESTABLISHED");
+    } catch (IOException unavailable) {
+      // IO includes stale revisions and capability failures; neither is proof that HA itself
+      // failed. Never relay exception text, which may contain native payloads or private origins.
+      budget.remaining();
+      return new DiagnosisResult(
+          "OBSERVATION_UNAVAILABLE",
+          request.reference().alias(),
+          null,
+          List.of(),
+          null,
+          List.of(),
+          null,
+          null,
+          null,
+          "NOT_ESTABLISHED");
+    }
+  }
+
   private ResourceView summary(Description value) {
     return new ResourceView(
         value.reference().alias(),
@@ -415,7 +564,37 @@ public final class HomeAssistantReadTools implements HomeAssistantToolHandlers {
   }
 
   private sealed interface Response
-      permits SearchResult, DescribeResult, ReadResult, ActionsResult, ErrorResult {}
+      permits SearchResult,
+          DescribeResult,
+          ReadResult,
+          ActionsResult,
+          HealthResult,
+          DiagnosisResult,
+          ErrorResult {}
+
+  private record HealthResult(
+      String checkedAt,
+      String homeAssistantConnection,
+      String providerCatalogue,
+      String lastSuccessfulSdkCommunication,
+      String lastSuccessfulHomeAssistantCommunication,
+      String endToEnd)
+      implements Response {}
+
+  private record AttributeDiagnosis(String name, String status) {}
+
+  private record DiagnosisResult(
+      String status,
+      String alias,
+      String availability,
+      List<String> permittedAttributes,
+      Integer nextAttributeOffset,
+      List<AttributeDiagnosis> requestedAttributes,
+      String sourceUpdatedAt,
+      String observedAt,
+      Boolean stale,
+      String cause)
+      implements Response {}
 
   private record RevisionView(
       String binding,

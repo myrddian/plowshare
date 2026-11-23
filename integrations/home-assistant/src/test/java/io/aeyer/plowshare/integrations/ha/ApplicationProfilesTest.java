@@ -35,8 +35,21 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Actual Application policy and definition loaders; no server, database, model or device calls. */
 class ApplicationProfilesTest {
-  private static final Set<String> READ_TOOLS =
-      Set.of("ha_read_search", "ha_read_describe", "ha_read_read", "ha_read_list_actions");
+  private static final Set<String> LEGACY_READ_TOOLS =
+      Set.of(
+          "ha_read_search",
+          "ha_read_describe",
+          "ha_read_read",
+          "ha_read_list_actions",
+          "ha_read_health",
+          "ha_read_diagnose");
+  private static final Set<String> CAPABILITY_READ_TOOLS =
+      Set.of("ha_read_health", "ha_read_resolve", "ha_read_describe_fields", "ha_read_read_fields");
+
+  private static Set<String> readTools(String profile) {
+    return profile.equals("readonly") ? CAPABILITY_READ_TOOLS : LEGACY_READ_TOOLS;
+  }
+
   private static final Set<String> CONTROL_TOOLS =
       Set.of("ha_control_describe_action", "ha_control_execute_action");
 
@@ -93,7 +106,7 @@ class ApplicationProfilesTest {
     String account = policy.executionAccount();
     assertTrue(account.startsWith("REPLACE_WITH_"));
     for (String agent : List.of("house_reader", "house_controller", "house_task", "unassigned")) {
-      for (String tool : READ_TOOLS) {
+      for (String tool : readTools(profile)) {
         boolean allowed =
             !profile.equals("task")
                 && (agent.equals("house_reader")
@@ -122,7 +135,7 @@ class ApplicationProfilesTest {
     assertEquals(
         profile.equals("task") ? 0 : profile.equals("control") ? 3 : 1, policy.toolGrants().size());
     if (!profile.equals("task"))
-      assertEquals(READ_TOOLS, Set.copyOf(policy.toolScopes().getFirst().grants()));
+      assertEquals(readTools(profile), Set.copyOf(policy.toolScopes().getFirst().grants()));
     if (profile.equals("control"))
       assertEquals(CONTROL_TOOLS, Set.copyOf(policy.toolScopes().get(1).grants()));
   }
@@ -188,7 +201,7 @@ class ApplicationProfilesTest {
     manifest.remove("toolGrants");
     var policy = ApplicationToolScopes.parse(Json.MAPPER.writeValueAsString(manifest));
     for (String agent : List.of("house_reader", "house_controller", "house_task")) {
-      for (String tool : READ_TOOLS)
+      for (String tool : readTools(profile))
         assertFalse(policy.permits(policy.executionAccount(), agent, "ha-read", tool));
       for (String tool : CONTROL_TOOLS)
         assertFalse(policy.permits(policy.executionAccount(), agent, "ha-control", tool));

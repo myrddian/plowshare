@@ -1,6 +1,7 @@
 """Configuration keys and deployment-independent resource bounds."""
 
 DOMAIN = "plowshare"
+INTEGRATION_VERSION = "0.2.0"
 CONF_PROJECT = "project"
 CONF_AGENT = "agent"
 CONF_REQUEST_TIMEOUT = "request_timeout"

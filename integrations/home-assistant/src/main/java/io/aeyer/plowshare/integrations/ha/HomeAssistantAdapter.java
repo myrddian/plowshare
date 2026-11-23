@@ -83,6 +83,7 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
   private String metadataAttemptEpoch;
   private final Set<String> completedMetadataEvents = new HashSet<>();
   private boolean metadataSetupFailed;
+  private volatile boolean capabilityDiscoveryActive;
   private long metadataVersion;
   private static final Set<String> METADATA_EVENTS =
       Set.of(
@@ -684,6 +685,7 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
   private synchronized void metadataChanged(String current, String eventType, JsonNode data) {
     if (!connected || retired || !epoch.equals(current)) return;
     if (eventType.equals("entity_registry_updated")
+        && !capabilityDiscoveryActive
         && !aliases.containsKey(data.path("entity_id").asText())) return;
     if (eventType.equals("service_registered") || eventType.equals("service_removed")) {
       String service = data.path("domain").asText() + "." + data.path("service").asText();
@@ -712,6 +714,185 @@ public final class HomeAssistantAdapter implements IntegrationAdapter {
     NativeResources created = new NativeResources(binding);
     resourceSources.put(bindingName, created);
     return created;
+  }
+
+  /**
+   * A separate opt-in read projection over this same native owner. The capability source borrows
+   * the socket, owns its identity store, and never changes the legacy fixed action targets.
+   */
+  HomeAssistantCapabilitySource capabilitySource(
+      HomeAssistantProviderConfiguration.Discovery policy,
+      HomeAssistantSettings settings,
+      HomeAssistantCapabilityIdentityStore identities) {
+    requireCapabilitySettings(settings);
+    capabilityDiscoveryActive = true;
+    return new NativeCapabilities(policy, settings, identities);
+  }
+
+  void requireCapabilitySettings(HomeAssistantSettings settings) {
+    HttpUrl configured =
+        Objects.requireNonNull(HttpUrl.parse(settings.endpoint()))
+            .newBuilder()
+            .addPathSegments("api/websocket")
+            .build();
+    if (!configured.equals(endpoint)
+        || !settings.entities().equals(entities)
+        || !settings.actions().equals(actions)
+        || !Set.copyOf(settings.subscriptions()).equals(subscriptions))
+      throw new IllegalArgumentException("Capability settings do not belong to this HA source");
+  }
+
+  private final class NativeCapabilities implements HomeAssistantCapabilitySource {
+    private final HomeAssistantProviderConfiguration.Discovery policy;
+    private final HomeAssistantSettings settings;
+    private final HomeAssistantCapabilityIdentityStore identities;
+    private final ReentrantLock collection = new ReentrantLock();
+    private volatile boolean closing;
+
+    NativeCapabilities(
+        HomeAssistantProviderConfiguration.Discovery policy,
+        HomeAssistantSettings settings,
+        HomeAssistantCapabilityIdentityStore identities) {
+      this.policy = Objects.requireNonNull(policy);
+      this.settings = Objects.requireNonNull(settings);
+      this.identities = Objects.requireNonNull(identities);
+    }
+
+    @Override
+    public Snapshot snapshot(OperationBudget budget) throws IOException {
+      if (closing || collection.isHeldByCurrentThread())
+        throw new IOException("Capability collection is unavailable");
+      boolean acquired;
+      try {
+        acquired = collection.tryLock(budget.remaining().toNanos(), TimeUnit.NANOSECONDS);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Capability collection interrupted");
+      }
+      if (!acquired) throw new IOException("Capability collection budget expired");
+      try {
+        if (closing) throw new IOException("Capability collection is closing");
+        String before;
+        long metadataBefore;
+        synchronized (HomeAssistantAdapter.this) {
+          if (!connected || retired || closed || snapshotting)
+            throw new IOException("HA capability connection unavailable");
+          before = epoch;
+        }
+        subscribeMetadata(before, budget);
+        Set<String> selected = selection(budget);
+        // Canonical exposure lookup may materialize defaults and emit registry updates. Those
+        // events establish this observation's baseline rather than invalidating its own first read.
+        synchronized (HomeAssistantAdapter.this) {
+          if (!connected || !epoch.equals(before))
+            throw new IOException("HA capability source changed");
+          metadataBefore = metadataVersion;
+        }
+        Registry entities = registry("config/entity_registry/list", budget);
+        if (entities.availability() != RegistryAvailability.AVAILABLE)
+          throw new IOException("HA registry identity capability unavailable");
+        JsonNode withAliases;
+        try {
+          Set<String> locators =
+              HomeAssistantCapabilityWire.selectedLocators(
+                  policy, settings, identities, entities.data(), selected);
+          if (locators.isEmpty()) withAliases = entities.data();
+          else {
+            var request = Json.object().put("type", "config/entity_registry/get_entries");
+            var ids = request.putArray("entity_ids");
+            locators.stream().sorted().forEach(ids::add);
+            withAliases =
+                HomeAssistantCapabilityWire.withAliases(
+                    entities.data(), command(request, budget), locators);
+          }
+        } catch (IllegalArgumentException malformed) {
+          throw new IOException("HA selected alias capability unavailable");
+        }
+        Registry devices = registry("config/device_registry/list", budget);
+        Registry areas = registry("config/area_registry/list", budget);
+        Registry configuration = registry("get_config", budget);
+        if (configuration.availability() == RegistryAvailability.AVAILABLE
+            && !configuration.data().isObject())
+          throw new IOException("HA unit configuration unavailable");
+        JsonNode states = command(Json.object().put("type", "get_states"), budget);
+        // Climate values in this HA baseline use installation units without carrying a unit on the
+        // state. Recheck the unit projection after values so a concurrent unit change cannot label
+        // a Fahrenheit value as Celsius when config-event subscriptions are unavailable.
+        Registry afterConfiguration = registry("get_config", budget);
+        if (configuration.availability() != afterConfiguration.availability()
+            || !configuration
+                .data()
+                .path("unit_system")
+                .equals(afterConfiguration.data().path("unit_system")))
+          throw new IOException("HA measurement units changed during collection");
+        // Metadata subscriptions may be refused by HA. A second registry projection is a deliberate
+        // identity-freshness check after the state batch, not a per-entity refetch or a retry.
+        Registry afterEntities = registry("config/entity_registry/list", budget);
+        if (afterEntities.availability() != RegistryAvailability.AVAILABLE
+            || !entities.data().equals(afterEntities.data())
+            || !selected.equals(selection(budget)))
+          throw new IOException("HA capability identity or selection changed during collection");
+        requireEpoch(before, metadataBefore);
+        Snapshot result;
+        try {
+          result =
+              HomeAssistantCapabilityWire.snapshot(
+                  before,
+                  policy,
+                  settings,
+                  identities,
+                  states,
+                  withAliases,
+                  devices.data(),
+                  areas.data(),
+                  configuration.data(),
+                  selected,
+                  Instant.now(),
+                  budget);
+        } catch (IllegalArgumentException malformed) {
+          throw new IOException("HA capability collection contains invalid selected data");
+        }
+        budget.remaining();
+        requireEpoch(before, metadataBefore);
+        return result;
+      } finally {
+        collection.unlock();
+      }
+    }
+
+    private Set<String> selection(OperationBudget budget) throws IOException {
+      if (policy.mode().equals("fixed")) return Set.of();
+      try {
+        return HomeAssistantCapabilityWire.exposed(
+            command(Json.object().put("type", "plowshare/discovery/selection"), budget));
+      } catch (ServiceRefused | IllegalArgumentException malformed) {
+        throw new IOException("HA effective exposure capability unavailable");
+      }
+    }
+
+    private void requireEpoch(String expected, long metadata) throws IOException {
+      synchronized (HomeAssistantAdapter.this) {
+        if (!connected
+            || retired
+            || closed
+            || snapshotting
+            || !epoch.equals(expected)
+            || metadataVersion != metadata)
+          throw new IOException("HA capability source changed during collection");
+      }
+    }
+
+    @Override
+    public void close() throws IOException {
+      closing = true;
+      if (!collection.tryLock())
+        throw new IOException("Capability collection still owns physical work");
+      try {
+        identities.close();
+      } finally {
+        collection.unlock();
+      }
+    }
   }
 
   /**

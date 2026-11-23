@@ -1,6 +1,7 @@
 # Home Assistant integration package: design and implementation plan
 
-Status: design and delivery plan. Scope corrected 22 November 2026.
+Status: design and delivery plan. Scope corrected 22 November 2026; generic
+read-discovery amendment authorized 24 November 2026.
 
 Current scope: the caching/fidelity concern does not justify adapting Plowshare
 to upstream prompt behavior. The only core extension is external conversation-ID
@@ -28,10 +29,11 @@ each deliverable. The coordinator tracks actual progress in the
 [delivery ledger](home-assistant-delivery-state.json). This document owns the
 design; the detailed graph and ledger own scheduling and completion status.
 
-The existing HA adapter and the Assist companion are implementation starting
-points. Discovery, generic action tools and the AI Task provider below are planned
-work. This document does not establish that an agent, provider or HA component has
-been deployed or validated against live devices.
+The existing selected-resource tools, Assist/AI Task companion and read diagnostics
+are implemented and independently reviewed; the ledger owns their exact source
+and operational evidence. The generic read-discovery amendment below extends that
+source. Historical proposed names and tables describe the original plan and do
+not establish current deployment or live validation.
 
 ## 1. Outcome and scope
 
@@ -70,14 +72,14 @@ missing public capability as a gap and continue independent integration work.
 
 ## 2. Current implementation and compatibility
 
-| Surface | Current evidence | Planned change |
+| Surface | Current source evidence | Capability amendment |
 | --- | --- | --- |
-| External HA adapter | Selected states, configured action aliases, state-change observations, threshold routes and uncertainty journal | Add policy-filtered discovery and named tools while retaining existing bindings |
-| Shared integration runtime | `IntegrationAdapter`, typed reads/actions, Relay request/return handling and workflow routing | Reuse lifecycle and recovery; do not add discovery variants to the shipped shared `IntegrationPayload` contract |
-| SDK tool providers | Named tools, typed schemas, catalogue publication, provider scopes and invocation reconciliation | Use these public capabilities for the HA catalogue |
-| HA Assist companion | Local `conversation` platform, public Python SDK gateway and private conversation/job correlation | Refactor its gateway for reuse by AI Task without changing existing chat behavior |
-| HA AI Task provider | No `ai_task` platform in the local Plowshare custom component | Add text generation, then validated structured output |
-| House Application | Example `house_coordinator`, evidence skill and heat-investigation orchestration | Supply optional reusable profiles; installation does not imply automatic deployment |
+| External HA adapter | Selected-state discovery/read tools, optional fixed action provider, observations and durable recovery | Add stable resource/field discovery and explicit selection profiles while preserving existing bindings |
+| Shared integration runtime | `IntegrationAdapter`, typed reads/actions, Relay handling and workflow routing | Reuse unchanged; no new shared `IntegrationPayload` variants |
+| SDK tool providers | Named tools, typed schemas, catalogue publication, scopes and reconciliation | Append adapter-owned capability tools using existing SDK |
+| HA Assist companion | Conversation platform, SDK gateway, retained correlation and diagnostics download | Add optional effective-exposure endpoint; preserve gateway lifecycle |
+| HA AI Task provider | Implemented text/flat-structured generation with independent review | Preserve current supported behavior and limits |
+| House Application | Read-only/control/task profiles, plus older observation examples | Add exact optional capability grants and source-qualified disambiguation guidance; no automatic deployment |
 
 Implementation references:
 
@@ -159,7 +161,70 @@ object payload. JSON and HA schema objects stay at their owning boundaries.
 
 ## 4. Discovery and agent tools
 
-Proposed initial model tools:
+### 24 November generic read-discovery amendment
+
+The user authorized documenting and implementing a general method for duplicate
+names, fields outside an entity's primary state, renames, updates and broken
+configuration. This amendment supersedes per-entity fixes as the intended method.
+The [capability contract](reviews/home-assistant-capability-contract.md) defines
+the adapter-local interfaces and failure cases; the delivery graph/ledger record
+independent implementation and review. Existing SDK operations suffice. Core,
+shared SDK contracts, shared integration runtime and database changes are excluded.
+Control remains disabled and this source task does not alter a live selection.
+
+The method is **discover → resolve → describe → read**. Resources have opaque
+stable references backed by registry identity where HA supplies it. Entity IDs
+are current locators, while names, aliases, device and area are lookup metadata.
+Persistent adapter-owned identity anchors distinguish a verified rename from a
+replacement reusing the old name or locator. Missing stable registry evidence
+remains explicit; continuity is never inferred from a friendly name.
+
+Field descriptions expose permitted typed state/attribute capabilities with a
+quantity, role (current measurement, target, status or unknown), unit and schema
+revision. Standard measurement profiles cover domain-supported readings without
+per-entity exceptions. Explicit field selection supports additional primitives;
+unknown semantics stay unknown and unsupported nested values remain unsupported.
+Current and target temperatures remain distinct even on the same resource.
+
+Resolution returns resource/field candidates and a whole-result ambiguity status
+before pagination. Names are not unique keys, and availability cannot establish
+identity or silently choose a winner. Reads return a fresh bounded batch with
+per-field availability, source/observation times, provenance and stale status.
+Schema changes invalidate prior field references; value changes alone do not.
+
+Policy is configured once: existing frozen entity selection remains the default;
+an explicit standard-measurement profile expands readable capabilities only for
+selected resources. An optional follow-Assist mode follows HA's effective
+conversation exposure rules, including removals, without granting control.
+Selection, exclusions and field permissions apply before metadata, candidates,
+counts or values are disclosed. New modes/profile choices require explicit
+operator configuration; discovery itself grants no authority.
+
+HA 2026.9.4's stock `homeassistant/expose_entity/list` is admin-only and reports
+stored positive preferences, which do not establish effective exposure defaults.
+The optional follow mode therefore uses an adapter-owned, versioned native HA
+WebSocket command, `plowshare/discovery/selection`, supplied by the companion.
+It invokes HA's canonical exposure helper rather than duplicating its rules.
+That helper may materialize HA's default exposure preferences in its own store;
+this normal HA behavior is documented, with no device/service/model invocation.
+The command requires HA administrator authority and returns only selected entity
+IDs. Unavailable/denied/incompatible capability fails honestly; no stock-list or
+broader-selection fallback occurs. Frozen mode has no companion dependency.
+
+Changes are reconciled within finite operation budgets using current policy and
+connection epochs. Schema/identity state is bounded and preserved across restart,
+with explicit ownership and corrupt-store failure. No accepted model/action work
+or uncertain provider publication is replayed to recover discovery. All new
+capability tools remain read-only and separately require exact server grants.
+
+The following table is the historical initial naming proposal. Current tools use
+the configured read-prefix suffixes `search`, `describe`, `read`, `list_actions`,
+`health` and `diagnose` in legacy mode. Optional capability mode instead publishes
+`health`, `resolve`, `describe_fields` and `read_fields`, preventing legacy handlers
+from bypassing its current field/selection policy. The original proposal names below are not
+current declarations.
+
+Historical initial model-tool proposal:
 
 | Tool | Purpose |
 | --- | --- |

@@ -1,12 +1,47 @@
 # Native resource discovery and reads
 
+## Resource and field capabilities
+
+The optional `HomeAssistantResourceCapabilities` boundary supplies typed
+`resolve`, `describe` and batched field reads through a capability catalogue.
+The standalone host selects it only with explicit `discovery` configuration.
+`HomeAssistantCapabilityTools` exposes that policy through four named read-only
+tools (including local health); it does not expose the legacy alias-data tools.
+Omitting discovery configuration preserves the existing catalogue below.
+
+Resource identity is separate from names, aliases, entity locators and rooms.
+The private bounded identity store anchors registered resources across renames
+and restart. Missing or replaced registry identity cannot inherit an earlier
+resource's authorization. Locator-only references are connection-scoped and
+cannot establish continuity. Field descriptions retain known capability, role,
+type, unit and support. Standard measurements distinguish a climate unit's
+current temperature from its target setpoint; explicit fields keep unknown
+meaning where HA provides no established semantics.
+
+Resolution counts authorized resource/field pairs before pagination, so a single
+resource can still be ambiguous between current and target fields. Availability
+never selects an identity. Reads return each field's typed value, source identity,
+source/update time, observation time, unit, role and unavailable/unknown state.
+Schema revisions cover projected identity, policy, connection and field shape;
+ordinary value changes do not invalidate them. Current exposure and exclusions
+are checked at the bounded native read-admission/observation boundary. HA policy
+and SDK publication are not atomic: later changes prevent new reads after
+observation, while accepted immutable results reconcile without recollection,
+scrubbing or replay. All native collection, validation and identity
+storage work shares the original caller's finite budget.
+
+See the [provider configuration](PROVIDER-HOST.md#capability-based-read-discovery)
+for fixed versus follow-Assist selection, profile limits, journals and migration.
+
+## Legacy alias catalogue
+
 `HomeAssistantResourceCatalog` implements the adapter-local `ResourceDiscovery`
 and `ResourceReader` interfaces. Its production source comes from
 `HomeAssistantAdapter.resourceSource(bindingName)` and shares that adapter's
 configured native WebSocket, origin and credential. It creates no second durable
 runtime or connection and does not bypass the public Plowshare SDK. Publishing
-these capabilities as named SDK tools is the next delivery slice; this change
-alone does not add tools to the existing manual Relay executable.
+these capabilities as named SDK tools is supplied by the separate provider host;
+the existing manual Relay executable retains its independent legacy behavior.
 
 A host composes the catalogue with an explicit immutable
 `HomeAssistantDiscoveryPolicy` and positive finite metadata maximum age (at most

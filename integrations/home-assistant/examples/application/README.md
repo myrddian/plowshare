@@ -15,12 +15,17 @@ They are templates, not installed Applications or live acceptance evidence.
 
 | Source root | Project | Agents and exact dynamic tool assignments |
 | --- | --- | --- |
-| `profiles/readonly` | `home-assistant-readonly` | `house_reader`: four `ha-read` tools; `house_task`: none |
-| `profiles/control` | `home-assistant-control` | `house_reader`: four `ha-read` tools; `house_controller`: those four plus two `ha-control` tools; `house_task`: none |
+| `profiles/readonly` | `home-assistant-readonly` | `house_reader`: four capability `ha-read` tools; `house_task`: none |
+| `profiles/control` | `home-assistant-control` | `house_reader`: six `ha-read` tools; `house_controller`: those six plus two `ha-control` tools; `house_task`: none |
 | `profiles/task` | `home-assistant-task` | `house_task` only; no provider or dynamic tool grants |
 
-The read tools are `ha_read_search`, `ha_read_describe`, `ha_read_read` and
-`ha_read_list_actions`. Control adds only `ha_control_describe_action` and
+The read-only capability tools are `ha_read_health`, `ha_read_resolve`,
+`ha_read_describe_fields` and `ha_read_read_fields`. Match them to the explicit
+capability configuration in the read-only outbound template. Its selection and
+field profiles govern discovery and preserve source-qualified measurement roles.
+The optional control root retains the legacy read tools `ha_read_search`,
+`ha_read_describe`, `ha_read_read`, `ha_read_list_actions`, `ha_read_health` and
+`ha_read_diagnose`. Control adds only `ha_control_describe_action` and
 `ha_control_execute_action`. Scope assignments name individual agents and tools;
 future catalogue entries are not automatically granted. The task agent explicitly
 sets `dynamic: false`. Every agent has empty built-in tools, workspace scopes,

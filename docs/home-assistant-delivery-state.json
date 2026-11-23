@@ -11,7 +11,7 @@
     "candidate_manifest": "docs/reviews/home-assistant-delivery-plan-candidate.json"
   },
   "scope": {
-    "current_request": "Commit and publish the HA integration/automatic read-provider recovery as a PR with validation evidence. Control disabled; existing SDK; no production core change or requested merge.",
+    "current_request": "Commit diagnostics and generic discovery changes and open a PR with validation evidence. Existing SDK only, no core changes, control disabled; no merge/deployment requested.",
     "runtime_implementation_dispatched": true,
     "merge_authorized": false,
     "deployment_authorized": true,
@@ -26,7 +26,10 @@
       "2026-11-22 continuation: separate PLAT-SQL-01 test-only deadline/cleanup fixture diagnosis and correction independently approved; outbound validation v2 independently approved after full green check. No runtime/API/SDK/schema extension or prompt gate satisfaction.",
       "2026-11-22 clarification: user rejects changing Plowshare to accommodate HA. Use existing SDK; unsupported HA semantics are adapter limitations. Native prompt mapping choice requested; no core extension or operational action authorized.",
       "2026-11-22: user explicitly clarified prompt fidelity gate concerned caching awareness, not a new native system-role requirement. Retire that prerequisite; preserve supplied HA text using existing SDK task semantics. No additional prompt-mapping user-choice gate or core extension.",
-      "2026-11-23: user explicitly authorized commit/push/PR for the completed HA integration and automatic read-provider recovery, with validation evidence and control disabled. Prior read-only deployment/recovery authorization remains satisfied. No merge or additional control/host-reboot acceptance requested."
+      "2026-11-23: user explicitly authorized commit/push/PR for the completed HA integration and automatic read-provider recovery, with validation evidence and control disabled. Prior read-only deployment/recovery authorization remains satisfied. No merge or additional control/host-reboot acceptance requested.",
+      "2026-11-24: diagnostics amendment DIAG-01\u201303 authorized with independent implementers/reviewers. Existing publication authorization and handoff describe earlier merged PR315, not a new diagnostics publication/rollout.",
+      "2026-11-24: CAP-PLAN/CAP-EXPOSURE/CAP-01\u201303 implementation authorized. Existing reviewed diagnostics are baseline. Optional capability modes remain explicit configuration; no live selection/control/prompt change or deployment/publication requested.",
+      "2026-11-24: user authorized committing/pushing diagnostics plus generic discovery and opening a PR with validation evidence. Reviewed source/package bytes are unchanged; control remains disabled. No merge or new deployment/live action authorized."
     ],
     "commit_authorized": true,
     "push_authorized": true,
@@ -3132,6 +3135,496 @@
       },
       "updated_at": "2026-11-22T20:37:46.154754+00:00",
       "live_validation_scope": "Samecontainer application-exit/network-outage auto recovery and onefreshHAread; persistent hostbootpolicy verified, actual host reboot notperformed. No broaderLIVE-01 or control acceptance."
+    },
+    {
+      "id": "DIAG-01",
+      "title": "Read-only provider health and resource diagnosis",
+      "dependencies": [
+        "RECOVER-01"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root/ha_diagnostics_provider_implementer",
+      "review_agent_id": "/root/ha_diagnostics_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "integrations/home-assistant/src/main/java",
+        "integrations/home-assistant/src/test/java",
+        "integrations/home-assistant/examples",
+        "integrations/home-assistant/PROVIDER-HOST.md",
+        "integrations/home-assistant/TOOL-PROVIDER.md"
+      ],
+      "candidate_revision": {
+        "id": "diag-01-v1",
+        "base_commit": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+        "files_sha256": {
+          "integrations/home-assistant/ACTION-PROVIDER.md": "77fe587c8ecdf020de6a69e2c399e7082711904908a5cb8a5e395156d53a6a20",
+          "integrations/home-assistant/PROVIDER-HOST.md": "3838641f1ec6064088755b4a3e9e172e76f83b854fd1cc2d62eb27743c106695",
+          "integrations/home-assistant/TOOL-PROVIDER.md": "da1866dab736e610cce95746b68357a6371676cd58ef1b9b7ed4d9f035ce1871",
+          "integrations/home-assistant/assist/PACKAGE-PROFILES.md": "b1167bf1a8cfaca90bd7ddedef283f9993ebef60d190569ca0b82999aa097e76",
+          "integrations/home-assistant/examples/application/README.md": "31d763d7e65371296d0d1cb942c2e535577cf43f8b46eb494ef3d9acd6ac9092",
+          "integrations/home-assistant/examples/application/profiles/control/agents/house_controller.md": "b52a4607ef6885e4a1eef1dcf8d3346925b55fd5fd249a681f6df2949bc7a7ca",
+          "integrations/home-assistant/examples/application/profiles/control/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+          "integrations/home-assistant/examples/application/profiles/control/plowshare.json": "401fb5d60217d00260c758471f8de29d1219804c15bac8de7df5703f7624bcb0",
+          "integrations/home-assistant/examples/application/profiles/readonly/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+          "integrations/home-assistant/examples/application/profiles/readonly/plowshare.json": "47df000af98e7cc6933c7bfba32af102e3b9f41b3991bf5111e383adf1b9cf8a",
+          "integrations/home-assistant/examples/outbound/README.md": "7b56fd2d07382551fb42e86c83602188daa121b48c5fb628bcc8a32f804353b3",
+          "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "24d3a5734b6189c044739be6ac54cc2aa3284c85ce7a35bc05601e41d82c1e2f",
+          "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "ccce2a7bc5f01af7c0ca3c71db4253ce679e5887a93a7e2421d1eebebc5b7e4a",
+          "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "5753e4997525297e14b9cc32bdf8c5be4f0bc992d1d8934c2849cf3350e5c748",
+          "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "e1daf4fc03d1a7c5cba39e7c3914468ecd61dd0f36545acf3b2d8ae551f4bd5b",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderDiagnostics.java": "49c391e7b7d38724badf1741b9bbe18e2e4b8cfbcc28283577a4c2f606d0e619",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "508e84f2a7381631ffc81ceb6a48d6cee28a8d38dc48e14b4da2c68a8d77fc03",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadDiagnostics.java": "41c49be63b62ec99c661a21ced4bcf04eb475d7550354cd9d3fe6ca9f6b29738",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "fe4bf133ed1e6fd4611e639455b19d2f131e6b00f11794d0d1b270db1a3fcd24",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ApplicationProfilesTest.java": "2bacbb67567e389f2699a4071ac416afd904eb128ee6533f97e0cbdf260a090f",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionToolsTest.java": "472c4101d5276f35d439cf012764b4924c0dab8adcb1f0090aa67798c98c9673",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderDiagnosticsTest.java": "62ac9ef265c80c99cf90823978c3afa5e3181dfe017e36b90f3d887591cfd28a",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "9b7606077c37cee927660ac4817dffb57823e0860de6e985926d242cbc0a252f",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProviderTest.java": "1065a986562afab15974d36cf107e6f5cd41cb7d285a4bc64d9f472e143cb375",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "1391bfcf550401960bddf58b6c4d57696b367a54f77d4352ecf27ee79881a938",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "005ec3d8e6110448f80934709bbff7a2b6fe3d3fb1704c05241c3fa0921acb03"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "owning_java_suite",
+          "result": "PASS: 200 tests, 0 failures/errors/skips across 24 suites; final broader check pending DIAG-03",
+          "includes": "public SDK + native fake HA diagnostic roundtrip, malformed/scoped input, availability/freshness and recovery"
+        },
+        {
+          "kind": "independent_source_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-diagnostics-provider-review.md",
+          "report_sha256": "1f14f51314c0a2c952de53101141ea5a240959507b023351b53f97c846b47b18"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-diagnostics-provider-review.md",
+        "report_sha256": "1f14f51314c0a2c952de53101141ea5a240959507b023351b53f97c846b47b18"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-diagnostics-contract.md",
+      "updated_at": "2026-11-23T19:19:19.593980+00:00"
+    },
+    {
+      "id": "DIAG-02",
+      "title": "Independent HA diagnostics download",
+      "dependencies": [
+        "HA-FIX-01"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root/ha_diagnostics_download_implementer",
+      "review_agent_id": "/root/ha_diagnostics_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "integrations/home-assistant/assist"
+      ],
+      "candidate_revision": {
+        "id": "diag-02-v1",
+        "base_commit": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+        "files_sha256": {
+          "integrations/home-assistant/assist/README.md": "77d4f61175c4617906852abee7c670d5bf54dce32af87ff965b0b790f7fece7a",
+          "integrations/home-assistant/assist/custom_components/plowshare/agent.py": "dfeb69e32b8fa44b71cc57c92148b76c80f418c86f16052094fefe220dac0051",
+          "integrations/home-assistant/assist/custom_components/plowshare/const.py": "efa562a954999259dd45b28970c8d7d197d65719afb5e16749921af34c8b6601",
+          "integrations/home-assistant/assist/custom_components/plowshare/manifest.json": "7d01329632e393be487aa9c7a926a1debe8d780a2134f6002a8e919a938cf2d7",
+          "integrations/home-assistant/assist/custom_components/plowshare/runtime.py": "22bc9b7e27917da0bfef3bdb2b0ab76194e67a22d0e0c2d5dc8bc72d04475b00",
+          "integrations/home-assistant/assist/custom_components/plowshare/diagnostic_models.py": "4a858b1e4d94dfa9dd22e4c125b95759b8de50e3d86ef484b551d81fb527f6d0",
+          "integrations/home-assistant/assist/custom_components/plowshare/diagnostics.py": "91f964843a401d622ef7ef313bc2e61174381bf5d3189e7a0e052222c25a1796",
+          "integrations/home-assistant/assist/tests/test_diagnostics.py": "46e0cf90e1a00b313ea5ad1ed4730794d26fb78aa23d0c123eb6fbe718e1cda1"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "python_runtime_check",
+          "command": "/private/tmp/plowshare-ha-delivery-venv/bin/python integrations/home-assistant/assist/scripts/check.py",
+          "result": "PASS: Ruff check/format and 150 tests on HA2026.9.4/Python3.14",
+          "log_sha256": "a435f1a0f78a7e9dd37e751b736b78dbfd84fa540f4c7870775e1633242fa6d9"
+        },
+        {
+          "kind": "independent_source_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-diagnostics-download-review.md",
+          "report_sha256": "a5525ea50793a3bd8ee3c64dae8c056d5692934282f013307eb9e81471c52848"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-diagnostics-download-review.md",
+        "report_sha256": "a5525ea50793a3bd8ee3c64dae8c056d5692934282f013307eb9e81471c52848"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-diagnostics-contract.md",
+      "updated_at": "2026-11-23T19:19:19.593980+00:00"
+    },
+    {
+      "id": "DIAG-03",
+      "title": "Integrated diagnostics verification and packaging",
+      "dependencies": [
+        "DIAG-01",
+        "DIAG-02"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root",
+      "review_agent_id": "/root/ha_diagnostics_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/home-assistant-delivery-plan.md",
+        "docs/home-assistant-delivery-state.json",
+        "docs/reviews/home-assistant-diagnostics-*"
+      ],
+      "candidate_revision": {
+        "id": "ha-diagnostics-v1",
+        "manifest_path": "docs/reviews/home-assistant-diagnostics-evidence.json",
+        "manifest_sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69"
+      },
+      "evidence": [
+        {
+          "kind": "integrated_verification",
+          "manifest_path": "docs/reviews/home-assistant-diagnostics-evidence.json",
+          "manifest_sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69",
+          "result": "PASS: repository check,150Python/200Java tests,53-entry Assist archive,8outboundchecks/56files; independent integrated approval recorded separately"
+        },
+        {
+          "kind": "independent_integrated_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-diagnostics-integrated-review.md",
+          "report_sha256": "057c347b3f8e3b927422d569a0ed7c8972de7f5e52a764226dfaebcf41dd1624",
+          "manifest_sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-diagnostics-integrated-review.md",
+        "report_sha256": "057c347b3f8e3b927422d569a0ed7c8972de7f5e52a764226dfaebcf41dd1624",
+        "candidate_digest": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69",
+        "approved_at": "2026-11-23T19:19:19.593980+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-diagnostics-contract.md",
+      "updated_at": "2026-11-23T19:19:19.593980+00:00"
+    },
+    {
+      "id": "CAP-PLAN",
+      "title": "Generic capability discovery design and contracts",
+      "dependencies": [
+        "DIAG-03"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root",
+      "review_agent_id": "/root/ha_capability_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/home-assistant-integration-design-and-plan.md",
+        "docs/home-assistant-delivery-plan.md",
+        "docs/home-assistant-delivery-state.json",
+        "docs/reviews/home-assistant-capability-contract.md"
+      ],
+      "candidate_revision": {
+        "id": "cap-plan-v2",
+        "files_sha256": {
+          "docs/home-assistant-integration-design-and-plan.md": "966a0c2c64fcf7cffa9aa2ffac8517fced700e38279d1bed3344398cb4593358",
+          "docs/home-assistant-delivery-plan.md": "575b5f02b6d7c40f477294225901fd6c40cc12c45b5a7ae4e1d283c493868bef",
+          "docs/reviews/home-assistant-capability-contract.md": "13c6c521069587ebab64c69f5573c7c3d1e7fe2667c5d5f70121abc4e8dc25fa",
+          "docs/reviews/home-assistant-capability-interface.md": "251ef5b1a94d21714a2a7076ddc8ca9fcef731e15c1e524b6465f58d90f74846"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "independent_design_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-capability-plan-v2-review.md",
+          "report_sha256": "187d531c131ea45fe4c8a596c18f71c827130b3537cb524c902e53e6d39b4100"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-capability-plan-v2-review.md",
+        "report_sha256": "187d531c131ea45fe4c8a596c18f71c827130b3537cb524c902e53e6d39b4100"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-capability-contract.md",
+      "updated_at": "2026-11-23T20:07:48.703716+00:00"
+    },
+    {
+      "id": "CAP-EXPOSURE",
+      "title": "Canonical effective Assist selection endpoint",
+      "dependencies": [
+        "CAP-PLAN"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root",
+      "review_agent_id": "/root/ha_capability_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "integrations/home-assistant/assist"
+      ],
+      "candidate_revision": {
+        "id": "cap-exposure-v1",
+        "files_sha256": {
+          "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "e3964802dac7f6879ae47d2076b3a0c5c4dab690312e9071c625f1f5636421e8",
+          "integrations/home-assistant/assist/custom_components/plowshare/exposure.py": "74fa4715bbf90e33989f8ab776782def6468e368e7032e2de80300f2573008e4",
+          "integrations/home-assistant/assist/custom_components/plowshare/const.py": "e3291d777bd3306e4a1c66438b4ca163193f0f300a0991f8858b3b3d46d9de78",
+          "integrations/home-assistant/assist/custom_components/plowshare/manifest.json": "9781310bfc414362839611daf988744543f68827545264d89d6265ca95c9a067",
+          "integrations/home-assistant/assist/tests/test_exposure.py": "97c67c3ff26f0688f9c73f6d048ed5fb5f8fd4b242a97e18b7b07a8df14c9e44",
+          "integrations/home-assistant/assist/README.md": "424f66cf1040389458f366f6d8ab55fc08543fedd3f16e1f910dcedc8aca3b79",
+          "integrations/home-assistant/assist/PACKAGE-PROFILES.md": "7a49a0d5e10f129a0756d1e379e33ee826313d52eee37555200c04a9ff58e250"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "actual_ha_runtime_check",
+          "result": "PASS:159Python tests/Ruff;9canonicalexposuretests independently rerun",
+          "log_sha256": "f1148fd610fa08fd6fd1715df824b3fbdf3481fa60e79d8897fc05fb08fd1b5c"
+        },
+        {
+          "kind": "independent_review",
+          "report_path": "docs/reviews/home-assistant-capability-exposure-review.md",
+          "report_sha256": "be6bc4be9f1c9d5332c0203f7d53a253f60d99cc3b8070741a578988ff8565b2",
+          "verdict": "APPROVE"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-capability-exposure-review.md",
+        "report_sha256": "be6bc4be9f1c9d5332c0203f7d53a253f60d99cc3b8070741a578988ff8565b2"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-capability-contract.md",
+      "updated_at": "2026-11-23T20:07:48.703716+00:00"
+    },
+    {
+      "id": "CAP-01",
+      "title": "Resource identity and typed capability catalogue",
+      "dependencies": [
+        "CAP-PLAN",
+        "CAP-EXPOSURE"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root/ha_capability_foundation_implementer",
+      "review_agent_id": "/root/ha_capability_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java",
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java",
+        "<new typed capability/source/catalogue/identity classes and tests>"
+      ],
+      "candidate_revision": {
+        "id": "cap-01-v1",
+        "files_sha256": {
+          "docs/reviews/home-assistant-capability-interface.md": "251ef5b1a94d21714a2a7076ddc8ca9fcef731e15c1e524b6465f58d90f74846",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "566c73a0ac1851c266431abfa0dd9000182df679373e438372d57c28bee03dae",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilities.java": "f06b6489c96fde959e261cd0bec855d696f208f605966a00b5344a2d39b7b768",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityCatalog.java": "b4d1791ff06cf9512032f99658b07f3c3c8f429f30acd6000c3d61bd8494c7e0",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityIdentityStore.java": "eea7a6eb6e57ce133008930e0611f1f255e636803f36c031bf50a8863e251c88",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityProfiles.java": "014163a60fcc848eec39969da0cdd2a41cac1e1ff1e15bec87fcf1af832dfec1",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilitySource.java": "dbf11f6509b189889039bcf4486954bd7bd688c86e006cd20f2ebcbec8bfbce8",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityWire.java": "38bc642b35db7b464a94bb530515c615ff29ffe26ebbb6140da93809f923b583",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java": "839f770d33d13b591725bc108957775365b71a6c41608536d5beeeb80fa4be3f",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCapabilities.java": "53644477abe7816f3e86810d513de8e76c08aa79a2855754b97dbf54b90128c3",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournal.java": "28e0909c94de43818f6cab6de23cb2440c7cdedd715be7191314241de07fdca4",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilitiesTest.java": "61043d8c3c3b0cd91d5e154d7265ee1e04559f43c4e70102abcb5f0226f68f1d",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityCatalogTest.java": "c903b86538f569411c56a2652c26f3fdea2a59ae1467e20ecd50dd536e131fd6",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityConfigurationTest.java": "9bab9898b609a75b4a321d59e4a2e5b0233693e6b63af76df9f19c838528b31b",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityIdentityStoreTest.java": "9ede5a2a9ec8851cbd85bd21b847349793a0b8f2a814f25a1bdf616999f9871e",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityNativeTest.java": "71d57d534ebd1bb638d2801965b427e3e0d0b454c41e9762cd6750a9e00caac0"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "owning_java_verification",
+          "result": "PASS:250tests/30suites; includes native/public SDK, lifecycle and policy cases",
+          "log_sha256": "5b676ccbaacc1a006741fc5822c480cc51131954cb5f4b5a1079d56b2535be77"
+        },
+        {
+          "kind": "independent_source_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-capability-foundation-review.md",
+          "report_sha256": "fa14ddac6c1e6394646b9e9341210a13f2f8cb105affb0fa04a4b2656c9e6737"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-capability-foundation-review.md",
+        "report_sha256": "fa14ddac6c1e6394646b9e9341210a13f2f8cb105affb0fa04a4b2656c9e6737"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-capability-contract.md",
+      "updated_at": "2026-11-23T20:07:48.703716+00:00"
+    },
+    {
+      "id": "CAP-02",
+      "title": "Capability SDK tools and composition",
+      "dependencies": [
+        "CAP-01"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root/ha_capability_tools_implementer",
+      "review_agent_id": "/root/ha_capability_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "<capability tools and composite handler>",
+        "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java",
+        "integrations/home-assistant/examples",
+        "<tool tests/operator guidance>"
+      ],
+      "candidate_revision": {
+        "id": "cap-02-v1",
+        "files_sha256": {
+          "integrations/home-assistant/PROVIDER-HOST.md": "8055692a7badf421747ef38f089d3718812a4a1108134aebca273ce452eeb4ae",
+          "integrations/home-assistant/README.md": "40699f847cfb23c7099dda24ed6f65cc9f2496cd348023d8bad3f5d605eaaa9c",
+          "integrations/home-assistant/RELEASE-RUNBOOK.md": "4d79c723491586c6fb105c681b9f4b5da622de6564e20bd209bab81b8ea3041e",
+          "integrations/home-assistant/RESOURCE-CONTRACTS.md": "c18592e1a11b8fbf3e552c2d1615d0b8e31f4c1cd012812890a8ed9d8eb49f41",
+          "integrations/home-assistant/TOOL-PROVIDER.md": "a484d41dddd449218dbad3005eb0d418c1a81081525eb9ec88a79bb04f6d1714",
+          "integrations/home-assistant/examples/application/README.md": "243dd3902f3beb4603dfdd76db35576846bbbd68355fd9b9f8201cedf0cb5706",
+          "integrations/home-assistant/examples/application/profiles/readonly/agents/house_reader.md": "942d74cd9548d946afbf5ca506ec294c448ca129df3f84b23e03b04f32e31084",
+          "integrations/home-assistant/examples/application/profiles/readonly/plowshare.json": "b551fbd2dfccff29cc346a321d057785b750c97596ca3b63611f97d857086cdb",
+          "integrations/home-assistant/examples/outbound/README.md": "dde47301373b703fa351ff8983af33b68900a88d9b6a420824e73f5f11271fe0",
+          "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "a4acc44022dcf4ce09faff091faf2c93425fd4b583eb16b7613777ba4c515f1e",
+          "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "090b27dad6c322720adbdc107eb3c3aa90730709779282bc3b899eea047b667b",
+          "integrations/home-assistant/examples/outbound/readonly/provider-assist-exposed.json": "84263cd7485b4f8ed7084dc40a68480b4b23e8e62e1e089da215119090d8ea8f",
+          "integrations/home-assistant/examples/outbound/readonly/provider.json": "450511d5d8d3ca60656162195308e686783433e5c088bf7c5b6721fa6b29aea8",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityTools.java": "3b0ca47724e456786b3968a86beb8719461ac85e553ae93926fa12c47d7df652",
+          "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "cc07635d378dcbf1e6ed9beb1f285a602f0ee62b9b500edb42ac5c6129db039a",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ApplicationProfilesTest.java": "ce485fd19a41ef05d8087100eee05d10b0dc39d6dccc94d5a05815e08b5d25a3",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantCapabilityToolsTest.java": "1a6ec9852c376eaa3726107dd0929b879a71123e59b9dbcd313e03c5004720d3",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHostTest.java": "557f29e1f711aac03165b713c19f356382737d1484391829391d07655f8f99a6",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "53b9467b161b067cb157f0374336c803125121def737662487c9e938ad457734",
+          "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "d25efc956132cef52bdaa65637333f390633a65ce04330bc74705602251ba40d"
+        }
+      },
+      "evidence": [
+        {
+          "kind": "owning_java_verification",
+          "result": "PASS:250tests/30suites; includes native/public SDK, lifecycle and policy cases",
+          "log_sha256": "5b676ccbaacc1a006741fc5822c480cc51131954cb5f4b5a1079d56b2535be77"
+        },
+        {
+          "kind": "independent_source_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-capability-tools-review.md",
+          "report_sha256": "0e30455997bf73ac30173f30a6b12de404c5502cd6af6ef3f9c6dd9e109d907e"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-capability-tools-review.md",
+        "report_sha256": "0e30455997bf73ac30173f30a6b12de404c5502cd6af6ef3f9c6dd9e109d907e"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-capability-contract.md",
+      "updated_at": "2026-11-23T20:07:48.703716+00:00"
+    },
+    {
+      "id": "CAP-03",
+      "title": "Integrated capability verification and packages",
+      "dependencies": [
+        "CAP-EXPOSURE",
+        "CAP-01",
+        "CAP-02"
+      ],
+      "gates": [],
+      "implementation_agent_id": "/root",
+      "review_agent_id": "/root/ha_capability_reviewer",
+      "status": "accepted",
+      "owned_paths": [
+        "docs/reviews/home-assistant-capability-*",
+        "docs/home-assistant-delivery-state.json"
+      ],
+      "candidate_revision": {
+        "id": "ha-capability-v1",
+        "manifest_path": "docs/reviews/home-assistant-capability-evidence.json",
+        "manifest_sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f"
+      },
+      "evidence": [
+        {
+          "kind": "integrated_verification",
+          "manifest_path": "docs/reviews/home-assistant-capability-evidence.json",
+          "manifest_sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f",
+          "result": "PASS:250Java/159Python,repositorychecks,54entryAssist0.2.0,8outboundchecks/57files; independent integrated approval recorded separately"
+        },
+        {
+          "kind": "independent_integrated_review",
+          "verdict": "APPROVE",
+          "report_path": "docs/reviews/home-assistant-capability-integrated-review.md",
+          "report_sha256": "b7cd709d00d86cb5e12784f46463163abf1eb5c99bd2dc966ddcaad23242b1eb",
+          "manifest_sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f"
+        }
+      ],
+      "findings": [],
+      "review": {
+        "state": "APPROVE",
+        "verdict": "APPROVE",
+        "report_path": "docs/reviews/home-assistant-capability-integrated-review.md",
+        "report_sha256": "b7cd709d00d86cb5e12784f46463163abf1eb5c99bd2dc966ddcaad23242b1eb",
+        "candidate_digest": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f",
+        "approved_at": "2026-11-23T20:07:48.703716+00:00"
+      },
+      "milestones": {
+        "implementation": "ready",
+        "verified_and_reviewed": true,
+        "merged": false,
+        "deployed": false,
+        "live_validated": false
+      },
+      "acceptance_contract": "docs/reviews/home-assistant-capability-contract.md",
+      "updated_at": "2026-11-23T20:07:48.703716+00:00"
     }
   ],
   "history": [
@@ -4997,17 +5490,24 @@
     }
   },
   "current_delivery_summary": {
-    "scope_amendment": "SCOPE-01",
-    "state": "read_only_production_deployment_with_automatic_recovery_complete",
-    "accepted_nodes": 31,
+    "scope_amendment": "CAP-PLAN/CAP-EXPOSURE/CAP-01\u201303",
+    "state": "generic_capability_source_verified_and_independently_reviewed_existing_deployment_unchanged",
+    "accepted_nodes": 39,
     "planned_nodes": 0,
     "awaiting_gate_nodes": 2,
     "in_review_or_implementing_nodes": 0,
     "core_extension_scope": "External conversation ID mapping via existing Ex SDK operations only; already accepted.",
     "native_prompt_or_cache_prerequisite": false,
     "runtime_publication_guards_changed": true,
-    "remaining_action": "Broader LIVE-01 voice/AI Task/follow-up/isolation acceptance and optional cache measurement remain open; control stays disabled.",
-    "latest_check": "7realSDKrecoverycases/all189HAJava cases/defaultformat+repositorycheck/installDistPASS. Two actualprovider-onlyautomaticrecoveries and onefreshHAreadpassed; original3jobsunchanged, samejournals/fences,30HAproduction/4042protectedsource/28binariesunchanged. Hostbootconfigured, sharedhostnotrebooted.",
+    "remaining_action": "Capability/diagnostic source and packages are verified and independently approved; not published or installed. Broader LIVE-01 acceptance and optional PERF-01 measurement remain separate. Control disabled; no live selection/field changes.",
+    "latest_check": {
+      "result": "PASS",
+      "repository_check": "formatCheck+check+installDist",
+      "ha_java_tests": 250,
+      "ha_python_tests": 159,
+      "outbound_checks": 8,
+      "full_db": false
+    },
     "all_required_ungated_work_complete": true,
     "reviewed_feature_nodes": [
       "HA-05",
@@ -5017,17 +5517,27 @@
       "HA-10",
       "HA-11",
       "VERIFY-01",
-      "RELEASE-01"
+      "RELEASE-01",
+      "DIAG-01",
+      "DIAG-02",
+      "DIAG-03",
+      "CAP-PLAN",
+      "CAP-EXPOSURE",
+      "CAP-01",
+      "CAP-02",
+      "CAP-03"
     ],
     "validated_baseline": "HA2026.9.4/Python3.14; actual HA target Core2026.9.4/OS18.3 verified, no upgrade required.",
     "final_evidence": {
-      "path": "docs/reviews/home-assistant-assist-recovery-publication-evidence.json",
-      "sha256": "c64529d6acfe9a677a44ba685c670ec1fd05ee39765c1cc10dbabf3ef815761f",
-      "role": "Current publication source/package/test and scoped live-recovery verification; earlier source-readiness manifests remain historical."
+      "path": "docs/reviews/home-assistant-capability-evidence.json",
+      "sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f",
+      "role": "Current generic capability source/package verification; immutable pre-review capture, final independent approval recorded in ledger/review."
     },
     "assist_archive": {
-      "path": "integrations/home-assistant/assist/build/plowshare-assist-0.1.1.zip",
-      "sha256": "1ad223a4859e415fd9e2b63344a3736b162a175e753e2fc3f7b8371e049110aa"
+      "path": "integrations/home-assistant/assist/build/plowshare-assist.zip",
+      "sha256": "7b8987c36c92fc69e73ef1c6956ccabe30b9f88ebbc5b5eb818fad3a4bad4770",
+      "version": "0.2.0",
+      "deployed": false
     },
     "published": false,
     "merged": false,
@@ -5053,7 +5563,23 @@
       "path": "docs/reviews/home-assistant-final-validation-evidence.json",
       "sha256": "dbf472faa3aa0a62a832698e097ef77d0790da169b909bf062324dbc601a5e67",
       "role": "Historical initial source-readiness baseline, superseded for changed bytes by HA-FIX-01/02 and RECOVER-01 plus current publication verification."
-    }
+    },
+    "diagnostics_review": {
+      "path": "docs/reviews/home-assistant-diagnostics-integrated-review.md",
+      "sha256": "057c347b3f8e3b927422d569a0ed7c8972de7f5e52a764226dfaebcf41dd1624"
+    },
+    "diagnostics_published": false,
+    "diagnostics_merged": false,
+    "diagnostics_deployed": false,
+    "diagnostics_live_validated": false,
+    "capability_review": {
+      "path": "docs/reviews/home-assistant-capability-integrated-review.md",
+      "sha256": "b7cd709d00d86cb5e12784f46463163abf1eb5c99bd2dc966ddcaad23242b1eb"
+    },
+    "capability_published": false,
+    "capability_merged": false,
+    "capability_deployed": false,
+    "capability_live_validated": false
   },
   "historical_plan_sources": {
     "previous_plan_path": "docs/reviews/home-assistant-cache-gate-correction-v1-previous-plan.md",
@@ -5071,8 +5597,8 @@
     "scope": "Unchanged SDK builds, conformance and fresh installed consumers; no real DB or live endpoint/model/device."
   },
   "latest_completion_audit": {
-    "checked_at": "2026-11-22T11:51:14.576353+00:00",
-    "scope": "Remaining SDK-only HA source/package delivery following SCOPE-01",
+    "checked_at": "2026-11-23T20:07:48.703716+00:00",
+    "scope": "CAP-PLAN/CAP-EXPOSURE/CAP-01\u201303 generic resource/field discovery source/package delivery",
     "result": "complete",
     "accepted_node_ids": [
       "PLAN-00",
@@ -5096,28 +5622,45 @@
       "HA-11",
       "VERIFY-01",
       "RELEASE-01",
+      "DEPLOY-01",
       "OUT-PLAN-01",
       "OUT-PACK-01",
       "OUT-PROFILE-01",
       "OUT-VERIFY-01",
       "PLAT-SQL-01",
-      "SCOPE-01"
+      "SCOPE-01",
+      "HA-FIX-01",
+      "HA-FIX-02",
+      "RECOVER-01",
+      "DIAG-01",
+      "DIAG-02",
+      "DIAG-03",
+      "CAP-PLAN",
+      "CAP-EXPOSURE",
+      "CAP-01",
+      "CAP-02",
+      "CAP-03"
     ],
     "awaiting_gate_node_ids": [
       "PERF-01",
-      "DEPLOY-01",
       "LIVE-01"
     ],
     "unfinished_ungated_node_ids": [],
     "independent_approval_required": true,
     "reviewed_source_and_artifact_evidence": {
-      "path": "docs/reviews/home-assistant-final-validation-evidence.json",
-      "sha256": "dbf472faa3aa0a62a832698e097ef77d0790da169b909bf062324dbc601a5e67"
+      "path": "docs/reviews/home-assistant-capability-evidence.json",
+      "sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f"
+    },
+    "review_report": {
+      "path": "docs/reviews/home-assistant-capability-integrated-review.md",
+      "sha256": "b7cd709d00d86cb5e12784f46463163abf1eb5c99bd2dc966ddcaad23242b1eb"
     },
     "new_core_or_sdk_changes": false,
+    "control_enabled": false,
+    "live_entity_or_attribute_scope_changed": false,
     "commit_publication_or_merge": false,
     "deployment_or_live_actions": false,
-    "note": "Original completion_audit remains an explicitly historical pre-SCOPE-01 record. Accepted means verified and independently reviewed source; no operational milestone is inferred."
+    "note": "Five nodes accepted after independent source/integrated approvals; previous audit preserved in history. Existing deployment unchanged. No optional LIVE/PERF milestone inferred."
   },
   "operational_progress": {
     "node": "DEPLOY-01",
@@ -5180,5 +5723,229 @@
     "final_remote_state_authority": "Git refs and PR metadata after publication; this precommit checkpoint does not claim a future push has completed.",
     "evidence_path": "docs/reviews/home-assistant-assist-recovery-publication-evidence.json",
     "evidence_sha256": "c64529d6acfe9a677a44ba685c670ec1fd05ee39765c1cc10dbabf3ef815761f"
+  },
+  "diagnostics_amendment": {
+    "date": "2026-11-24",
+    "baseline": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+    "request": "Add read-only diagnostic tools and HA diagnostics download using existing SDK with independent implementers/reviewers. Keep control disabled.",
+    "nodes": [
+      "DIAG-01",
+      "DIAG-02",
+      "DIAG-03"
+    ],
+    "contract": "docs/reviews/home-assistant-diagnostics-contract.md",
+    "publication": "Not part of this diagnostics request; prior publication records remain historical.",
+    "deployment": "Not yet performed for diagnostics; source acceptance does not establish installation or live verification.",
+    "entity_scope": "Unchanged selected entities and state/unit attributes. Proposed Office climate current_temperature attribute remains unactivated.",
+    "commit_authorized": true,
+    "push_authorized": true,
+    "pull_request_authorized": true,
+    "merge_authorized": false,
+    "deployment_authorized": false,
+    "live_validation_authorized": false,
+    "status": "accepted",
+    "evidence_manifest": "docs/reviews/home-assistant-diagnostics-evidence.json",
+    "evidence_manifest_sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69",
+    "control_enabled": false,
+    "source_scope": "Existing SDK only; no core/shared-runtime/SDK edits; selected HA entities and attributes unchanged.",
+    "live_status": "Not installed or live validated for diagnostics.",
+    "review_report": "docs/reviews/home-assistant-diagnostics-integrated-review.md",
+    "review_report_sha256": "057c347b3f8e3b927422d569a0ed7c8972de7f5e52a764226dfaebcf41dd1624",
+    "accepted_nodes": [
+      "DIAG-01",
+      "DIAG-02",
+      "DIAG-03"
+    ],
+    "updated_at": "2026-11-23T19:19:19.593980+00:00"
+  },
+  "completion_audit_history": [
+    {
+      "checked_at": "2026-11-22T11:51:14.576353+00:00",
+      "scope": "Remaining SDK-only HA source/package delivery following SCOPE-01",
+      "result": "complete",
+      "accepted_node_ids": [
+        "PLAN-00",
+        "AUDIT-01",
+        "CORE-01",
+        "CORE-02",
+        "CORE-03A",
+        "CORE-03",
+        "CORE-04",
+        "FIDELITY-01",
+        "HA-01",
+        "HA-02",
+        "HA-03",
+        "HA-04",
+        "HA-05",
+        "HA-06",
+        "HA-07",
+        "HA-08",
+        "HA-09",
+        "HA-10",
+        "HA-11",
+        "VERIFY-01",
+        "RELEASE-01",
+        "OUT-PLAN-01",
+        "OUT-PACK-01",
+        "OUT-PROFILE-01",
+        "OUT-VERIFY-01",
+        "PLAT-SQL-01",
+        "SCOPE-01"
+      ],
+      "awaiting_gate_node_ids": [
+        "PERF-01",
+        "DEPLOY-01",
+        "LIVE-01"
+      ],
+      "unfinished_ungated_node_ids": [],
+      "independent_approval_required": true,
+      "reviewed_source_and_artifact_evidence": {
+        "path": "docs/reviews/home-assistant-final-validation-evidence.json",
+        "sha256": "dbf472faa3aa0a62a832698e097ef77d0790da169b909bf062324dbc601a5e67"
+      },
+      "new_core_or_sdk_changes": false,
+      "commit_publication_or_merge": false,
+      "deployment_or_live_actions": false,
+      "note": "Original completion_audit remains an explicitly historical pre-SCOPE-01 record. Accepted means verified and independently reviewed source; no operational milestone is inferred."
+    },
+    {
+      "checked_at": "2026-11-23T19:19:19.593980+00:00",
+      "scope": "DIAG-01\u201303 read-only diagnostics source/package delivery",
+      "result": "complete",
+      "accepted_node_ids": [
+        "PLAN-00",
+        "AUDIT-01",
+        "CORE-01",
+        "CORE-02",
+        "CORE-03A",
+        "CORE-03",
+        "CORE-04",
+        "FIDELITY-01",
+        "HA-01",
+        "HA-02",
+        "HA-03",
+        "HA-04",
+        "HA-05",
+        "HA-06",
+        "HA-07",
+        "HA-08",
+        "HA-09",
+        "HA-10",
+        "HA-11",
+        "VERIFY-01",
+        "RELEASE-01",
+        "DEPLOY-01",
+        "OUT-PLAN-01",
+        "OUT-PACK-01",
+        "OUT-PROFILE-01",
+        "OUT-VERIFY-01",
+        "PLAT-SQL-01",
+        "SCOPE-01",
+        "HA-FIX-01",
+        "HA-FIX-02",
+        "RECOVER-01",
+        "DIAG-01",
+        "DIAG-02",
+        "DIAG-03"
+      ],
+      "awaiting_gate_node_ids": [
+        "PERF-01",
+        "LIVE-01"
+      ],
+      "unfinished_ungated_node_ids": [],
+      "independent_approval_required": true,
+      "reviewed_source_and_artifact_evidence": {
+        "path": "docs/reviews/home-assistant-diagnostics-evidence.json",
+        "sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69"
+      },
+      "review_report": {
+        "path": "docs/reviews/home-assistant-diagnostics-integrated-review.md",
+        "sha256": "057c347b3f8e3b927422d569a0ed7c8972de7f5e52a764226dfaebcf41dd1624"
+      },
+      "new_core_or_sdk_changes": false,
+      "control_enabled": false,
+      "entity_or_attribute_scope_expanded": false,
+      "commit_publication_or_merge": false,
+      "deployment_or_live_actions": false,
+      "note": "Implementation/verification complete with independent approvals; prior completion audit preserved in history. Evidence is immutable at pre-review capture; ledger records final review closure. Existing deployment remains unchanged."
+    }
+  ],
+  "capability_amendment": {
+    "date": "2026-11-24",
+    "status": "accepted",
+    "baseline_commit": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+    "baseline_dirty_diagnostics_evidence": "docs/reviews/home-assistant-diagnostics-evidence.json",
+    "baseline_dirty_diagnostics_evidence_sha256": "262389b13889a7e40129d4274b16926384451ed566ba5bbe8eb8846445bbcd69",
+    "preserved_baseline_source_archive_sha256": "8b620bc294846122c0174477dc4a826b8f4c81a2a1e9553f7caed646739aad3c",
+    "nodes": [
+      "CAP-PLAN",
+      "CAP-EXPOSURE",
+      "CAP-01",
+      "CAP-02",
+      "CAP-03"
+    ],
+    "contract": "docs/reviews/home-assistant-capability-contract.md",
+    "control_enabled": false,
+    "core_sdk_shared_runtime_changes": false,
+    "live_policy_changed": false,
+    "commit_authorized": true,
+    "push_authorized": true,
+    "pull_request_authorized": true,
+    "merge_authorized": false,
+    "deployment_authorized": false,
+    "live_validation_authorized": false,
+    "plan_review": "docs/reviews/home-assistant-capability-plan-v2-review.md",
+    "plan_review_sha256": "187d531c131ea45fe4c8a596c18f71c827130b3537cb524c902e53e6d39b4100",
+    "tool_modes": {
+      "legacy": "6 when discovery absent",
+      "capability": "4: health,resolve,describe_fields,read_fields"
+    },
+    "evidence_manifest": "docs/reviews/home-assistant-capability-evidence.json",
+    "evidence_manifest_sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f",
+    "accepted_nodes": [
+      "CAP-PLAN",
+      "CAP-EXPOSURE",
+      "CAP-01",
+      "CAP-02",
+      "CAP-03"
+    ],
+    "review_report": "docs/reviews/home-assistant-capability-integrated-review.md",
+    "review_report_sha256": "b7cd709d00d86cb5e12784f46463163abf1eb5c99bd2dc966ddcaad23242b1eb",
+    "updated_at": "2026-11-23T20:07:48.703716+00:00",
+    "source_package_version": "0.2.0",
+    "deployed": false,
+    "live_validated": false
+  },
+  "diagnostics_discovery_publication": {
+    "recorded_at": "2026-11-23T20:17:30.243560+00:00",
+    "state": "precommit_publication_checkpoint",
+    "request": "Commit diagnostics and generic discovery and open a PR; keep control disabled and include validation evidence.",
+    "branch": "codex/ha-diagnostics",
+    "source_base_commit": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+    "observed_main_commit": "368d59e15be9186b2c4270b701248bd4fce0c96e",
+    "source_evidence": {
+      "path": "docs/reviews/home-assistant-capability-evidence.json",
+      "sha256": "145ac9594783ee7df3816bdddf342e927f2fcf4918c87ab7c54cf72483073d3f"
+    },
+    "source_hash_count": 154,
+    "report": "docs/reviews/home-assistant-capability-publication.md",
+    "scope": "HA adapter, companion, explicit profiles, documentation and validation evidence only. No core/SDK/shared-runtime/database changes; control disabled; live configuration unchanged.",
+    "validation": {
+      "java_ha_tests": 250,
+      "python_ha_tests": 159,
+      "repository_check": "PASS",
+      "outbound_package_checks": 8,
+      "outbound_artifact_files": 57,
+      "assist_version": "0.2.0",
+      "assist_archive_entries": 54,
+      "full_db": false
+    },
+    "commit_authorized": true,
+    "push_authorized": true,
+    "pull_request_authorized": true,
+    "merge_authorized": false,
+    "deployment_authorized": false,
+    "live_validation_authorized": false,
+    "git_metadata_note": "This immutable precommit checkpoint cannot contain its own commit SHA or the later PR number. Git and GitHub metadata identify the exact published commit and PR; source acceptance is bound by the referenced evidence."
   }
 }

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "plowshare": "https://plowshare.example.invalid",
+  "binding": "house",
+  "policyRevision": "outbound-assist-exposed-v1",
+  "homeAssistant": {
+    "endpoint": "https://home-assistant.example.invalid",
+    "tokenEnv": "HA_TOKEN",
+    "entities": {
+      "office.temperature": {
+        "entity": "sensor.example_office_temperature",
+        "attributes": []
+      },
+      "office.occupancy": {
+        "entity": "binary_sensor.example_office_occupancy",
+        "attributes": []
+      },
+      "office.climate": {
+        "entity": "climate.example_office",
+        "attributes": []
+      }
+    },
+    "actions": {},
+    "subscriptions": []
+  },
+  "read": {
+    "project": "home-assistant-readonly",
+    "provider": "ha-read",
+    "account": "REPLACE_WITH_READONLY_EXECUTION_PRINCIPAL",
+    "prefix": "ha_read_",
+    "tokenEnv": "PLOWSHARE_READONLY_TOKEN",
+    "journal": "private/assist-read",
+    "leaseSeconds": 120
+  },
+  "timing": {
+    "connectTimeoutMillis": 20000,
+    "requestTimeoutMillis": 2000,
+    "cleanupTimeoutMillis": 2000,
+    "pollIntervalMillis": 500,
+    "renewEveryMillis": 10000,
+    "metadataMaxAgeMillis": 30000
+  },
+  "discovery": {
+    "mode": "assist_exposed",
+    "profile": "standard_measurements",
+    "excludedEntities": [],
+    "excludedFields": [],
+    "identityJournal": "private/assist-identities"
+  }
+}

@@ -39,8 +39,21 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Real host, manifest and definition parsers; no server, model fleet or device is started. */
 class OutboundProfilesTest {
-  private static final Set<String> READ_TOOLS =
-      Set.of("ha_read_search", "ha_read_describe", "ha_read_read", "ha_read_list_actions");
+  private static final Set<String> LEGACY_READ_TOOLS =
+      Set.of(
+          "ha_read_search",
+          "ha_read_describe",
+          "ha_read_read",
+          "ha_read_list_actions",
+          "ha_read_health",
+          "ha_read_diagnose");
+  private static final Set<String> CAPABILITY_READ_TOOLS =
+      Set.of("ha_read_health", "ha_read_resolve", "ha_read_describe_fields", "ha_read_read_fields");
+
+  private static Set<String> readTools(String profile) {
+    return profile.equals("readonly") ? CAPABILITY_READ_TOOLS : LEGACY_READ_TOOLS;
+  }
+
   private static final Set<String> CONTROL_TOOLS =
       Set.of("ha_control_describe_action", "ha_control_execute_action");
 
@@ -109,7 +122,16 @@ class OutboundProfilesTest {
             mock(ResourceDiscovery.class),
             mock(ResourceReader.class),
             host.timing().requestTimeout());
-    assertEquals(READ_TOOLS, names(read));
+    assertEquals(LEGACY_READ_TOOLS, names(read));
+    HomeAssistantToolHandlers offered = read;
+    if (host.discovery().isPresent())
+      offered =
+          new HomeAssistantCapabilityTools(
+                  host.read().prefix(),
+                  mock(HomeAssistantResourceCapabilities.class),
+                  host.timing().requestTimeout())
+              .withHealth(read);
+    assertEquals(readTools(profile), names(offered));
     if (host.control().isPresent()) {
       var control = host.control().orElseThrow();
       assertEquals(host.read().account(), control.provider().account());
@@ -138,8 +160,8 @@ class OutboundProfilesTest {
     var policy = ApplicationToolScopes.read(profile(profile).resolve("application"));
     String account = policy.executionAccount();
     String agent = agent(profile);
-    assertEquals(READ_TOOLS, Set.copyOf(policy.toolScopes().getFirst().grants()));
-    for (String tool : READ_TOOLS) {
+    assertEquals(readTools(profile), Set.copyOf(policy.toolScopes().getFirst().grants()));
+    for (String tool : readTools(profile)) {
       assertTrue(policy.permits(account, agent, "ha-read", tool));
       assertFalse(policy.permits("another-principal", agent, "ha-read", tool));
       assertFalse(policy.permits(account, "unassigned_agent", "ha-read", tool));
@@ -168,7 +190,7 @@ class OutboundProfilesTest {
     ObjectNode body = (ObjectNode) Json.MAPPER.readTree(Files.readString(manifest));
     body.remove("toolGrants");
     var policy = ApplicationToolScopes.parse(Json.MAPPER.writeValueAsString(body));
-    for (String tool : READ_TOOLS)
+    for (String tool : readTools(profile))
       assertFalse(policy.permits(policy.executionAccount(), agent(profile), "ha-read", tool));
     for (String tool : CONTROL_TOOLS)
       assertFalse(policy.permits(policy.executionAccount(), agent(profile), "ha-control", tool));

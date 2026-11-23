@@ -8,15 +8,23 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import CoreState, Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.storage import STORAGE_DIR
+from homeassistant.helpers.typing import ConfigType
 
 from .agent import ProfileRuntime, SdkConversationAgent
 from .config import configured_profiles
 from .const import CONF_AI_TASK_ENABLED, CONF_CONVERSATION_ENABLED, DOMAIN
+from .exposure import async_register
 from .runtime import EntryRuntime, PlatformSetupIncomplete, owners
 from .storage import CorrelationJournal, JournalUnavailable
 
 type PlowshareConfigEntry = ConfigEntry[ProfileRuntime]
 _STOPPING = {CoreState.stopping, CoreState.final_write, CoreState.stopped}
+
+
+async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
+    """Register the local selection capability without opening an SDK gateway."""
+    async_register(hass)
+    return True
 
 
 class _HAPlatforms:

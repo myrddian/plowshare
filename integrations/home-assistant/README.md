@@ -16,6 +16,28 @@ agents, skills, orchestration and investigation. The adapter uses the existing
 Plowshare requests use its existing WebSocket SDK. There is no HTTP fallback or
 core integration subsystem.
 
+The provider's read tools include local health observations and diagnosis of a
+permitted resource, alongside discovery and fresh reads. They distinguish an
+unavailable HA entity, a policy-limited attribute and a failed observation without
+guessing the physical cause. Exact diagnostic tool grants are required; they do
+not add control or expand the selected entities/attributes. See the
+[provider tools](TOOL-PROVIDER.md). The separately installed
+[Assist component](assist/README.md) also provides HA's native diagnostics
+download, so its retained lifecycle facts can be inspected when the outbound
+provider is unreachable. Downloading diagnostics performs no network requests
+or new model work.
+
+An explicit capability-discovery mode resolves permitted resource/field candidates
+using names, aliases, locations and measurement meaning. Its catalogue contains
+`health`, `resolve`, `describe_fields` and `read_fields`; the legacy alias-data
+tools are absent so they cannot bypass live selection or field exclusions.
+Current temperature and target setpoints remain separate typed fields, and
+duplicate names remain explicit alternatives. Verified registry identity follows
+renames without allowing replacement devices to inherit the old reference. See
+[capability read discovery](PROVIDER-HOST.md#capability-based-read-discovery) for
+fixed/follow-Assist selection, measurement profiles and identity-journal ownership.
+Omitting that configuration preserves the existing six-tool provider behavior.
+
 ## Build and configure
 
 ```sh
