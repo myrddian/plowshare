@@ -19,6 +19,7 @@ import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +27,8 @@ import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -1486,6 +1489,35 @@ class LlmConfigTest {
               String message = trail(context.getStartupFailure());
               assertTrue(message.contains("studio"), message);
               assertTrue(message.contains("embedding-timeout"), message);
+            });
+  }
+
+  @Test
+  void an_embedding_connection_idle_timeout_binds_at_startup() {
+    runner
+        .withPropertyValues(
+            onePoolPlus("plowshare.llm.pools[0].embedding-connection-idle-timeout=4s"))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              PoolProperties pool = context.getBean(LlmProperties.class).getPools().getFirst();
+              assertEquals(Duration.ofSeconds(4), pool.getEmbeddingConnectionIdleTimeout());
+              assertEquals(Duration.ofSeconds(30), pool.getEmbeddingTimeout());
+            });
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"0s", "-1s", "10000000000s"})
+  void an_invalid_embedding_connection_idle_timeout_names_the_pool_and_setting(String duration) {
+    runner
+        .withPropertyValues(
+            onePoolPlus("plowshare.llm.pools[0].embedding-connection-idle-timeout=" + duration))
+        .run(
+            context -> {
+              assertNotNull(context.getStartupFailure());
+              String message = trail(context.getStartupFailure());
+              assertTrue(message.contains("studio"), message);
+              assertTrue(message.contains("embedding-connection-idle-timeout"), message);
             });
   }
 

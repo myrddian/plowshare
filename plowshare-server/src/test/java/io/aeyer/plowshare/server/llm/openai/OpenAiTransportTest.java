@@ -367,6 +367,54 @@ class OpenAiTransportTest {
     }
   }
 
+  @Test
+  void an_embedding_idle_timeout_only_retires_connections_for_the_configured_embedding_client()
+      throws Exception {
+    try (MockWebServer server = new MockWebServer()) {
+      String chat =
+          """
+          {"choices":[{"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}
+          """;
+      String embedding = "{\"data\":[{\"embedding\":[1.0]}]}";
+      server.enqueue(json(chat));
+      for (int i = 0; i < 4; i++) {
+        server.enqueue(json(embedding));
+      }
+      server.enqueue(json(chat));
+      server.start();
+
+      String url = server.url("/v1").toString();
+      PoolProperties configured = poolAt(url);
+      configured.setEmbeddingConnectionIdleTimeout(Duration.ofMillis(100));
+      PoolProperties other = poolAt(url);
+      other.setName("other");
+      ObjectMapper mapper = new ObjectMapper();
+      try (OpenAiTransport studio = new OpenAiTransport(configured, mapper);
+          OpenAiTransport unconfigured = new OpenAiTransport(other, mapper)) {
+        List<ChatMessage> prompt = ChatMessage.conversation(null, "hello");
+        studio.complete("chat-model", prompt, Sampling.NONE, List.of());
+        studio.embed("embedding-model", List.of("one"));
+        unconfigured.embed("embedding-model", List.of("one"));
+
+        // Allow the connection pool's cleanup task to retire the configured idle socket.
+        Thread.sleep(Duration.ofSeconds(1));
+
+        studio.embed("embedding-model", List.of("two"));
+        unconfigured.embed("embedding-model", List.of("two"));
+        studio.complete("chat-model", prompt, Sampling.NONE, List.of());
+
+        // MockWebServer numbers requests per connection. Only configured embeddings start fresh.
+        List<Integer> sequenceNumbers = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+          RecordedRequest request = server.takeRequest(2, TimeUnit.SECONDS);
+          assertNotNull(request);
+          sequenceNumbers.add(request.getSequenceNumber());
+        }
+        assertEquals(List.of(0, 0, 0, 0, 1, 1), sequenceNumbers);
+      }
+    }
+  }
+
   /**
    * No key configured, no header. An unauthenticated local box must not be handed an empty
    * Authorization header to reject.
