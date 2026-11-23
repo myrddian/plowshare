@@ -1339,6 +1339,7 @@ export class DesktopWorkspace {
       request.action === 'delegate-retry' ||
       request.action === 'run' ||
       request.action === 'history' ||
+      request.action === 'tool-trace' ||
       request.action === 'context' ||
       request.action === 'context-snapshot'
     )

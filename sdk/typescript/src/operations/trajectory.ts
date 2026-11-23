@@ -1,5 +1,6 @@
 import { cleaned } from './clean.ts';
 import type { Asked, Entry, Opened } from './client-views.ts';
+import type { ToolEffectReceiptView } from './conversation-replies.ts';
 import { tint, type Role, type Tint, type Tinted } from './tints.ts';
 
 /**
@@ -107,6 +108,7 @@ export interface Call extends Based {
   readonly argumentsCut: boolean;
   readonly argumentsLength: number;
   readonly opened?: Opened;
+  readonly effectReceipt?: ToolEffectReceiptView;
   /** No result yet, and nothing after it says there never will be one. */
   readonly pending: boolean;
   /** No result, and the turn went on past it: stopped, stuck, or a server that restarted. */
@@ -137,6 +139,9 @@ function callOf(asked: Asked, entry: Entry): Call {
     argumentsCut: asked.cut,
     argumentsLength: asked.length,
     ...(asked.opened === undefined ? {} : { opened: asked.opened }),
+    ...(asked.effectReceipt === undefined
+      ? {}
+      : { effectReceipt: asked.effectReceipt }),
     pending: true,
     unanswered: false,
     hooks: [],
@@ -159,6 +164,8 @@ export function stepsOf(entries: readonly Entry[]): Step[] {
   const ordered = [...entries].sort((a, b) => a.ordinal - b.ordinal);
   const steps: Step[] = [];
   const open = new Map<string, number>();
+  const byResultOrdinal = new Map<number, number>();
+  const byCall = new Map<string, number>();
   let lastSettled: number | undefined;
   for (const entry of ordered) {
     const base = { ordinal: entry.ordinal, turn: entry.turnOrdinal, entry };
@@ -178,19 +185,36 @@ export function stepsOf(entries: readonly Entry[]): Step[] {
           steps.push({ kind: 'answer', ...base });
         }
         for (const asked of entry.calls ?? []) {
-          open.set(asked.id, steps.length);
+          byCall.set(`${entry.ordinal}:${asked.id}`, steps.length);
+          const receipt = asked.effectReceipt;
+          if (!receipt) open.set(asked.id, steps.length);
+          else if (receipt.resultOrdinal !== null)
+            byResultOrdinal.set(receipt.resultOrdinal, steps.length);
           steps.push(callOf(asked, entry));
         }
         break;
       case 'tool_result': {
+        const retained = entry.retainedToolResult;
+        const id = entry.toolCallId;
         const at =
-          entry.toolCallId === undefined
+          id === undefined
             ? undefined
-            : open.get(entry.toolCallId);
+            : retained
+              ? byCall.get(`${retained.answerOrdinal}:${id}`)
+              : (byResultOrdinal.get(entry.ordinal) ?? open.get(id));
         const call = at === undefined ? undefined : steps[at];
-        if (at !== undefined && call?.kind === 'call') {
-          steps[at] = { ...call, pending: false, result: entry };
-          open.delete(call.id);
+        if (
+          at !== undefined &&
+          call?.kind === 'call' &&
+          call.id === entry.toolCallId
+        ) {
+          steps[at] = {
+            ...call,
+            pending: false,
+            result: entry,
+            ...(retained ? { effectReceipt: retained.effectReceipt } : {}),
+          };
+          if (open.get(call.id) === at) open.delete(call.id);
           lastSettled = at;
         } else {
           steps.push({ kind: 'note', ...base });

@@ -12,6 +12,7 @@ import {
 } from 'plowshare-client-ts/operations/trajectory';
 import { inferenceTokens } from './inference-stats.ts';
 import type { Step } from 'plowshare-client-ts/operations/trajectory';
+import type { ToolEffectReceiptView } from 'plowshare-client-ts/operations/conversation-replies';
 import { icon, mountIcons } from './icons.ts';
 import type { Icon } from './icons.ts';
 import { copyButton, installCopyControls } from './copy.ts';
@@ -369,8 +370,69 @@ function delegationLink(
   return `<button class="step-trajectory-link ${placement}" data-delegate-parent="${esc(conversation)}" data-delegate-step="${esc(stepKey(call))}" title="Open ${esc(name)} trajectory" aria-label="Open ${esc(name)} trajectory">${icon('external')}${placement === 'header' ? 'Trajectory' : ''}</button>`;
 }
 function section(label: string, text: string, note = '', direction = '') {
-  return `<section class="trajectory-text-section"><h3>${icon(label === 'Input' ? 'terminal' : label === 'Result' ? 'file' : label === 'Published reasoning' ? 'brain' : 'message')}${direction ? `<span class="delegation-direction">${esc(direction)}</span>` : ''}${esc(label)}${copyButton('Copy displayed text', 'section')}</h3><pre>${esc(text)}</pre>${note ? `<p class="history-note">${esc(note)}</p>` : ''}</section>`;
+  return `<section class="trajectory-text-section"><h3>${icon(label === 'Input' ? 'terminal' : label === 'Result' ? 'file' : label === 'Published reasoning' ? 'brain' : 'message')}${direction ? `<span class="delegation-direction">${esc(direction)}</span>` : ''}${esc(label)}${copyButton('Copy displayed text', 'section')}</h3><pre${label === 'Result' || label === 'Text' ? ' data-result-text' : ''}>${esc(text)}</pre>${note ? `<p class="history-note">${esc(note)}</p>` : ''}</section>`;
 }
+function effectSummary(receipt: ToolEffectReceiptView): string {
+  switch (receipt.observation) {
+    case 'PREFLIGHT_REFUSED':
+      return 'Refused before dispatch. No effect.';
+    case 'FILE_SENT':
+      return 'Sent. Effect unknown.';
+    case 'FILE_REPLY_TIMEOUT':
+      return 'Sent. Reply timed out. Effect unknown.';
+    case 'FILE_EFFECT_CONFIRMED':
+      return 'File provider confirmed the change.';
+    case 'FILE_EFFECT_VERIFIED':
+    case 'FILE_LOCAL_CHANGED':
+      return 'File change verified.';
+    case 'FILE_EFFECT_UNCHANGED':
+    case 'FILE_LOCAL_UNCHANGED':
+      return 'No file content change verified.';
+    case 'FILE_REPLY_UNVERIFIED':
+      return 'Reply received. Effect unknown.';
+    case 'FILE_DISPATCH_UNCERTAIN':
+      return 'Dispatch and effect unknown.';
+    case 'FILE_LOCAL_UNVERIFIED':
+      return 'Local operation completed. Effect unknown.';
+  }
+}
+
+// The disclosure is initially closed even when Follow latest selects the call. Bind the
+// request to this DOM node so a response from a previous selection cannot fill a new one.
+document.addEventListener(
+  'toggle',
+  (event) => {
+    const disclosure = event.target;
+    if (
+      !(disclosure instanceof HTMLDetailsElement) ||
+      !disclosure.open ||
+      disclosure.dataset.loading
+    )
+      return;
+    const invocationId = disclosure.dataset.toolTrace;
+    const output = disclosure.querySelector('pre');
+    if (!invocationId || !output) return;
+    disclosure.dataset.loading = 'true';
+    output.textContent = 'Loading trace…';
+    background(
+      window.plowshare
+        .request({ action: 'tool-trace', conversation, invocationId })
+        .then(({ toolTrace }) => {
+          if (!disclosure.isConnected) return;
+          output.textContent = toolTrace?.trace
+            ? JSON.stringify(toolTrace.trace, null, 2)
+            : 'No trace was retained for this call.';
+        })
+        .catch((error: unknown) => {
+          if (!disclosure.isConnected) return;
+          delete disclosure.dataset.loading;
+          output.textContent = errorMessage(error);
+        }),
+    );
+  },
+  true,
+);
+
 function renderDetail() {
   const row = [...visible, ...runItems].find((item) => item.key === selected);
   const stamp = JSON.stringify([
@@ -417,6 +479,10 @@ function renderDetail() {
         : '',
       linked && call.result ? '<' : '',
     );
+    if (call.effectReceipt) {
+      body += section('Side effect', effectSummary(call.effectReceipt));
+      body += `<details class="trajectory-raw" data-tool-trace="${esc(call.effectReceipt.invocationId)}"><summary>Trace</summary><pre></pre></details>`;
+    }
     if (
       call.tool === 'agent_run' &&
       call.opened &&
@@ -475,6 +541,16 @@ function renderDetail() {
     body += `<p class="history-note">Folded into model summary #${row.step.entry.supersededBy}. The original entry remains in your history.</p>`;
   const recorded =
     row.step?.kind === 'call' ? row.step.result : row.step?.entry;
+  const window = recorded?.fileWindow;
+  if (window) {
+    body += section(
+      'File window',
+      `${window.linesRead} of ${window.totalLines} lines from offset ${window.offset} · ${window.byteLength} bytes\n` +
+        (window.nextOffset === null
+          ? 'End of file'
+          : `Continue from offset ${window.nextOffset}`),
+    );
+  }
   if (recorded?.job) body += section('Job', recorded.job);
   if (recorded?.source)
     body += section(
@@ -485,6 +561,10 @@ function renderDetail() {
     );
   body += `<details class="trajectory-raw"><summary>Record details ${copyButton('Copy displayed record', 'record')}</summary><pre>${esc(JSON.stringify(row.step ?? row.job, null, 2))}</pre></details>`;
   detail.innerHTML = body;
+  if (window && recorded.text !== undefined) {
+    const output = detail.querySelector('[data-result-text]');
+    if (output) output.textContent = recorded.text;
+  }
   if (following && nearBottom) detail.scrollTop = detail.scrollHeight;
   else detail.scrollTop = top;
 }

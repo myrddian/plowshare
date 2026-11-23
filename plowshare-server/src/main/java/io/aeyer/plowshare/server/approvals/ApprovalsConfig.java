@@ -10,6 +10,8 @@ import io.aeyer.plowshare.server.delivery.PersonDelivery;
 import io.aeyer.plowshare.server.events.ApplicationInbox;
 import io.aeyer.plowshare.server.events.Inbox;
 import io.aeyer.plowshare.server.events.SpeakerHandles;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import java.time.Instant;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -23,12 +25,24 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class ApprovalsConfig {
 
   @Bean
-  public SuspendedRunCalls suspendedRunCalls(
-      JdbcTemplate jdbc, JobRuntime runtime, ActiveRunApprovals active) {
-    SuspendedRunCalls calls = new JdbcSuspendedRunCalls(jdbc);
+  public JdbcSuspendedRunCalls suspendedRunCalls(
+      JdbcTemplate jdbc,
+      JobRuntime runtime,
+      ActiveRunApprovals active,
+      SqlWorkBudget sql,
+      SqlWorkBudgetProperties limits,
+      ToolCallTraces traces) {
+    var calls = new JdbcSuspendedRunCalls(jdbc, sql, limits.queryCeiling(), traces);
     runtime.useSuspendedRunCalls(calls);
+    runtime.useDirectFileCalls(calls);
     runtime.useActiveRunApprovals(active);
     return calls;
+  }
+
+  @Bean
+  public ToolCallTraces toolCallTraces(
+      JdbcTemplate jdbc, SqlWorkBudget sql, SqlWorkBudgetProperties limits) {
+    return new JdbcToolCallTraces(jdbc, sql, limits.queryCeiling());
   }
 
   @Bean

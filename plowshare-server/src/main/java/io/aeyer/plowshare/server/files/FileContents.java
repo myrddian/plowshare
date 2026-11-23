@@ -6,6 +6,7 @@ import io.aeyer.plowshare.protocol.FileResult;
 import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ImageFormat;
+import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.images.UnstorableImageException;
 import java.io.IOException;
@@ -27,7 +28,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 
 /**
  * Server-side file interpretation. Fresh fenced source metadata is required on every access,
- * including cache hits. Raw bytes never become a model tool result.
+ * including cache hits. Lossless reads cut a bounded window from the verified source.
  */
 public final class FileContents {
   public static final FileContents SHARED = new FileContents(8 * 1024 * 1024);
@@ -50,6 +51,32 @@ public final class FileContents {
     List<String> remembered = remembered(meta.sha256(), path, op, home, images, true);
     if (remembered != null) return remembered;
     return decode(path, op, transfer(path, meta, FileSource.MAX_BYTES, ask), home, images, true);
+  }
+
+  /** Transfer and verify bytes from the currently authorized source for every exact read. */
+  public FileRead remoteWindow(
+      String path,
+      Window window,
+      Home home,
+      ImageStore images,
+      Function<FileRequest, FileReply> ask) {
+    FileSource meta = ask.apply(FileRequest.source(id(), path, null, null)).source();
+    if (meta == null || meta.data() != null) throw broken("missing source metadata");
+    // SOURCE metadata comes from the client. Its hash verifies the transfer below and cannot
+    // authorize disclosure of bytes from another binding.
+    byte[] bytes = transfer(path, meta, FileSource.MAX_BYTES, ask);
+    if (isPdf(bytes) || ImageFormat.of(bytes) != null) {
+      try {
+        return new FileRead.View(
+            window.cut(decode(path, FileRequest.READ, bytes, home, images, true)));
+      } catch (Window.LineTooWide wide) {
+        throw new FileRefusedException(
+            FileResult.lineTooWide(
+                FileRequest.READ, path, wide.offset(), wide.bytes(), Window.MAX_WINDOW_BYTES),
+            true);
+      }
+    }
+    return FileRead.utf8(path, bytes, window, true);
   }
 
   /** Transfer raw, hash-verified bytes through the existing SOURCE channel. */

@@ -659,6 +659,38 @@ class LmStudioSocketTest {
     }
   }
 
+  @Test
+  void lossless_tool_parts_preserve_crlf_and_empty_content() throws Exception {
+    try (Wiring wiring = wire(List.of(success("{\"stopReason\":\"eosFound\"}"), CLOSE))) {
+      String exact = "\r\n  {\"error\":true}\r\n";
+      var conversation =
+          List.of(
+              ChatMessage.user("read both"),
+              ChatMessage.assistant(
+                  "",
+                  List.of(
+                      new ToolCall("file", "file_read", "{}"),
+                      new ToolCall("empty", "file_read", "{}"))),
+              ChatMessage.losslessTool("file", exact),
+              ChatMessage.losslessTool("empty", ""));
+      wiring.transport().stream(
+          "qwen3.5-9b",
+          conversation,
+          Sampling.NONE,
+          List.of(),
+          token -> {},
+          PRESENT,
+          fraction -> {});
+      JsonNode messages =
+          parse(wiring.node().received.get(1))
+              .path("creationParameter")
+              .path("history")
+              .path("messages");
+      assertEquals(exact, messages.get(2).path("content").get(0).get("content").textValue());
+      assertEquals("", messages.get(3).path("content").get(0).get("content").textValue());
+    }
+  }
+
   // ---- usage ---------------------------------------------------------------
 
   @Test

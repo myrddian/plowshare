@@ -9,7 +9,15 @@ import {
   type ApprovalView,
   type BudgetExtension,
 } from './administrative-replies.ts';
-import { commandEntry, type CommandEntry } from './conversation-replies.ts';
+import {
+  commandEntry,
+  isToolEffectReceipt,
+  isFileReadWindow,
+  type FileReadWindow,
+  type CommandEntry,
+  type RetainedToolResultView,
+  type ToolEffectReceiptView,
+} from './conversation-replies.ts';
 // Shared domain readers. Unknown fields are tolerated; frontend rendering stays outside this module.
 import {
   OK,
@@ -803,6 +811,7 @@ export interface Asked {
   readonly cut: boolean;
   readonly salient?: string;
   readonly opened?: Opened;
+  readonly effectReceipt?: ToolEffectReceiptView;
 }
 
 /**
@@ -853,6 +862,8 @@ export interface Entry {
   readonly toolCallId?: string;
   /** On an answer that asked for tools: the calls, in the order asked. */
   readonly calls?: readonly Asked[];
+  readonly retainedToolResult?: RetainedToolResultView;
+  readonly fileWindow?: FileReadWindow;
   /** On a tool result: its outcome in a word (`ok`, `exit 1`, `refused` …); absent before V62. */
   readonly outcome?: string;
   /** How long the model call (an answer) or the tool (a result) took. */
@@ -882,6 +893,17 @@ function openedIn(value: unknown): Opened | undefined {
 }
 
 /** One `AskedView`, read as the call it names, or nothing for one with no id or name. */
+function receiptIn(value: unknown): ToolEffectReceiptView | undefined {
+  if (!isToolEffectReceipt(value)) return undefined;
+  return {
+    invocationId: value.invocationId,
+    observation: value.observation,
+    dispatch: value.dispatch,
+    effect: value.effect,
+    resultOrdinal: value.resultOrdinal,
+  };
+}
+
 function askedIn(value: unknown): Asked[] {
   const fields = fieldsOf(value);
   const id = textAt(fields, 'id');
@@ -891,6 +913,7 @@ function askedIn(value: unknown): Asked[] {
   }
   const salient = textAt(fields, 'salient');
   const opened = openedIn(fields['opened']);
+  const receipt = receiptIn(fields['effectReceipt']);
   return [
     {
       id,
@@ -900,6 +923,7 @@ function askedIn(value: unknown): Asked[] {
       cut: flagAt(fields, 'cut'),
       ...(salient === undefined || salient === '' ? {} : { salient }),
       ...(opened === undefined ? {} : { opened }),
+      ...(receipt === undefined ? {} : { effectReceipt: receipt }),
     },
   ];
 }
@@ -939,6 +963,10 @@ export function entriesOf(answer: Answer): Entry[] {
       : undefined;
     const listed = isList(calls) ? calls.flatMap(askedIn) : [];
     const toolCallId = textAt(fields, 'toolCallId');
+    const retained = fieldsOf(fields['retainedToolResult']);
+    const answerOrdinal = countAt(retained, 'answerOrdinal');
+    const effectReceipt = receiptIn(retained['effectReceipt']);
+    const window = fields['fileWindow'];
     const outcome = textAt(fields, 'outcome');
     const tookMillis = countAt(fields, 'tookMillis');
     const promptTokens = countAt(fields, 'promptTokens');
@@ -968,6 +996,25 @@ export function entriesOf(answer: Answer): Entry[] {
         : { source: { kind: sourceKind, reference: sourceReference ?? null } }),
       ...(listed.length === 0 ? {} : { calls: listed }),
       ...(toolCallId === undefined ? {} : { toolCallId }),
+      ...(isFileReadWindow(window)
+        ? {
+            fileWindow: {
+              offset: window.offset,
+              linesRead: window.linesRead,
+              totalLines: window.totalLines,
+              byteLength: window.byteLength,
+              limit: window.limit,
+              requestedLimit: window.requestedLimit,
+              stoppedBy: window.stoppedBy,
+              nextOffset: window.nextOffset,
+            },
+          }
+        : {}),
+      ...(answerOrdinal === undefined || effectReceipt === undefined
+        ? {}
+        : {
+            retainedToolResult: { answerOrdinal, effectReceipt },
+          }),
       ...(outcome === undefined || outcome === '' ? {} : { outcome }),
       ...(tookMillis === undefined ? {} : { tookMillis }),
       ...(promptTokens === undefined ? {} : { promptTokens }),

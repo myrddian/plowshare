@@ -2,6 +2,8 @@ package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.agents.ToolObservation;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -89,7 +91,77 @@ public record EntryRecord(
     Long tookMillis,
     Instant ejectedAt,
     String export,
-    io.aeyer.plowshare.server.agents.ToolObservation observation) {
+    ToolObservation observation,
+    FileReadWindow fileWindow,
+    Integer retainedAnswerOrdinal) {
+
+  public EntryRecord(
+      String conversationId,
+      int ordinal,
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Integer supersededBy,
+      UUID handle,
+      int turnOrdinal,
+      Instant recordedAt,
+      Long tookMillis,
+      Instant ejectedAt,
+      String export,
+      ToolObservation observation,
+      FileReadWindow fileWindow) {
+    this(
+        conversationId,
+        ordinal,
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        supersededBy,
+        handle,
+        turnOrdinal,
+        recordedAt,
+        tookMillis,
+        ejectedAt,
+        export,
+        observation,
+        fileWindow,
+        null);
+  }
+
+  public EntryRecord(
+      String conversationId,
+      int ordinal,
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Integer supersededBy,
+      UUID handle,
+      int turnOrdinal,
+      Instant recordedAt,
+      Long tookMillis,
+      Instant ejectedAt,
+      String export,
+      ToolObservation observation) {
+    this(
+        conversationId,
+        ordinal,
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        supersededBy,
+        handle,
+        turnOrdinal,
+        recordedAt,
+        tookMillis,
+        ejectedAt,
+        export,
+        observation,
+        null);
+  }
 
   /**
    * Rejects the nulls that have no meaning, and copies the one list.

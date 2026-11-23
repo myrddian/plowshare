@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.files;
 import io.aeyer.plowshare.protocol.CommandRunner;
 import io.aeyer.plowshare.protocol.EnvironmentFile;
 import io.aeyer.plowshare.protocol.FileAccess;
+import io.aeyer.plowshare.protocol.FileResult;
+import io.aeyer.plowshare.protocol.FileSource;
 import io.aeyer.plowshare.protocol.Found;
 import io.aeyer.plowshare.protocol.Needle;
 import io.aeyer.plowshare.protocol.Span;
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * One thing that resolves file requests against a real disk.
@@ -57,7 +60,7 @@ import java.util.function.BooleanSupplier;
  * <p>{@link #roots()} is the one method for which an empty list is a real answer, because "what can
  * I see?" is exactly the question it is asked.
  */
-public interface FileProvider {
+public interface FileProvider extends FileMutations {
 
   /**
    * What to call this provider when something has to name it.
@@ -146,6 +149,14 @@ public interface FileProvider {
     return this;
   }
 
+  /**
+   * Evidence for the ensuing mutation, using this exact provider binding. Providers without
+   * correlated mutation evidence leave the call unobserved.
+   */
+  default FileProvider observeMutation(Consumer<FileMutationObservation> observer) {
+    return this;
+  }
+
   /** Confirm a reviewed routing snapshot still refers to the same provider connection. */
   default void requireReviewBinding() {}
 
@@ -181,6 +192,11 @@ public interface FileProvider {
    * @throws WorkspaceUnavailableException if the disk could not be asked
    */
   Span read(Path path, Window window);
+
+  /** Preserve raw UTF-8 when this provider can serve it. Span-only providers retain their view. */
+  default FileRead readWindow(Path path, Window window) {
+    return new FileRead.View(read(path, window));
+  }
 
   /**
    * How long one file is, without moving any of it.
@@ -225,13 +241,23 @@ public interface FileProvider {
   }
 
   /** Fresh fenced raw-byte metadata. Unsupported providers fail explicitly. */
-  default io.aeyer.plowshare.protocol.FileSource fingerprint(Path path) {
+  default FileSource fingerprint(Path path) {
     throw new WorkspaceRefusedException(name() + " does not support raw code snapshots");
   }
 
+  /** Raw metadata for verification, with an empty answer only for authoritative absence. */
+  default Optional<FileSource> mutationFingerprint(Path path) {
+    try {
+      return Optional.of(fingerprint(path));
+    } catch (FileRefusedException refused) {
+      if (FileResult.NO_FILE.equals(refused.facts().kind())
+          && path.toString().equals(refused.facts().path())) return Optional.empty();
+      throw refused;
+    }
+  }
+
   /** Whole bounded bytes matching metadata, with fresh authority at every access. */
-  default byte[] snapshot(
-      Path path, io.aeyer.plowshare.protocol.FileSource metadata, int maxBytes) {
+  default byte[] snapshot(Path path, FileSource metadata, int maxBytes) {
     throw new WorkspaceRefusedException(name() + " does not support raw code snapshots");
   }
 

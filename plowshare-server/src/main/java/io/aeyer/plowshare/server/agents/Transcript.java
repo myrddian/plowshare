@@ -195,6 +195,11 @@ public interface Transcript {
    */
   List<ChatMessage> before();
 
+  /** Original projected assistant object for exact stopped-turn recovery. */
+  default ChatMessage projectedAnswer(int ordinal) {
+    return null;
+  }
+
   /**
    * One thing that happened in this run, for the conversation's log.
    *
@@ -229,6 +234,17 @@ public interface Transcript {
    */
   default void recordDurably(LoggedEntry entry) {
     throw new IllegalStateException("This transcript cannot confirm durable execution records");
+  }
+
+  /** Record a retained call's declaration and return its server-assigned entry ordinal. */
+  default Integer recordRetainedCallBatch(LoggedEntry answer) {
+    recordDurably(answer);
+    return null;
+  }
+
+  /** Append the result once for this server-owned invocation, including during recovery. */
+  default void recordRetainedResult(LoggedEntry entry, String invocation) {
+    recordDurably(entry);
   }
 
   /**

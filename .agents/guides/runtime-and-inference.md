@@ -40,6 +40,16 @@ Neither a visible row nor a context-eligible label proves a particular provider 
 | Context snapshot | `conversation.context.snapshot` constructs a timestamped next-projection preview with tools/settings; optional measurement generates no answer or inference spend. Drafts/transient execution additions and image bytes are absent. |
 | Actual inference evidence | Retained invocation and accounting call/attempt records describe dispatch/model/usage when recorded; a preview or reconstructed projection is not that evidence or a full provider-payload receipt. |
 
+Trajectory pages can attach a side-effect receipt to the exact original tool call.
+The result entry keeps its existing payload. The optional `conversation.tool.trace`
+read requires current conversation visibility and loads debug metadata only on
+explicit request. Trajectory pagination and model projection perform no trace reads.
+
+A lossless `file_read` records the original UTF-8 text, including empty windows,
+with separate typed window metadata. The runtime delivers paging guidance after
+the complete tool batch. A release check that would modify the text withholds
+the exact result. Span-only and converted providers continue to return views.
+
 Compaction writes summaries and coverage markers while keeping original rows;
 separate retention can eject tool-result payloads. Projection selects eligible
 standing history, adds the agent block and applies tool-result/summary policies.
@@ -170,10 +180,19 @@ agent-editable Personal file. A missing policy is Manual; an invalid policy neve
 supplies stale automatic permission.
 
 Human questions retain the original tool name and exact arguments through
-`SuspendedRunCalls`; a started effect with no result is uncertain and never
-replayed. A retained `run` claims its own approval, not another matching standing
-grant. Typed file approval requires its displayed input digest and permits once
-or deny only. Review diagnostics are audit-only Trajectory entries, never model
+`SuspendedRunCalls`. The claim prevents replay. A receipt can prove a refusal
+before dispatch, a sent request with unknown effect, or a typed confirmation
+from the original remote file provider. A retained remote file mutation whose
+reply times out receives a tool error while its effect stays unknown. Recovery
+without authoritative effect evidence must not replay the original call.
+Directly admitted file mutations use the same journal and need no approval row.
+A stopped-turn continuation can settle its original invocation without reissuing it.
+Verification uses bounded reads on the same provider binding and keeps file
+bytes and hashes out of Trajectory metadata. A remote reply timeout stays
+unknown even if the expected bytes later appear.
+A retained `run` claims its own approval, not another matching standing grant.
+Typed file approval requires its displayed input digest and permits once or
+deny only. Review diagnostics are audit-only Trajectory entries, never model
 instructions or chain-of-thought storage. Inference remains in the existing
 journal and allowance; there is no independent durable reviewer-stage workflow.
 

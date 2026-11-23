@@ -111,7 +111,15 @@ public final class EntryStore implements ConversationSearchRepository {
   private static final String COLUMNS =
       "conversation_id, ordinal, kind, role, content, tool_call_id, tool_calls,"
           + " superseded_by, handle, turn_ordinal, recorded_at, took_ms, ejected_at,"
-          + " export, tool_observation";
+          + " export, tool_observation, file_window";
+
+  // Only direct file recovery needs to rehome results recorded in a later turn. Approved tools
+  // retain their existing disclosure and projection paths, including web-release audit handling.
+  private static final String DIRECT_ANSWER_COLUMN =
+      ", (SELECT c.answer_ordinal FROM suspended_run_calls c"
+          + " WHERE c.conversation = entries.conversation_id"
+          + " AND c.invocation_id = entries.retained_invocation AND c.approval IS NULL)"
+          + " AS retained_answer";
 
   /**
    * The log's advisory-lock space: the two-key form, so no other advisory lock this database takes
@@ -148,9 +156,9 @@ public final class EntryStore implements ConversationSearchRepository {
                                  invocation, produced_by, dispatch, model_specifier, model_pool,
                                  wire_model, completion, finish_reason, prompt_tokens,
                                  completion_tokens, reasoning_tokens, sent_at, fallback_reason,
-                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation, input_provenance)
+                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation, input_provenance, retained_invocation, file_window)
             SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB), CAST(? AS JSONB)
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, CAST(? AS JSONB)
               FROM entries
              WHERE conversation_id = ?
             RETURNING %s"""
@@ -486,6 +494,7 @@ public final class EntryStore implements ConversationSearchRepository {
   private static final String THAT_PROJECTED_AT =
       "SELECT "
           + COLUMNS
+          + DIRECT_ANSWER_COLUMN
           + " FROM entries WHERE conversation_id = ?"
           + " AND role IS NOT NULL"
           + " AND ordinal <= ?"
@@ -829,7 +838,7 @@ public final class EntryStore implements ConversationSearchRepository {
                            WITH ORDINALITY AS each(call, asked)) AS tool_calls,
                    handle, recorded_at, took_ms,
                    dispatch, wire_model, completion, speaker, speaker_name, outcome, job_id,
-                   prompt_tokens, completion_tokens, reasoning_tokens
+                   prompt_tokens, completion_tokens, reasoning_tokens, file_window
               FROM entries
              WHERE conversation_id = ?%s""";
 
@@ -2034,6 +2043,22 @@ public final class EntryStore implements ConversationSearchRepository {
 
   /** Records the immutable owning job; null means an unbound or legacy entry, never a guess. */
   public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry, String job) {
+    return append(conversationId, turnOrdinal, entry, job, null);
+  }
+
+  public void appendRetainedResult(
+      String conversationId, int turnOrdinal, LoggedEntry entry, String job, String invocation) {
+    if (entry.kind() != EntryKind.TOOL_RESULT || invocation == null || invocation.isBlank())
+      throw new IllegalArgumentException("A retained invocation requires a tool result");
+    append(conversationId, turnOrdinal, entry, job, invocation);
+  }
+
+  private EntryRecord append(
+      String conversationId,
+      int turnOrdinal,
+      LoggedEntry entry,
+      String job,
+      String retainedInvocation) {
     if (job != null) ArchiveValues.identity(job, "job id");
     String conversation = ConversationStore.named(conversationId);
     String kind = entry.kind().wireName();
@@ -2069,6 +2094,21 @@ public final class EntryStore implements ConversationSearchRepository {
                           .isActualTransactionActive())
                     throw new IllegalStateException("Typed entry append requires a transaction");
                   jdbc.query(LOCK, (ResultSet rs) -> null, conversation);
+                  // The conversation lock serializes retries with the original append. Keep the
+                  // first row and its result bytes even if recovery reserved another turn.
+                  if (retainedInvocation != null) {
+                    var recorded =
+                        jdbc.query(
+                            "SELECT "
+                                + COLUMNS
+                                + " FROM entries WHERE retained_invocation = ?"
+                                + " AND conversation_id = ? AND tool_call_id = ?",
+                            ROW_MAPPER,
+                            retainedInvocation,
+                            conversation,
+                            entry.toolCallId());
+                    if (!recorded.isEmpty()) return recorded.getFirst();
+                  }
                   EntryRecord written =
                       jdbc.queryForObject(
                           INSERT,
@@ -2104,6 +2144,8 @@ public final class EntryStore implements ConversationSearchRepository {
                           job,
                           ToolObservationCodec.write(entry.observation()),
                           InputProvenanceCodec.write(entry.inputProvenance()),
+                          retainedInvocation,
+                          FileReadWindowCodec.write(entry.fileWindow()),
                           conversation);
                   if (entry.observation() != null) {
                     artifacts.retain(written, job);
@@ -2503,12 +2545,13 @@ public final class EntryStore implements ConversationSearchRepository {
             jdbc.query(
                 "SELECT "
                     + COLUMNS
+                    + DIRECT_ANSWER_COLUMN
                     + " FROM entries WHERE conversation_id = ?"
                     + " AND ((TRUE "
                     + THAT_PROJECT
                     + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
                     + IN_CONVERSATION_ORDER,
-                ROW_MAPPER,
+                PROJECTION_MAPPER,
                 conversation,
                 WebReleaseAudit.PREFIX + "%"));
   }
@@ -2632,7 +2675,8 @@ public final class EntryStore implements ConversationSearchRepository {
                     + " turns table and the log disagree about which turns"
                     + " this conversation had.");
           }
-          return jdbc.query(THAT_PROJECTED_AT, ROW_MAPPER, conversation, assembled, assembled);
+          return jdbc.query(
+              THAT_PROJECTED_AT, PROJECTION_MAPPER, conversation, assembled, assembled);
         });
   }
 
@@ -4057,30 +4101,37 @@ public final class EntryStore implements ConversationSearchRepository {
               rs.getString("fallback_reason"),
               rs.getObject("first_token_ms", Long.class));
 
-  private static final RowMapper<EntryRecord> ROW_MAPPER =
-      (rs, rowNum) ->
-          new EntryRecord(
-              rs.getString("conversation_id"),
-              rs.getInt("ordinal"),
-              EntryKind.of(rs.getString("kind")),
-              rs.getString("content"),
-              rs.getString("tool_call_id"),
-              read(rs.getString("tool_calls")),
-              rs.getObject("superseded_by", Integer.class),
-              rs.getObject("handle", UUID.class),
-              rs.getInt("turn_ordinal"),
-              instant(rs, "recorded_at"),
-              // getObject and not getLong, on superseded_by's reasoning and with a
-              // quieter failure than its one: getLong reads a SQL NULL as 0, and 0
-              // is a legitimate duration here -- an operation that finished inside
-              // a millisecond -- so an unmeasured entry would come back claiming to
-              // have been measured at nothing, which is exactly the confusion
-              // between an absence and a measurement this column was added to
-              // avoid.
-              rs.getObject("took_ms", Long.class),
-              instant(rs, "ejected_at"),
-              rs.getString("export"),
-              ToolObservationCodec.read(rs.getString("tool_observation")));
+  private static final RowMapper<EntryRecord> ROW_MAPPER = (rs, rowNum) -> entryRecord(rs, null);
+
+  private static final RowMapper<EntryRecord> PROJECTION_MAPPER =
+      (rs, rowNum) -> entryRecord(rs, rs.getObject("retained_answer", Integer.class));
+
+  private static EntryRecord entryRecord(ResultSet rs, Integer retainedAnswer) throws SQLException {
+    return new EntryRecord(
+        rs.getString("conversation_id"),
+        rs.getInt("ordinal"),
+        EntryKind.of(rs.getString("kind")),
+        rs.getString("content"),
+        rs.getString("tool_call_id"),
+        read(rs.getString("tool_calls")),
+        rs.getObject("superseded_by", Integer.class),
+        rs.getObject("handle", UUID.class),
+        rs.getInt("turn_ordinal"),
+        instant(rs, "recorded_at"),
+        // getObject and not getLong, on superseded_by's reasoning and with a
+        // quieter failure than its one: getLong reads a SQL NULL as 0, and 0
+        // is a legitimate duration here -- an operation that finished inside
+        // a millisecond -- so an unmeasured entry would come back claiming to
+        // have been measured at nothing, which is exactly the confusion
+        // between an absence and a measurement this column was added to
+        // avoid.
+        rs.getObject("took_ms", Long.class),
+        instant(rs, "ejected_at"),
+        rs.getString("export"),
+        ToolObservationCodec.read(rs.getString("tool_observation")),
+        FileReadWindowCodec.read(rs.getString("file_window")),
+        retainedAnswer);
+  }
 
   /*
    * OffsetDateTime on both sides and never java.sql.Timestamp, for the reason
@@ -4157,7 +4208,8 @@ public final class EntryStore implements ConversationSearchRepository {
               rs.getString("job_id"),
               rs.getObject("prompt_tokens", Integer.class),
               rs.getObject("completion_tokens", Integer.class),
-              rs.getObject("reasoning_tokens", Integer.class));
+              rs.getObject("reasoning_tokens", Integer.class),
+              FileReadWindowCodec.read(rs.getString("file_window")));
 
   private static final RowMapper<StoredResults.Result> LISTING_MAPPER =
       (rs, rowNum) ->

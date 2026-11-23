@@ -302,6 +302,8 @@ public final class FrameTypes {
    */
   public static final String CONVERSATION_TRAJECTORY = "conversation.trajectory";
 
+  public static final String CONVERSATION_TOOL_TRACE = "conversation.tool.trace";
+
   /**
    * What a conversation's prompt costs, and every part of it that cannot honestly be priced —
    * {@code GET /v1/conversations/&#123;id&#125;/context}. {@link ConversationContextHandler} is

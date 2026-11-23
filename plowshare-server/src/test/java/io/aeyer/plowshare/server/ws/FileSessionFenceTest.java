@@ -6,18 +6,40 @@ import static org.mockito.Mockito.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
+import io.aeyer.plowshare.protocol.FileResult;
+import io.aeyer.plowshare.protocol.FileSource;
+import io.aeyer.plowshare.protocol.Replacement;
+import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.frames.Code;
 import io.aeyer.plowshare.protocol.frames.Envelope;
 import io.aeyer.plowshare.protocol.frames.Outcome;
+import io.aeyer.plowshare.server.approvals.DirectFileCalls;
+import io.aeyer.plowshare.server.approvals.RetainedFileEffects;
+import io.aeyer.plowshare.server.approvals.RunCallResumption;
+import io.aeyer.plowshare.server.approvals.SuspendedRunCalls;
+import io.aeyer.plowshare.server.approvals.ToolEffectReceipt;
 import io.aeyer.plowshare.server.files.ClientWork;
+import io.aeyer.plowshare.server.files.FileContents;
+import io.aeyer.plowshare.server.files.FileMutationObservation;
+import io.aeyer.plowshare.server.files.FileReplyTimeoutException;
+import io.aeyer.plowshare.server.files.Grant;
+import io.aeyer.plowshare.server.files.Mode;
+import io.aeyer.plowshare.server.files.RemoteProvider;
+import io.aeyer.plowshare.server.files.Scope;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionGoneException;
+import io.aeyer.plowshare.server.files.VerifiedFileMutations;
 import io.aeyer.plowshare.server.reads.ReadAdmission;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.ProjectRoots;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -29,6 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.support.GenericApplicationContext;
@@ -50,15 +73,153 @@ class FileSessionFenceTest {
           Duration.ofSeconds(3));
 
   private WebSocketSession connect(String session, String account) throws Exception {
+    return connect(session, account, false);
+  }
+
+  private WebSocketSession connect(String session, String account, boolean source)
+      throws Exception {
     var socket = mock(WebSocketSession.class);
     when(socket.getUri())
-        .thenReturn(URI.create("ws://example.invalid/v1/files?session=" + session));
+        .thenReturn(
+            URI.create(
+                "ws://example.invalid/v1/files?session=" + session + (source ? "&source=1" : "")));
     var attributes = new ConcurrentHashMap<String, Object>();
     attributes.put(EventChannelHandler.HANDLE, account);
     when(socket.getAttributes()).thenReturn(attributes);
     when(socket.isOpen()).thenReturn(true);
     files.afterConnectionEstablished(socket);
     return socket;
+  }
+
+  private void answerSource(WebSocketSession socket, FileRequest request, Path file)
+      throws Exception {
+    byte[] content = Files.readAllBytes(file);
+    var source =
+        request.offset() == null
+            ? new FileSource(content.length, FileContents.sha256(content), null, null)
+            : new FileSource(
+                content.length,
+                null,
+                request.offset(),
+                Base64.getEncoder().encodeToString(content));
+    files.handleTextMessage(
+        socket, new TextMessage(json.writeValueAsString(FileReply.source(request.id(), source))));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_direct_edit_with_no_reply_is_unknown_and_never_replayed(
+      boolean applied, @TempDir Path root) throws Exception {
+    String session = "silent-direct";
+    var socket = connect(session, "owner", true);
+    var path = Files.writeString(root.resolve("note.txt"), "before\r\n");
+    var sent = new AtomicReference<String>();
+    var sends = new AtomicInteger();
+    doAnswer(
+            call -> {
+              var request =
+                  json.readValue(
+                      ((TextMessage) call.getArgument(0)).getPayload(), FileRequest.class);
+              if (FileRequest.SOURCE.equals(request.op())) {
+                assertNull(sent.get(), "No read-back can settle an edit whose reply was lost");
+                answerSource(socket, request, path);
+              } else {
+                assertEquals(FileRequest.EDIT, request.op());
+                sends.incrementAndGet();
+                sent.set(request.id());
+                if (applied) Files.writeString(path, "after\r\n");
+              }
+              return null;
+            })
+        .when(socket)
+        .sendMessage(any());
+
+    var store = mock(DirectFileCalls.class);
+    var tool = new ToolCall("call", "file_edit", "{}");
+    var invocation = "file_original";
+    when(store.claimDirect("log", 3, tool, "owner")).thenReturn(invocation);
+    var effects =
+        new RetainedFileEffects(store::recordEffect, store.claimDirect("log", 3, tool, "owner"));
+    var provider =
+        new RemoteProvider(files, session, List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)))
+            .forReviewedMutation();
+    var mutation = new VerifiedFileMutations(provider, effects);
+    var timeout =
+        assertThrows(FileReplyTimeoutException.class, () -> mutation.edit(path, "before", "after"));
+    assertTrue(effects.replyTimedOut(timeout));
+    var receipt = new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, sent.get());
+    var ordered = inOrder(store);
+    ordered.verify(store).claimDirect("log", 3, tool, "owner");
+    ordered
+        .verify(store)
+        .recordEffect(
+            invocation, new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_SENT, sent.get()));
+    ordered.verify(store).recordEffect(invocation, receipt);
+    assertEquals(ToolEffectReceipt.Effect.UNKNOWN, receipt.effect());
+
+    var replacement = connect(session, "owner", true);
+    RunCallResumption.reconcileDirect(
+        store,
+        new DirectFileCalls.Pending(invocation, 1, tool, receipt, null),
+        result -> {
+          assertEquals(receipt, result.effectReceipt());
+          assertEquals(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, result.text());
+        });
+    verify(store).complete(invocation, RunCallResumption.FILE_REPLY_TIMEOUT_RESULT);
+    verify(store).acknowledged(invocation);
+    assertEquals(1, sends.get());
+    verify(replacement, never()).sendMessage(any());
+    assertEquals(
+        applied ? "after\r\n" : "before\r\n", Files.readString(path, StandardCharsets.UTF_8));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_direct_edit_verifies_disk_bytes_even_when_the_reply_claims_success(
+      boolean applied, @TempDir Path root) throws Exception {
+    String session = "verify-direct";
+    var socket = connect(session, "owner", true);
+    var path = Files.writeString(root.resolve("note.txt"), "before\r\n");
+    var facts = Replacement.edit("before\r\n", "before", "after").result(path.toString());
+    var id = new AtomicReference<String>();
+    doAnswer(
+            call -> {
+              var request =
+                  json.readValue(
+                      ((TextMessage) call.getArgument(0)).getPayload(), FileRequest.class);
+              if (FileRequest.SOURCE.equals(request.op())) answerSource(socket, request, path);
+              else {
+                assertEquals(FileRequest.EDIT, request.op());
+                id.set(request.id());
+                if (applied) Files.writeString(path, "after\r\n");
+                files.handleTextMessage(
+                    socket,
+                    new TextMessage(
+                        json.writeValueAsString(FileReply.changed(request.id(), facts))));
+              }
+              return null;
+            })
+        .when(socket)
+        .sendMessage(any());
+    var observations = new ArrayList<FileMutationObservation>();
+    var provider =
+        new RemoteProvider(files, session, List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)))
+            .forReviewedMutation();
+    assertEquals(
+        facts,
+        new VerifiedFileMutations(provider, observations::add)
+            .edit(path, "before", "after")
+            .facts());
+    assertEquals(
+        List.of(
+            new FileMutationObservation(null, FileMutationObservation.Kind.ATTEMPTED),
+            new FileMutationObservation(id.get(), FileMutationObservation.Kind.SENT),
+            new FileMutationObservation(
+                id.get(),
+                applied
+                    ? FileMutationObservation.Kind.VERIFIED
+                    : FileMutationObservation.Kind.REPLY_UNVERIFIED)),
+        observations);
   }
 
   private void answerRoots(WebSocketSession socket) throws Exception {
@@ -257,6 +418,153 @@ class FileSessionFenceTest {
     assertThrows(SessionGoneException.class, () -> captured.ask(session, unsent));
     verify(work, never()).interrupted(session, unsent);
     verify(replacement.get(), never()).sendMessage(any());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_sent_mutation_without_a_reply_stays_unknown_through_retained_recovery(boolean peerApplied)
+      throws Exception {
+    String session = "silent-mutation";
+    String approval = "apr_silent";
+    var socket = connect(session, "owner");
+    var effectsApplied = new AtomicInteger();
+    var requestId = new AtomicReference<String>();
+    doAnswer(
+            invocation -> {
+              var frame = (TextMessage) invocation.getArgument(0);
+              var request = json.readValue(frame.getPayload(), FileRequest.class);
+              assertEquals(FileRequest.DELETE, request.op());
+              requestId.set(request.id());
+              if (peerApplied) effectsApplied.incrementAndGet();
+              return null; // The socket stays open and the peer supplies no reply.
+            })
+        .when(socket)
+        .sendMessage(any());
+
+    var store = mock(SuspendedRunCalls.class);
+    when(store.claim(approval)).thenReturn(true);
+    var provider =
+        new RemoteProvider(files, session, List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)))
+            .forReviewedMutation();
+    var tool = new ToolCall("tool_original", "file_delete", "{\"path\":\"/fixture/demo.txt\"}");
+    var waiting =
+        new SuspendedRunCalls.Call(
+            approval,
+            "conversation",
+            session,
+            "local",
+            tool,
+            "waiting",
+            "allowed",
+            "owner",
+            null,
+            null);
+    var original = new RunCallResumption(store);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            original.resumeWithReceipt(
+                waiting,
+                call -> {
+                  var effects = new RetainedFileEffects(store, call.approval());
+                  var timeout =
+                      assertThrows(
+                          FileReplyTimeoutException.class,
+                          () ->
+                              provider
+                                  .observeMutation(effects)
+                                  .delete(Path.of("/fixture/demo.txt")));
+                  assertTrue(effects.replyTimedOut(timeout));
+                  return effects.result(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT);
+                },
+                result -> {
+                  assertTrue(result.replyTimedOut());
+                  assertEquals(ToolEffectReceipt.Dispatch.SENT, result.effectReceipt().dispatch());
+                  assertEquals(ToolEffectReceipt.Effect.UNKNOWN, result.effectReceipt().effect());
+                  throw new IllegalStateException("Interrupted before writing Trajectory");
+                }));
+
+    var sent = new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_SENT, requestId.get());
+    var unknown = new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, requestId.get());
+    var ordered = inOrder(store, socket);
+    ordered.verify(store).claim(approval);
+    ordered.verify(socket).sendMessage(any());
+    ordered.verify(store).recordEffect(approval, sent);
+    ordered.verify(store).recordEffect(approval, unknown);
+    ordered.verify(store).complete(approval, RunCallResumption.FILE_REPLY_TIMEOUT_RESULT);
+    verify(store, never()).acknowledged(approval);
+
+    var replacement = connect(session, "owner");
+    var completed =
+        new SuspendedRunCalls.Call(
+            approval,
+            "conversation",
+            session,
+            "local",
+            tool,
+            "completed",
+            "used",
+            "owner",
+            null,
+            RunCallResumption.FILE_REPLY_TIMEOUT_RESULT,
+            "owner",
+            true,
+            unknown);
+    assertTrue(
+        new RunCallResumption(store)
+            .resumeWithReceipt(
+                completed,
+                call -> fail("A retained mutation may not be replayed"),
+                result -> {
+                  assertEquals(unknown, result.effectReceipt());
+                  assertEquals(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, result.text());
+                }));
+    verify(store).acknowledged(approval);
+    verify(store, times(1)).claim(approval);
+    verify(socket, times(1)).sendMessage(any());
+    verify(replacement, never()).sendMessage(any());
+    assertEquals(peerApplied ? 1 : 0, effectsApplied.get());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void only_a_reply_identifying_the_requested_file_confirms_the_effect(boolean matching)
+      throws Exception {
+    String session = "confirming-mutation";
+    var socket = connect(session, "owner");
+    Path path = Path.of("/fixture/demo.txt");
+    var confirmed = FileResult.deleted(matching ? path.toString() : "/fixture/other.txt", 12, 1);
+    var requestId = new AtomicReference<String>();
+    doAnswer(
+            invocation -> {
+              var frame = (TextMessage) invocation.getArgument(0);
+              var request = json.readValue(frame.getPayload(), FileRequest.class);
+              assertEquals(FileRequest.DELETE, request.op());
+              requestId.set(request.id());
+              files.handleTextMessage(
+                  socket,
+                  new TextMessage(
+                      json.writeValueAsString(FileReply.changed(request.id(), confirmed))));
+              return null;
+            })
+        .when(socket)
+        .sendMessage(any());
+    var observed = new ArrayList<FileMutationObservation>();
+    var provider =
+        new RemoteProvider(files, session, List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)))
+            .forReviewedMutation()
+            .observeMutation(observed::add);
+
+    assertEquals(confirmed, provider.delete(path).facts());
+    assertEquals(
+        List.of(
+            new FileMutationObservation(requestId.get(), FileMutationObservation.Kind.SENT),
+            new FileMutationObservation(
+                requestId.get(),
+                matching
+                    ? FileMutationObservation.Kind.CONFIRMED
+                    : FileMutationObservation.Kind.REPLY_UNVERIFIED)),
+        observed);
   }
 
   @Test

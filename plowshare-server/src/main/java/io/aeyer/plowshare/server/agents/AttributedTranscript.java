@@ -53,6 +53,11 @@ public record AttributedTranscript(
   }
 
   @Override
+  public ChatMessage projectedAnswer(int ordinal) {
+    return delegate.projectedAnswer(ordinal);
+  }
+
+  @Override
   public void record(LoggedEntry entry) {
     delegate.record(entry);
   }
@@ -65,6 +70,16 @@ public record AttributedTranscript(
   @Override
   public void recordDurably(LoggedEntry entry) {
     delegate.recordDurably(entry);
+  }
+
+  @Override
+  public Integer recordRetainedCallBatch(LoggedEntry answer) {
+    return delegate.recordRetainedCallBatch(answer);
+  }
+
+  @Override
+  public void recordRetainedResult(LoggedEntry entry, String invocation) {
+    delegate.recordRetainedResult(entry, invocation);
   }
 
   @Override

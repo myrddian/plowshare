@@ -94,4 +94,39 @@ class ApprovalProjectionTest {
             .map(EntryRecord::content)
             .toList());
   }
+
+  @Test
+  void a_late_journaled_result_returns_to_its_own_batch_after_an_id_is_reused() {
+    var first = entry(1, EntryKind.ANSWER, "");
+    var second = entry(2, EntryKind.ANSWER, "");
+    var laterResult = entry(3, EntryKind.TOOL_RESULT, "Later result");
+    var recovered =
+        new EntryRecord(
+            first.conversationId(),
+            4,
+            EntryKind.TOOL_RESULT,
+            "Recovered result",
+            "call_1",
+            List.of(),
+            null,
+            null,
+            2,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            first.ordinal());
+    var messages =
+        Projection.of(
+            ApprovalProjection.settledResults(List.of(first, second, laterResult, recovered)),
+            false);
+    assertEquals(
+        List.of("Recovered result", "Later result"),
+        messages.stream()
+            .filter(message -> message.role() == ChatMessage.Role.TOOL)
+            .map(ChatMessage::content)
+            .toList());
+  }
 }

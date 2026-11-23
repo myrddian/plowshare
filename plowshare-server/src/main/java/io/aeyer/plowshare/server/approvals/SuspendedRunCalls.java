@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.approvals;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -12,7 +13,8 @@ import java.util.Optional;
  */
 public interface SuspendedRunCalls {
   /**
-   * One retained call. A started call without a result has uncertain effects and must not replay.
+   * One retained call. A started call without a result must not replay. Its receipt can establish a
+   * more precise effect than the claim alone.
    */
   record Call(
       String approval,
@@ -26,7 +28,69 @@ public interface SuspendedRunCalls {
       String denialReason,
       String result,
       String owner,
-      boolean released) {
+      boolean released,
+      ToolEffectReceipt effectReceipt,
+      FileReadWindow fileWindow) {
+    public Call(
+        String approval,
+        String conversation,
+        String session,
+        String side,
+        ToolCall tool,
+        String state,
+        String decision,
+        String answeredBy,
+        String denialReason,
+        String result,
+        String owner,
+        boolean released,
+        ToolEffectReceipt effectReceipt) {
+      this(
+          approval,
+          conversation,
+          session,
+          side,
+          tool,
+          state,
+          decision,
+          answeredBy,
+          denialReason,
+          result,
+          owner,
+          released,
+          effectReceipt,
+          null);
+    }
+
+    public Call(
+        String approval,
+        String conversation,
+        String session,
+        String side,
+        ToolCall tool,
+        String state,
+        String decision,
+        String answeredBy,
+        String denialReason,
+        String result,
+        String owner,
+        boolean released) {
+      this(
+          approval,
+          conversation,
+          session,
+          side,
+          tool,
+          state,
+          decision,
+          answeredBy,
+          denialReason,
+          result,
+          owner,
+          released,
+          null);
+    }
+
     public Call(
         String approval,
         String conversation,
@@ -110,6 +174,16 @@ public interface SuspendedRunCalls {
       String owner,
       ToolCall tool);
 
+  /** Retain the exact recorded answer that declared the call. Null is reserved for legacy paths. */
+  void retainAt(
+      String approval,
+      String conversation,
+      String session,
+      String side,
+      String owner,
+      ToolCall tool,
+      Integer answerOrdinal);
+
   /** Unacknowledged calls in their original order, including results awaiting transcript append. */
   List<Call> pending(String conversation);
 
@@ -126,11 +200,17 @@ public interface SuspendedRunCalls {
    */
   boolean claim(String approval);
 
+  /** Retain an observation of the claimed call without changing its payload or execution fence. */
+  void recordEffect(String approval, ToolEffectReceipt receipt);
+
   /** Release only after approval.post has been told, including its documented fail-open path. */
   void release(String approval);
 
   /** Retain the final model-visible result before appending it to the conversation. */
   void complete(String approval, String result);
+
+  /** Retain both the exact payload (including empty text) and its independent window facts. */
+  void completeRead(String approval, String result, FileReadWindow window);
 
   /** The result has been durably appended; a retry may not dispatch the command again. */
   void acknowledged(String approval);

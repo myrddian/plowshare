@@ -97,6 +97,12 @@ export type {
   AgentRunRequestEx,
 } from './catalog.ts';
 export type { Replies } from './replies.ts';
+export type {
+  ToolEffectReceiptView,
+  ToolCallTrace,
+  ToolTraceView,
+  FileReadWindow,
+} from './conversation-replies.ts';
 export type { JobView, JobOutcome } from '../binding/job-view.ts';
 
 export {

@@ -21,7 +21,9 @@ import io.aeyer.plowshare.server.approvals.ActiveRunApprovals;
 import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
 import io.aeyer.plowshare.server.approvals.ApprovalReviewSessions;
 import io.aeyer.plowshare.server.approvals.BudgetExtension;
+import io.aeyer.plowshare.server.approvals.DirectFileCalls;
 import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
+import io.aeyer.plowshare.server.approvals.RetainedFileEffects;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.approvals.RunCallResumption;
@@ -32,6 +34,8 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.embedding.QueryEmbeddings;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.CodeWorkspaceMonitor;
+import io.aeyer.plowshare.server.files.FileReadWindow;
+import io.aeyer.plowshare.server.files.FileReplyTimeoutException;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.RunProviders;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -886,6 +890,7 @@ public final class JobRuntime {
   }
 
   private volatile SuspendedRunCalls suspendedRunCalls;
+  private volatile DirectFileCalls directFileCalls;
   private volatile ActiveRunApprovals activeRunApprovals = new ActiveRunApprovals();
 
   public void useActiveRunApprovals(ActiveRunApprovals active) {
@@ -898,6 +903,10 @@ public final class JobRuntime {
 
   public void useSuspendedRunCalls(SuspendedRunCalls calls) {
     suspendedRunCalls = Objects.requireNonNull(calls);
+  }
+
+  public void useDirectFileCalls(DirectFileCalls calls) {
+    directFileCalls = Objects.requireNonNull(calls);
   }
 
   private volatile Function<String, Optional<ConversationRecord>> approvalRoots =
@@ -3517,8 +3526,45 @@ public final class JobRuntime {
           watch);
     }
     List<String> trail = new ArrayList<>();
+    // Only the continuation owner of a stopped turn can settle its pending calls. An unrelated
+    // message-driven run in the same conversation could otherwise settle a still-live mutation.
+    Integer stoppedTurn = transcript.continuingTurn();
+    if (directFileCalls != null && stoppedTurn != null && transcript.conversationId() != null) {
+      try {
+        for (var pending :
+            directFileCalls.pendingDirect(transcript.conversationId(), stoppedTurn)) {
+          RunCallResumption.reconcileDirect(
+              directFileCalls,
+              pending,
+              result -> {
+                transcript.recordRetainedResult(
+                    LoggedEntry.toolResult(pending.tool().id(), result.text())
+                        .told(
+                            pending.result() == null
+                                ? ToolLines.ERROR
+                                : retainedOutcome(pending.tool().name(), result)),
+                    pending.invocation());
+                replaceDirectResult(
+                    history,
+                    transcript.projectedAnswer(pending.answerOrdinal()),
+                    pending.tool(),
+                    ChatMessage.tool(pending.tool().id(), result.text()));
+              });
+        }
+      } catch (RuntimeException failed) {
+        failures.report(FailureReporter.Source.RUNTIME, failed);
+        return stopped(
+            Ending.UNAVAILABLE,
+            "The original file result could not be reconciled. No mutation was replayed.",
+            trail,
+            0,
+            0,
+            describe(failed));
+      }
+    }
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
       var resumption = new RunCallResumption(suspendedRunCalls);
+      List<String> readNotes = new ArrayList<>();
       for (var pending : suspendedRunCalls.pending(transcript.conversationId())) {
         var pendingTool = pending.tool();
         WebToolSecurity.Bound pendingWeb =
@@ -3529,7 +3575,7 @@ public final class JobRuntime {
           if (pending.released() && !RunApproval.ASKED.equals(pending.decision()))
             recordApprovalDecision(pending.approval(), transcript);
           resumed =
-              resumption.resume(
+              resumption.resumeWithReceipt(
                   pending,
                   retained -> {
                     RunActivity.Call resumedActivity =
@@ -3540,7 +3586,7 @@ public final class JobRuntime {
                             () ->
                                 ToolLines.salient(
                                     pending.tool().name(), retained.tool().arguments()));
-                    String completed =
+                    RunCallResumption.Result completed =
                         resumeRunCall(
                             retained,
                             offered,
@@ -3554,21 +3600,26 @@ public final class JobRuntime {
                             skillChecks,
                             watch,
                             resumedActivity,
-                            operation);
-                    resumedActivity.returned(ToolLines.outcome(pending.tool().name(), completed));
+                            operation,
+                            readNotes);
+                    resumedActivity.returned(retainedOutcome(pending.tool().name(), completed));
                     return completed;
                   },
                   result -> {
-                    transcript.recordDurably(
-                        LoggedEntry.toolResult(pending.tool().id(), result)
-                            .told(ToolLines.outcome(pending.tool().name(), result)));
+                    transcript.recordRetainedResult(
+                        LoggedEntry.toolResult(pending.tool().id(), result.text())
+                            .told(retainedOutcome(pending.tool().name(), result))
+                            .windowed(result.fileWindow()),
+                        pending.approval());
                     if (pendingWeb != null) pendingWeb.resultRecorded();
                     replaceRetainedResult(
                         history,
                         pendingTool,
                         pendingWeb == null
-                            ? ChatMessage.tool(pendingTool.id(), result)
-                            : pendingWeb.projectRetained(pendingTool.id(), result));
+                            ? fileToolMessage(pendingTool.id(), result.text(), result.fileWindow())
+                            : pendingWeb.projectRetained(pendingTool.id(), result.text()));
+                    if (result.fileWindow() != null)
+                      readNotes.add(result.fileWindow().note(pendingTool.id()));
                   });
         } catch (RuntimeException interrupted) {
           failures.report(FailureReporter.Source.RUNTIME, interrupted);
@@ -3590,6 +3641,10 @@ public final class JobRuntime {
               0,
               "");
         trail.add(RunTool.NAME);
+      }
+      for (String note : readNotes) {
+        history.add(ChatMessage.user(note));
+        transcript.record(LoggedEntry.runtimeNote(note));
       }
     }
     // An explicit resume repairs the exact interrupted child before asking the parent model.
@@ -4568,16 +4623,24 @@ public final class JobRuntime {
                 .anyMatch(
                     wanted -> {
                       AgentTool tool = offered.get(wanted.name());
-                      return tool instanceof AgentTool.ContentTool typed
+                      return !FileTools.READ_NAME.equals(wanted.name())
+                          && tool instanceof AgentTool.ContentTool typed
                           && typed.typedResults(home);
                     });
-        if (typedResults
-            || retainsBudget
-            || (suspendedRunCalls != null
-                && transcript.conversationId() != null
-                && asked.stream().anyMatch(wanted -> RunTool.NAME.equals(wanted.name())))) {
+        boolean canRetain =
+            transcript.conversationId() != null
+                && asked.stream()
+                    .anyMatch(
+                        wanted -> {
+                          var tool = offered.get(wanted.name());
+                          return (suspendedRunCalls != null && tool instanceof RetainedApprovalTool)
+                              || directFileMutation(tool, wanted.name()) != null;
+                        });
+        Integer answerOrdinal = null;
+        if (typedResults || retainsBudget || canRetain) {
           try {
-            transcript.recordDurably(requestedCall);
+            if (canRetain) answerOrdinal = transcript.recordRetainedCallBatch(requestedCall);
+            else transcript.recordDurably(requestedCall);
           } catch (RuntimeException unrecorded) {
             return stopped(
                 Ending.UNAVAILABLE,
@@ -4679,6 +4742,10 @@ public final class JobRuntime {
                   transcript.conversationId(), budget, definition, sessionId, transcript);
             Instant askedAt = clock.get();
             String result;
+            FileReadWindow fileWindow = null;
+            boolean fileReadCodeHint = false;
+            String directInvocation = null;
+            RetainedFileEffects directEffects = null;
             List<HookRecord> toolRecords = new ArrayList<>();
             String fenced =
                 tool == null ? null : extras.fence().refusal(wanted.name(), wanted.arguments());
@@ -4755,7 +4822,7 @@ public final class JobRuntime {
                   && suspendedRunCalls != null) {
                 var question = run.waitingApproval().orElseThrow();
                 String approval = question.id();
-                suspendedRunCalls.retain(
+                suspendedRunCalls.retainAt(
                     approval,
                     transcript.conversationId(),
                     sessionId,
@@ -4764,7 +4831,8 @@ public final class JobRuntime {
                     new ToolCall(
                         wanted.id(),
                         wanted.name(),
-                        run.retainedArguments(preTool.arguments(), home)));
+                        run.retainedArguments(preTool.arguments(), home)),
+                    answerOrdinal);
                 // The model's original stack, including all delegated parents and sibling calls,
                 // remains suspended. Neither waiting nor an approval answer enters its prompt.
                 toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
@@ -4772,10 +4840,10 @@ public final class JobRuntime {
                 String root = question.conversation();
                 var resumption = new RunCallResumption(suspendedRunCalls);
                 var executedAt = new AtomicReference<Instant>();
-                Optional<String> output;
+                Optional<RunCallResumption.Result> output;
                 try {
                   output =
-                      resumption.await(
+                      resumption.awaitWithReceipt(
                           approval,
                           root,
                           activeRunApprovals,
@@ -4802,16 +4870,19 @@ public final class JobRuntime {
                                 skillChecks,
                                 watch,
                                 recording,
-                                operation);
+                                operation,
+                                notes);
                           },
-                          text -> {
-                            transcript.recordDurably(
-                                LoggedEntry.toolResult(wanted.id(), text)
-                                    .told(ToolLines.outcome(wanted.name(), text))
+                          settled -> {
+                            transcript.recordRetainedResult(
+                                LoggedEntry.toolResult(wanted.id(), settled.text())
+                                    .told(retainedOutcome(wanted.name(), settled))
                                     .took(
                                         executedAt.get() == null
                                             ? Duration.ZERO
-                                            : Duration.between(executedAt.get(), clock.get())));
+                                            : Duration.between(executedAt.get(), clock.get()))
+                                    .windowed(settled.fileWindow()),
+                                approval);
                             if (tool instanceof WebToolSecurity.Bound web) web.resultRecorded();
                           });
                 } catch (RuntimeException interrupted) {
@@ -4856,13 +4927,16 @@ public final class JobRuntime {
                   return stopped(Ending.CANCELLED, cancelledResult, trail, steps, modelCalls, "");
                 }
                 extras.end().approvalResumed(approval);
-                result = output.get();
+                var retainedResult = output.orElseThrow();
+                result = retainedResult.text();
                 history.add(
                     tool instanceof WebToolSecurity.Bound web
                         ? web.project(wanted.id(), result)
-                        : ChatMessage.tool(wanted.id(), result));
+                        : fileToolMessage(wanted.id(), result, retainedResult.fileWindow()));
+                if (retainedResult.fileWindow() != null)
+                  notes.add(retainedResult.fileWindow().note(wanted.id()));
                 results.add(result);
-                told = ToolLines.outcome(RunTool.NAME, result);
+                told = retainedOutcome(wanted.name(), retainedResult);
                 outcomes.add(told);
                 recording.returned(told);
                 if (executedAt.get() != null) trail.add(RunTool.NAME);
@@ -4919,11 +4993,48 @@ public final class JobRuntime {
                   // Internal grants come from the admitted definition. External provider proxies
                   // recheck their additional authority inside run, alongside tool-owned access
                   // checks.
-                  if (tool instanceof AgentTool.ContentTool typed && typed.typedResults(home)) {
+                  var file = directFileMutation(tool, wanted.name());
+                  if (file != null && transcript.conversationId() != null) {
+                    try {
+                      if (answerOrdinal == null)
+                        throw new IllegalStateException(
+                            "The original file declaration has no ordinal");
+                      directInvocation =
+                          directFileCalls.claimDirect(
+                              transcript.conversationId(), answerOrdinal, wanted, callerHandle);
+                    } catch (RuntimeException unclaimed) {
+                      recording.returned(ToolLines.ERROR);
+                      return stopped(
+                          Ending.UNAVAILABLE,
+                          "The original file call could not be claimed. No mutation was sent.",
+                          trail,
+                          steps - 1,
+                          modelCalls,
+                          describe(unclaimed));
+                    }
+                    directEffects =
+                        new RetainedFileEffects(directFileCalls::recordEffect, directInvocation);
+                    var usage =
+                        transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
+                            ? UsageAttribution.LEGACY
+                            : usageFor(transcript, definition, steps);
+                    result =
+                        usable(
+                            file.runVerifyingMutation(
+                                preTool.arguments(), home, usage, directEffects),
+                            wanted.name());
+                    directEffects.settleBeforeDispatch();
+                  } else if (tool instanceof AgentTool.ContentTool typed
+                      && typed.typedResults(home)) {
                     AgentTool.Result returned =
                         typed.runResult(
                             preTool.arguments(), home, usageFor(transcript, definition, steps));
-                    result = usable(returned.text(), wanted.name());
+                    fileWindow = returned.fileWindow();
+                    fileReadCodeHint = returned.fileReadCodeHint();
+                    result =
+                        fileWindow == null
+                            ? usable(returned.text(), wanted.name())
+                            : returned.text();
                     observation =
                         returned.observation() == null
                             ? null
@@ -4963,6 +5074,7 @@ public final class JobRuntime {
                     // returned reaches the model or a hook. The run ends at the next
                     // step's check, as it would for any other revocation.
                     result = withheldForAuthority(wanted.name());
+                    fileWindow = null;
                     told = ToolLines.ERROR;
                   } else {
                     ToolPost postTool =
@@ -4978,7 +5090,14 @@ public final class JobRuntime {
                     // Through usable again: a hook that redacts to nothing
                     // must not hand the model the blank result usable
                     // exists to replace.
-                    result = usable(postTool.result(), wanted.name());
+                    boolean withheldWindow =
+                        fileWindow != null
+                            && (withheld(postTool) || !result.equals(postTool.result()));
+                    if (withheldWindow) {
+                      result = FileReadWindow.WITHHELD;
+                      fileWindow = null;
+                    } else if (fileWindow == null)
+                      result = usable(postTool.result(), wanted.name());
                     if (tool instanceof WebToolSecurity.Bound web)
                       result = web.finish(result, withheld(postTool));
                     if (observation != null)
@@ -4990,12 +5109,15 @@ public final class JobRuntime {
                     Outcome.Ending delegate =
                         tool instanceof AgentRunTool runner ? runner.returned() : null;
                     told =
-                        withheld(postTool)
+                        withheldWindow
+                                || withheld(postTool)
                                 || (tool instanceof WebToolSecurity.Bound web && web.withheld())
                             ? ToolLines.ERROR
                             : delegate != null
                                 ? ToolLines.delegation(delegate)
-                                : ToolLines.outcome(wanted.name(), result);
+                                : fileWindow != null
+                                    ? ToolLines.OK
+                                    : ToolLines.outcome(wanted.name(), result);
                   }
                 } catch (AgentRunTool.SubAgentFailed child) {
                   // Ordinary child model failures are tool results. An owning-session
@@ -5022,13 +5144,20 @@ public final class JobRuntime {
                       steps - 1,
                       modelCalls,
                       child.detail());
+                } catch (FileReplyTimeoutException timeout) {
+                  if (directEffects == null || !directEffects.replyTimedOut(timeout)) throw timeout;
+                  failures.report(FailureReporter.Source.RUNTIME, timeout);
+                  result = RunCallResumption.FILE_REPLY_TIMEOUT_RESULT;
+                  told = ToolLines.ERROR;
                 } catch (OperationFence.Withdrawn withdrawn) {
                   // The tool's in-transaction write fence refused: its transaction rolled back,
                   // but earlier committed units (a receipt, a log) may stand. Same words as the
                   // after-tool check, never the tool's own "refused", and tool.post is skipped.
                   result = withheldForAuthority(wanted.name());
+                  fileWindow = null;
                   told = ToolLines.ERROR;
                 } catch (RuntimeException failed) {
+                  fileWindow = null;
                   if (failed instanceof ReadUnavailableException
                       || failed instanceof ReadFailedException)
                     failures.report(FailureReporter.Source.RUNTIME, failed);
@@ -5103,7 +5232,11 @@ public final class JobRuntime {
             history.add(
                 tool instanceof WebToolSecurity.Bound web
                     ? web.project(wanted.id(), result)
-                    : ChatMessage.tool(wanted.id(), result));
+                    : fileToolMessage(wanted.id(), result, fileWindow));
+            if (fileWindow != null) {
+              notes.add(fileWindow.note(wanted.id()));
+              if (fileReadCodeHint) notes.add(FileTools.Read.CODE_HINT);
+            }
             results.add(result);
             outcomes.add(told);
             // Recorded where it is appended, so that the four returns above
@@ -5116,8 +5249,25 @@ public final class JobRuntime {
                 LoggedEntry.toolResult(wanted.id(), result)
                     .observing(observation)
                     .told(told)
-                    .took(toolTook);
-            if (tool instanceof RequestBudgetTool requestTool) {
+                    .took(toolTook)
+                    .windowed(fileWindow);
+            if (directInvocation != null) {
+              try {
+                directFileCalls.complete(directInvocation, result);
+                transcript.recordRetainedResult(toolEntry, directInvocation);
+                directFileCalls.acknowledged(directInvocation);
+              } catch (RuntimeException unrecorded) {
+                failures.report(FailureReporter.Source.RUNTIME, unrecorded);
+                recording.returned(ToolLines.ERROR);
+                return stopped(
+                    Ending.UNAVAILABLE,
+                    "The original file result needs recovery. No mutation was replayed.",
+                    trail,
+                    steps - 1,
+                    modelCalls,
+                    describe(unrecorded));
+              }
+            } else if (tool instanceof RequestBudgetTool requestTool) {
               transcript.recordDurably(toolEntry);
               if (requestTool.pending())
                 return new Outcome(
@@ -5128,7 +5278,9 @@ public final class JobRuntime {
                 && transcript.conversationId() != null) {
               transcript.recordDurably(toolEntry);
               web.resultRecorded();
-            } else if (retainsBudget && observation == null) transcript.recordDurably(toolEntry);
+            } else if ((retainsBudget && observation == null)
+                || (fileWindow != null && transcript.conversationId() != null))
+              transcript.recordDurably(toolEntry);
             else if (observation == null) transcript.record(toolEntry);
             else {
               try {
@@ -5329,7 +5481,7 @@ public final class JobRuntime {
   /**
    * Execute one retained run through the same authority, environment and hook fences as a new call.
    */
-  private String resumeRunCall(
+  private RunCallResumption.Result resumeRunCall(
       SuspendedRunCalls.Call retained,
       Map<String, AgentTool> offered,
       Home home,
@@ -5342,12 +5494,18 @@ public final class JobRuntime {
       Hooks skillChecks,
       JobWatch watch,
       RunActivity.Call recording,
-      OperationAuthority.Admission operation) {
-    if (cancelled.getAsBoolean())
-      return "The retained command was cancelled before execution; nothing ran.";
+      OperationAuthority.Admission operation,
+      List<String> notes) {
+    var effects = new RetainedFileEffects(suspendedRunCalls, retained.approval());
+    if (cancelled.getAsBoolean()) {
+      effects.refusedBeforeDispatch();
+      return effects.result("The retained command was cancelled before execution; nothing ran.");
+    }
     AgentTool held = offered.get(retained.tool().name());
-    if (!(held instanceof RetainedApprovalTool run))
-      return "The retained tool is no longer granted; nothing ran.";
+    if (!(held instanceof RetainedApprovalTool run)) {
+      effects.refusedBeforeDispatch();
+      return effects.result("The retained tool is no longer granted; nothing ran.");
+    }
     admittedAuthority.run();
     if (operation != null) operations.require(operation);
     if (confined)
@@ -5357,6 +5515,8 @@ public final class JobRuntime {
     run.retainedApproval(retained.approval());
     Instant started = clock.get();
     String result;
+    FileReadWindow fileWindow = null;
+    boolean fileReadCodeHint = false;
     try {
       ToolPre checked;
       try {
@@ -5375,11 +5535,14 @@ public final class JobRuntime {
       } catch (WorkspaceRefusedException refused) {
         // The approval was claimed, but preflight refused before dispatch. Settle the retained
         // call with the provider's guidance so the model can correct its path.
-        return refused.getMessage() + " The approved tool did not run.";
+        effects.refusedBeforeDispatch();
+        return effects.result(refused.getMessage() + " The approved tool did not run.");
       }
       checked.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
-      if (checked.isDenied()) result = "The retained command was refused: " + checked.denied();
-      else {
+      if (checked.isDenied()) {
+        effects.refusedBeforeDispatch();
+        result = "The retained command was refused: " + checked.denied();
+      } else {
         admittedAuthority.run();
         // An approval grants consent for this command, not fresh account authority. Recheck
         // the retained operation after the wait and after tool.pre has rewritten its input.
@@ -5387,12 +5550,26 @@ public final class JobRuntime {
         requireOperationTool(operation, home, retained.tool().name(), checked.arguments());
         run.calledAs(retained.tool().id());
         watch.toolCalled(definition.name(), retained.tool().name());
-        result =
-            usable(
-                transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED
-                    ? run.run(checked.arguments(), home)
-                    : run.run(checked.arguments(), home, usageFor(transcript, definition, 0)),
-                retained.tool().name());
+        boolean legacy = transcript.usage().status() == UsageAttribution.Status.LEGACY_UNATTRIBUTED;
+        var usage = legacy ? UsageAttribution.LEGACY : usageFor(transcript, definition, 0);
+        if (run instanceof ReviewedFileTool file) {
+          if (FileTools.READ_NAME.equals(retained.tool().name())) {
+            var read = file.runResult(checked.arguments(), home, usage);
+            fileWindow = read.fileWindow();
+            fileReadCodeHint = read.fileReadCodeHint();
+            result = fileWindow == null ? usable(read.text(), retained.tool().name()) : read.text();
+          } else
+            result =
+                usable(
+                    file.runObservingMutation(checked.arguments(), home, usage, effects),
+                    retained.tool().name());
+        } else
+          result =
+              usable(
+                  legacy
+                      ? run.run(checked.arguments(), home)
+                      : run.run(checked.arguments(), home, usage),
+                  retained.tool().name());
         admittedAuthority.run();
         ToolPost after =
             toolPost(
@@ -5404,9 +5581,21 @@ public final class JobRuntime {
                 checked.arguments(),
                 result);
         after.records().forEach(r -> transcript.record(LoggedEntry.hook(r)));
-        result = usable(after.result(), retained.tool().name());
+        if (fileWindow == null) result = usable(after.result(), retained.tool().name());
+        else if (withheld(after) || !result.equals(after.result())) {
+          result = FileReadWindow.WITHHELD;
+          fileWindow = null;
+        }
         if (run instanceof WebToolSecurity.Bound web) result = web.finish(result, withheld(after));
       }
+    } catch (FileReplyTimeoutException timeout) {
+      // A preflight/read timeout cannot attest that the mutation was sent.
+      if (!effects.replyTimedOut(timeout)) {
+        recording.returned(ToolLines.ERROR);
+        throw timeout;
+      }
+      failures.report(FailureReporter.Source.RUNTIME, timeout);
+      result = RunCallResumption.FILE_REPLY_TIMEOUT_RESULT;
     } catch (RuntimeException failed) {
       // A lost bridge can mean a command ran but its response was lost. Do not manufacture a
       // retryable tool error. The durable started fence remains authoritative for no-replay.
@@ -5420,7 +5609,30 @@ public final class JobRuntime {
                 + " settled after "
                 + Duration.between(started, clock.get()).toMillis()
                 + " ms"));
-    return result;
+    // Navigation advice is transient and only queued when the original text can be disclosed.
+    if (fileWindow != null && fileReadCodeHint) notes.add(FileTools.Read.CODE_HINT);
+    return new RunCallResumption.Result(result, effects.result(result).effectReceipt(), fileWindow);
+  }
+
+  private static String retainedOutcome(String tool, RunCallResumption.Result result) {
+    if (result.fileWindow() != null) return ToolLines.OK;
+    return result.replyTimedOut() || FileReadWindow.WITHHELD.equals(result.text())
+        ? ToolLines.ERROR
+        : ToolLines.outcome(tool, result.text());
+  }
+
+  private static ChatMessage fileToolMessage(String call, String text, FileReadWindow window) {
+    return window == null ? ChatMessage.tool(call, text) : ChatMessage.losslessTool(call, text);
+  }
+
+  private FileTools.VerifiableMutation directFileMutation(AgentTool tool, String name) {
+    return directFileCalls != null
+            && tool instanceof FileTools.VerifiableMutation file
+            && (FileTools.EDIT_NAME.equals(name)
+                || FileTools.DELETE_NAME.equals(name)
+                || FileTools.MOVE_NAME.equals(name))
+        ? file
+        : null;
   }
 
   /** Replace the suspended result in its original slot; never invent another assistant call. */
@@ -5430,21 +5642,38 @@ public final class JobRuntime {
       if (history.get(i).toolCalls().stream()
           .noneMatch(call -> call.id().equals(tool.id()) && call.name().equals(tool.name())))
         continue;
-      int slot = i + 1;
-      while (slot < history.size() && history.get(slot).role() == ChatMessage.Role.TOOL) {
-        if (tool.id().equals(history.get(slot).toolCallId())) {
-          history.set(slot, result);
-          return;
-        }
-        slot++;
-      }
-      history.add(slot, result);
+      replaceInBatch(history, i + 1, tool, result);
       return;
     }
     // Some agents deliberately omit previous tool working from their projection. Reinstate the
     // original request/result pair in that case, without submitting another inference.
     history.add(ChatMessage.assistant("", List.of(tool)));
     history.add(result);
+  }
+
+  private static void replaceDirectResult(
+      List<ChatMessage> history, ChatMessage declaration, ToolCall tool, ChatMessage result) {
+    for (int i = 0; i < history.size(); i++) {
+      // Identity matters even if another turn used exactly the same payload and wire ID.
+      if (history.get(i) == declaration) {
+        replaceInBatch(history, i + 1, tool, result);
+        return;
+      }
+    }
+    history.add(ChatMessage.assistant("", List.of(tool)));
+    history.add(result);
+  }
+
+  private static void replaceInBatch(
+      List<ChatMessage> history, int slot, ToolCall tool, ChatMessage result) {
+    while (slot < history.size() && history.get(slot).role() == ChatMessage.Role.TOOL) {
+      if (tool.id().equals(history.get(slot).toolCallId())) {
+        history.set(slot, result);
+        return;
+      }
+      slot++;
+    }
+    history.add(slot, result);
   }
 
   // --- what the agent may reach ------------------------------------------------

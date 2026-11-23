@@ -297,6 +297,14 @@ public final class Projection {
    */
   public static List<ChatMessage> of(
       List<EntryRecord> log, boolean canList, Superseded superseded) {
+    return of(log, canList, superseded, null);
+  }
+
+  static List<ChatMessage> of(
+      List<EntryRecord> log,
+      boolean canList,
+      Superseded superseded,
+      Map<Integer, ChatMessage> answers) {
     Objects.requireNonNull(log, "log");
     Objects.requireNonNull(superseded, "superseded");
     List<ChatMessage> messages = new ArrayList<>();
@@ -374,6 +382,8 @@ public final class Projection {
                   release);
       }
       messages.add(projected);
+      if (answers != null && entry.kind() == EntryKind.ANSWER && !entry.toolCalls().isEmpty())
+        answers.put(entry.ordinal(), projected);
       if (entry.kind() == EntryKind.SUMMARY) {
         // A summary carries the last turn it stands for as its own turn
         // ordinal, and the log is read in conversation order, so this is
@@ -404,7 +414,9 @@ public final class Projection {
       }
       case TOOL_RESULT -> {
         unanswered.remove(entry.toolCallId());
-        yield ChatMessage.tool(entry.toolCallId(), entry.content());
+        yield entry.fileWindow() == null || entry.content() == null
+            ? ChatMessage.tool(entry.toolCallId(), entry.content())
+            : ChatMessage.losslessTool(entry.toolCallId(), entry.content());
       }
       case SUMMARY ->
           ChatMessage.system(

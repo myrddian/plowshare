@@ -2,6 +2,64 @@ import { describe, expect, it } from 'vitest';
 import type { Entry } from './client-views.ts';
 import { modelContextOf, stepsOf, turnsOf } from './trajectory.ts';
 
+it('attaches the receipt and exact result to the original call across reused model IDs', () => {
+  const call = {
+    id: 'edit',
+    name: 'file_edit',
+    arguments: '{}',
+    cut: false,
+    length: 2,
+  };
+  const receipt = {
+    invocationId: 'apr_old',
+    observation: 'FILE_REPLY_TIMEOUT',
+    dispatch: 'SENT',
+    effect: 'UNKNOWN',
+    resultOrdinal: 3,
+  } as const;
+  const result = '  {"error":"raw result"}\n';
+  const steps = stepsOf([
+    {
+      ordinal: 1,
+      turnOrdinal: 1,
+      kind: 'answer',
+      state: 'stands',
+      calls: [call],
+    },
+    {
+      ordinal: 2,
+      turnOrdinal: 2,
+      kind: 'answer',
+      state: 'stands',
+      calls: [call],
+    },
+    {
+      ordinal: 3,
+      turnOrdinal: 2,
+      kind: 'tool_result',
+      state: 'stands',
+      toolCallId: 'edit',
+      text: result,
+      retainedToolResult: { answerOrdinal: 1, effectReceipt: receipt },
+    },
+    {
+      ordinal: 4,
+      turnOrdinal: 2,
+      kind: 'tool_result',
+      state: 'stands',
+      toolCallId: 'edit',
+      text: 'later result',
+    },
+  ]);
+  expect(steps).toHaveLength(2);
+  expect(steps[0]).toMatchObject({
+    effectReceipt: receipt,
+    result: { text: result },
+  });
+  expect(steps[1]).toMatchObject({ result: { text: 'later result' } });
+  expect(steps[1]).not.toHaveProperty('effectReceipt');
+});
+
 describe('human trajectory after model compaction', () => {
   it('retains folded messages and paired tool results across repeated folds', () => {
     const entries: Entry[] = [

@@ -22,6 +22,8 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.api.ApiExceptionHandler;
 import io.aeyer.plowshare.server.api.ConversationController;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
+import io.aeyer.plowshare.server.approvals.ToolCallTraces;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationLifecycle;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
@@ -129,7 +131,9 @@ class ConversationTurnsHandlerTest {
                         mock(Callers.class),
                         LogStages.NONE,
                         org.mockito.Mockito.mock(
-                            io.aeyer.plowshare.server.agents.CallerAccess.class))));
+                            io.aeyer.plowshare.server.agents.CallerAccess.class),
+                        mock(TrajectoryToolReceipts.class),
+                        mock(ToolCallTraces.class))));
   }
 
   // --- the read itself -----------------------------------------------------

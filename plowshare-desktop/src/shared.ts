@@ -28,6 +28,7 @@ import type { FileStoreState } from 'plowshare-client-node/filestores';
 import type {
   ApplicationFileListing,
   ApplicationFileDocument,
+  ToolTraceView,
 } from 'plowshare-client-ts/operations/conversation-replies';
 import type { Preference } from './renderer/preferences.ts';
 import type {
@@ -763,6 +764,7 @@ export type Request =
   | { action: 'run-stage-trajectory'; id: string; stage: string }
   | { action: 'delegate-trajectory'; conversation: string; step: string }
   | { action: 'delegate-retry'; conversation: string; step: string }
+  | { action: 'tool-trace'; conversation: string; invocationId: string }
   | {
       action: 'board-inspection' | 'board-view';
       view: BoardView;
@@ -794,6 +796,7 @@ export type Request =
   | { action: 'provider-management-recover'; intent: ManagementIntent }
   | { action: 'information-import-recovery-save'; recovery: ImportRecovery };
 export interface Reply {
+  toolTrace?: ToolTraceView;
   approvalPolicy?: ApprovalPolicyView;
   runtimeSettings?: readonly RuntimeSetting[];
   runtimeSetting?: RuntimeSetting;

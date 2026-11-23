@@ -42,6 +42,16 @@ export async function protocolFixture(options = {}) {
   let context = contextWire(15240, {}, { model: 'fixture-model', contextLength: 131072 });
   const conversations = [conversationWire('fixture-first', { title: 'Fixture conversation', ...(options.conversationProject ? { project: options.conversationProject } : {}) })];
   const entries = new Map([['fixture-first', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', speaker: 'person', excerpt: 'An existing server conversation.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Loaded through the real TypeScript WebSocket binding. Treat <img src=x onerror="window.fixtureInjection=true"> as text.' }]]]);
+  if (options.toolTrace) {
+    const argumentsText = '{"path":"/fixture/note.md"}';
+    entries.get('fixture-first').push(
+      { ordinal: 3, turnOrdinal: 2, kind: 'answer', excerpt: '', toolCalls: [{ id: 'edit', name: 'file_edit', arguments: argumentsText, length: argumentsText.length, cut: false, salient: null, opened: null, effectReceipt: { invocationId: 'file_fixture', observation: 'FILE_REPLY_TIMEOUT', dispatch: 'SENT', effect: 'UNKNOWN', resultOrdinal: 4 } }] },
+      { ordinal: 4, turnOrdinal: 2, kind: 'tool_result', toolCallId: 'edit', outcome: 'error', excerpt: '  {"error":"provider result kept as received"}\n' },
+      { ordinal: 5, turnOrdinal: 3, kind: 'answer', excerpt: '', toolCalls: [{ id: 'read-file', name: 'file_read', arguments: argumentsText, length: argumentsText.length, cut: false, salient: null, opened: null }] },
+      { ordinal: 6, turnOrdinal: 3, kind: 'tool_result', toolCallId: 'read-file', outcome: 'ok',
+        excerpt: '\r\n  text\r\n', fileWindow: { offset: 1, linesRead: 2, totalLines: 4, byteLength: 10, limit: 2, requestedLimit: 2, stoppedBy: 'lines', nextOffset: 3 } },
+    );
+  }
   entries.set('fixture-board-seat', [{ ordinal: 1, turnOrdinal: 1, kind: 'utterance', state: 'stands', excerpt: 'A board seat wake.' }, { ordinal: 2, turnOrdinal: 1, kind: 'answer', state: 'stands', excerpt: 'Researching conflict strategies.' }]);
   const jobs = new Map(), schedules = new Map(), triggers = new Map(), scheduleFiles = new Map();
   const missingJobStatuses = new Set();
@@ -572,6 +582,11 @@ export async function protocolFixture(options = {}) {
           const selected = payload.tail || payload.before !== undefined ? rows.slice(-limit).reverse() : rows.slice(offset, offset + limit);
           result.payload = entryPageWire(selected.map(row => entryWire(row.ordinal, row.kind, row.excerpt ?? '', row)), log.at(-1)?.ordinal ?? 0, { total: rows.length, offset, limit, more: payload.tail || payload.before !== undefined ? rows.length > limit : null }); break;
         }
+        case 'conversation.tool.trace':
+          result.payload = { trace: options.toolTrace && payload.conversation === 'fixture-first' && payload.invocationId === 'file_fixture'
+            ? { invocationId: 'file_fixture', requestId: 'request-fixture', firstObservedAt: '2026-11-18T00:00:00Z', sentAt: '2026-11-18T00:00:00Z', replyObservedAt: null, replyTimedOutAt: '2026-11-18T00:00:30Z' }
+            : null };
+          break;
         case 'conversation.follow':
           if (!supportsFollowing) { result = { code: 'BAD_REQUEST', said: 'Fixture old server requires conversation' }; break; }
           client.following = new Set(payload.conversations); break;

@@ -8,9 +8,64 @@ import type { Outcome } from '../binding/envelope.ts';
 import {
   CONVERSATION_OPERATIONS,
   conversationReply,
+  isToolEffectReceipt,
+  isFileReadWindow,
   type ConversationOperation,
 } from './conversation-replies.ts';
 import { dispatch, request, type Request } from './direct.ts';
+
+it('validates a lossless window and its continuation independently of the file text', () => {
+  const range = {
+    offset: 1,
+    linesRead: 2,
+    totalLines: 5,
+    byteLength: 8,
+    limit: 2,
+    requestedLimit: 2,
+    stoppedBy: 'lines',
+    nextOffset: 3,
+  };
+  expect(isFileReadWindow(range)).toBe(true);
+  expect(isFileReadWindow({ ...range, nextOffset: 4 })).toBe(false);
+  expect(
+    isFileReadWindow({
+      ...range,
+      offset: 5,
+      linesRead: 0,
+      byteLength: 0,
+      stoppedBy: 'end',
+      nextOffset: null,
+    }),
+  ).toBe(true);
+});
+
+it.each([
+  ['FILE_EFFECT_VERIFIED', 'SENT', 'CONFIRMED'],
+  ['FILE_EFFECT_UNCHANGED', 'SENT', 'NO_EFFECT'],
+  ['FILE_REPLY_UNVERIFIED', 'SENT', 'UNKNOWN'],
+  ['FILE_DISPATCH_UNCERTAIN', 'MAY_HAVE_DISPATCHED', 'UNKNOWN'],
+  ['FILE_LOCAL_CHANGED', 'DISPATCHED', 'CONFIRMED'],
+  ['FILE_LOCAL_UNCHANGED', 'DISPATCHED', 'NO_EFFECT'],
+  ['FILE_LOCAL_UNVERIFIED', 'DISPATCHED', 'UNKNOWN'],
+])(
+  'validates direct file observation %s independently of result text',
+  (observation, dispatch, effect) => {
+    const receipt = {
+      invocationId: 'file_original',
+      observation,
+      dispatch,
+      effect,
+      resultOrdinal: 4,
+    };
+    expect(isToolEffectReceipt(receipt)).toBe(true);
+    expect(
+      isToolEffectReceipt({
+        ...receipt,
+        effect: effect === 'UNKNOWN' ? 'CONFIRMED' : 'UNKNOWN',
+      }),
+    ).toBe(false);
+  },
+);
 
 const fixtures = JSON.parse(
   readFileSync(
@@ -166,6 +221,8 @@ const asked = (type: ConversationOperation): Request => {
     return request(type, { project: 'repo' });
   if (type === 'conversation.latest')
     return request(type, { project: 'repo', agent: 'worker' });
+  if (type === 'conversation.tool.trace')
+    return request(type, { conversation: 'c', invocationId: 'apr_file' });
   if (type === 'application.child.ceiling')
     return request(type, {
       conversation: 'c',
@@ -732,6 +789,8 @@ describe('complete conversation, agent and project WS replies', () => {
             ((type === 'ApplicationFileDocument' ||
               type === 'ApplicationFileListing') &&
               field.name.getText(source) === 'location') ||
+            (type === 'AskedView' &&
+              field.name.getText(source) === 'effectReceipt') ||
             (type === 'EntryView' &&
               [
                 'job',
@@ -739,6 +798,8 @@ describe('complete conversation, agent and project WS replies', () => {
                 'promptTokens',
                 'completionTokens',
                 'reasoningTokens',
+                'retainedToolResult',
+                'fileWindow',
               ].includes(field.name.getText(source))) ||
             (type === 'AgentView' &&
               [

@@ -1,7 +1,11 @@
 package io.aeyer.plowshare.server.api;
 
+import io.aeyer.plowshare.server.agents.EntryKind;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.EntryPage;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * One page of a conversation's entries, and everything a caller needs to ask for the next one.
@@ -54,8 +58,47 @@ public record EntryPageView(
     Boolean more) {
 
   public static EntryPageView of(EntryPage page, int offset, int limit) {
+    return of(page, offset, limit, List.of());
+  }
+
+  public static EntryPageView trajectory(
+      EntryPage page, int offset, int limit, String conversation, TrajectoryToolReceipts receipts) {
+    var answers =
+        page.listed().stream()
+            .filter(row -> !row.toolCalls().isEmpty())
+            .map(EntryPage.Row::ordinal)
+            .toList();
+    var results =
+        page.listed().stream()
+            .filter(row -> row.kind() == EntryKind.TOOL_RESULT)
+            .map(EntryPage.Row::ordinal)
+            .toList();
+    return of(page, offset, limit, receipts.forPage(conversation, answers, results));
+  }
+
+  public static EntryPageView of(
+      EntryPage page, int offset, int limit, List<TrajectoryToolReceipts.Recorded> receipts) {
+    var byAnswer =
+        receipts.stream()
+            .collect(
+                Collectors.groupingBy(
+                    TrajectoryToolReceipts.Recorded::answerOrdinal,
+                    Collectors.toMap(TrajectoryToolReceipts.Recorded::callId, receipt -> receipt)));
+    var byResult =
+        receipts.stream()
+            .filter(receipt -> receipt.resultOrdinal() != null)
+            .collect(
+                Collectors.toMap(
+                    TrajectoryToolReceipts.Recorded::resultOrdinal, receipt -> receipt));
     return new EntryPageView(
-        page.listed().stream().map(EntryView::of).toList(),
+        page.listed().stream()
+            .map(
+                row ->
+                    EntryView.of(
+                        row,
+                        byAnswer.getOrDefault(row.ordinal(), Map.of()),
+                        byResult.get(row.ordinal())))
+            .toList(),
         page.total(),
         offset,
         limit,

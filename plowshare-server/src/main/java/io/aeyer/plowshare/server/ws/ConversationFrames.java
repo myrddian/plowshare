@@ -7,6 +7,8 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.api.ConversationsProperties;
+import io.aeyer.plowshare.server.approvals.ToolCallTraces;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Conversations;
@@ -53,6 +55,8 @@ public class ConversationFrames implements FrameArea {
   private final Tokenizer tokenizer;
   private final Callers callers;
   private final LogStages logStages;
+  private final TrajectoryToolReceipts receipts;
+  private final ToolCallTraces traces;
 
   /**
    * @param rules the conversation rules six of these handlers ask a question of — the same bean the
@@ -82,7 +86,9 @@ public class ConversationFrames implements FrameArea {
       Tokenizer tokenizer,
       Callers callers,
       LogStages logStages,
-      CallerAccess access) {
+      CallerAccess access,
+      TrajectoryToolReceipts receipts,
+      ToolCallTraces traces) {
     this.access = access;
     this.rules = Objects.requireNonNull(rules, "rules");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
@@ -96,6 +102,8 @@ public class ConversationFrames implements FrameArea {
     this.tokenizer = Objects.requireNonNull(tokenizer, "tokenizer");
     this.callers = Objects.requireNonNull(callers, "callers");
     this.logStages = Objects.requireNonNull(logStages, "logStages");
+    this.receipts = Objects.requireNonNull(receipts, "receipts");
+    this.traces = Objects.requireNonNull(traces, "traces");
   }
 
   private io.aeyer.plowshare.server.personal.PersonalSpaces personal;
@@ -132,7 +140,8 @@ public class ConversationFrames implements FrameArea {
             Map.entry(FrameTypes.CONVERSATION_CHAT, new ConversationChatHandler(rules, entries)),
             Map.entry(
                 FrameTypes.CONVERSATION_TRAJECTORY,
-                new ConversationTrajectoryHandler(rules, entries)),
+                new ConversationTrajectoryHandler(rules, entries, receipts)),
+            Map.entry(FrameTypes.CONVERSATION_TOOL_TRACE, new ConversationToolTraceHandler(traces)),
             Map.entry(
                 FrameTypes.CONVERSATION_CONTEXT,
                 new ConversationContextHandler(

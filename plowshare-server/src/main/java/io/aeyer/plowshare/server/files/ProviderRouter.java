@@ -156,7 +156,12 @@ public final class ProviderRouter {
   }
 
   /** The provider path to open and the scope path and roots used for containment. */
-  public record Target(FileProvider provider, Path path, Path scopePath, List<Path> roots) {
+  public record Target(
+      FileProvider provider, Path path, Path scopePath, List<Path> roots, FileMutations mutations) {
+    public Target(FileProvider provider, Path path, Path scopePath, List<Path> roots) {
+      this(provider, path, scopePath, roots, provider);
+    }
+
     public Target {
       roots = List.copyOf(roots);
     }
@@ -174,7 +179,7 @@ public final class ProviderRouter {
    * Resolve once so the roots used to classify the read belong to the provider that will read it.
    */
   public ReadTarget readTarget(Home home, Path path) {
-    Target target = resolve(home, path, FileProvider::forReviewedRead, true);
+    Target target = targetForRead(home, path);
     FileProvider provider = target.provider();
     // An alias must not give a read standing intent when exact account rules name the original.
     // A Personal read also uses the provider's single, declared workspace.
@@ -188,15 +193,24 @@ public final class ProviderRouter {
             .filter(workspace -> path.equals(provider.reviewPath(path))));
   }
 
+  public Target targetForRead(Home home, Path path) {
+    return resolve(home, path, FileProvider::forReviewedRead, true);
+  }
+
   /** Classifies a direct mutation against the same provider roots used for routing it. */
   public MutationTarget mutationTarget(Home home, Path path) {
-    Target target = resolve(home, path, FileProvider::forReviewedMutation, true);
+    Target target = targetForMutation(home, path);
     Path named = target.path().normalize();
     Path reviewed = target.provider().reviewPath(target.path());
     boolean protectedPath =
         target.roots().stream()
             .anyMatch(root -> securityFile(root, named) || securityFile(root, reviewed));
     return new MutationTarget(target, protectedPath);
+  }
+
+  /** Select and pin the provider used for an admitted mutation and its verification reads. */
+  public Target targetForMutation(Home home, Path path) {
+    return resolve(home, path, FileProvider::forReviewedMutation, true);
   }
 
   private static boolean securityFile(Path root, Path path) {

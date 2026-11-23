@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +59,51 @@ public record LoggedEntry(
     String outcome,
     Map<String, String> salients,
     ToolObservation observation,
-    InputProvenance inputProvenance) {
+    InputProvenance inputProvenance,
+    FileReadWindow fileWindow) {
+
+  public LoggedEntry(
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Long tookMillis,
+      Invocation invocation,
+      Speaker speaker,
+      String outcome,
+      Map<String, String> salients,
+      ToolObservation observation,
+      InputProvenance inputProvenance) {
+    this(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation,
+        inputProvenance,
+        null);
+  }
+
+  public LoggedEntry windowed(FileReadWindow window) {
+    return new LoggedEntry(
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        tookMillis,
+        invocation,
+        speaker,
+        outcome,
+        salients,
+        observation,
+        inputProvenance,
+        window);
+  }
 
   /** Compatibility for entries without classified supplied context. */
   public LoggedEntry(
@@ -145,6 +190,8 @@ public record LoggedEntry(
 
   public LoggedEntry {
     Objects.requireNonNull(kind, "kind");
+    if (fileWindow != null && (kind != EntryKind.TOOL_RESULT || observation != null))
+      throw new IllegalArgumentException("A file window annotates a textual tool result");
     if (inputProvenance != null) {
       if (kind != EntryKind.UTTERANCE)
         throw new IllegalArgumentException("Only an input can retain supplied context");

@@ -1677,6 +1677,34 @@ class OpenAiTransportTest {
     }
   }
 
+  @Test
+  void lossless_text_is_the_scalar_tool_content_including_empty_results() throws Exception {
+    try (MockWebServer server = new MockWebServer()) {
+      server.enqueue(json("{\"choices\":[{\"message\":{\"content\":\"done\"}}]}"));
+      server.start();
+      String exact = "\r\n  {\"error\":true}\r\n";
+      var messages =
+          List.of(
+              ChatMessage.user("read both"),
+              ChatMessage.assistant(
+                  "",
+                  List.of(
+                      new ToolCall("file", "file_read", "{}"),
+                      new ToolCall("empty", "file_read", "{}"))),
+              ChatMessage.losslessTool("file", exact),
+              ChatMessage.losslessTool("empty", ""));
+      try (OpenAiTransport transport = transportAt(server.url("/v1").toString())) {
+        transport.complete("qwen3.5-9b", messages, Sampling.NONE, List.of());
+        var sent =
+            new ObjectMapper()
+                .readTree(server.takeRequest(5, TimeUnit.SECONDS).getBody().readUtf8())
+                .path("messages");
+        assertEquals(exact, sent.get(2).get("content").textValue());
+        assertEquals("", sent.get(3).get("content").textValue());
+      }
+    }
+  }
+
   /**
    * A batch of two produces two tool messages, in order, each against its own id.
    *
