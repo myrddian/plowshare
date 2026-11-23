@@ -243,7 +243,7 @@ class HomeAssistantToolProviderTest {
       host.renewCatalogue();
       assertTrue(host.catalogueAvailable());
       assertEquals(0, host.poll());
-      assertEquals(4, wire.consumes);
+      assertEquals(6, wire.consumes);
       clock.updateAndGet(value -> value.plusSeconds(11));
       assertFalse(host.catalogueAvailable());
       assertThrows(IOException.class, host::poll);

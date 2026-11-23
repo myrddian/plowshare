@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,7 +32,53 @@ public record HomeAssistantProviderConfiguration(
     HomeAssistantSettings homeAssistant,
     Provider read,
     Optional<Control> control,
-    Timing timing) {
+    Timing timing,
+    Optional<Discovery> discovery) {
+
+  /** Explicit opt-in read policy. Configuration changes cannot adopt an earlier provider owner. */
+  public record Discovery(
+      String mode,
+      String profile,
+      Set<String> excludedEntities,
+      Set<String> excludedFields,
+      Path identityJournal) {
+    public Discovery {
+      if (!Set.of("fixed", "assist_exposed").contains(mode)
+          || !Set.of("explicit", "standard_measurements").contains(profile))
+        throw new IllegalArgumentException("Unsupported discovery policy");
+      excludedEntities = Set.copyOf(excludedEntities);
+      excludedFields = Set.copyOf(excludedFields);
+      if (excludedEntities.size() > 256 || excludedFields.size() > 256)
+        throw new IllegalArgumentException("Discovery exclusion bound exceeded");
+      excludedEntities.forEach(HomeAssistantResources::haName);
+      excludedFields.forEach(HomeAssistantCapabilities::fieldId);
+      identityJournal = Objects.requireNonNull(identityJournal).toAbsolutePath().normalize();
+    }
+
+    /** Includes frozen selectors and explicit attributes, not merely the named profile. */
+    public String fingerprint(HomeAssistantSettings settings) {
+      var value =
+          Json.object()
+              .put("mode", mode)
+              .put("profile", profile)
+              .put("identityJournal", identityJournal.toString());
+      var excluded = value.putArray("excludedEntities");
+      excludedEntities.stream().sorted().forEach(excluded::add);
+      var fields = value.putArray("excludedFields");
+      excludedFields.stream().sorted().forEach(fields::add);
+      var selected = value.putObject("selected");
+      settings.entities().entrySet().stream()
+          .sorted(Map.Entry.comparingByKey())
+          .forEach(
+              entry -> {
+                var entity =
+                    selected.putObject(entry.getKey()).put("entity", entry.getValue().entity());
+                var attributes = entity.putArray("attributes");
+                entry.getValue().attributes().stream().sorted().forEach(attributes::add);
+              });
+      return Json.hash(value);
+    }
+  }
 
   /** One logical provider and its private durable receipt owner. Both providers share one login. */
   public record Provider(
@@ -108,6 +155,27 @@ public record HomeAssistantProviderConfiguration(
     Objects.requireNonNull(read);
     Objects.requireNonNull(control);
     Objects.requireNonNull(timing);
+    Objects.requireNonNull(discovery);
+    if (discovery.isPresent()) {
+      if (control.isPresent())
+        throw new IllegalArgumentException("Capability discovery is read-only");
+      var selected = discovery.orElseThrow();
+      if (selected.identityJournal().startsWith(read.journal())
+          || read.journal().startsWith(selected.identityJournal()))
+        throw new IllegalArgumentException("Capability and provider journals must be separate");
+      for (var entity : homeAssistant.entities().values()) {
+        Set<String> fields = new LinkedHashSet<>();
+        fields.add("state");
+        entity.selectedAttributes().forEach(value -> fields.add("attribute." + value));
+        if (selected.profile().equals("standard_measurements"))
+          HomeAssistantCapabilityProfiles.attributes(
+                  entity.entity().substring(0, entity.entity().indexOf('.')))
+              .forEach(value -> fields.add("attribute." + value));
+        fields.removeAll(selected.excludedFields());
+        if (fields.size() > HomeAssistantCapabilities.MAX_FIELDS)
+          throw new IllegalArgumentException("Capability field bound exceeded");
+      }
+    }
     if (!homeAssistant.subscriptions().isEmpty())
       throw new IllegalArgumentException("Provider mode does not admit workflow subscriptions");
     long minimumLease = read.leaseSeconds();
@@ -167,7 +235,8 @@ public record HomeAssistantProviderConfiguration(
           "homeAssistant",
           "read",
           "control",
-          "timing");
+          "timing",
+          "discovery");
       if (integer(root, "version") != 1)
         throw new IllegalArgumentException("Provider configuration version 1 required");
       Path base = file.toAbsolutePath().normalize().getParent();
@@ -212,12 +281,36 @@ public record HomeAssistantProviderConfiguration(
           new HomeAssistantFactory().decode(ha.toString()),
           read,
           control,
-          timing);
+          timing,
+          root.has("discovery")
+              ? Optional.of(discovery(root.get("discovery"), base))
+              : Optional.empty());
     } catch (IOException | RuntimeException invalid) {
       // Parser/URI/path errors can contain supplied values. Do not echo private configuration.
       throw new IOException(
           "Invalid provider configuration; inspect its schema and selected policy");
     }
+  }
+
+  private static Discovery discovery(JsonNode value, Path base) {
+    Json.fields(value, "mode", "profile", "excludedEntities", "excludedFields", "identityJournal");
+    return new Discovery(
+        Json.text(value, "mode"),
+        Json.text(value, "profile"),
+        strings(value.get("excludedEntities")),
+        strings(value.get("excludedFields")),
+        base.resolve(Json.text(value, "identityJournal")));
+  }
+
+  private static Set<String> strings(JsonNode value) {
+    if (value == null || !value.isArray() || value.size() > 256)
+      throw new IllegalArgumentException("Discovery string array required");
+    var result = new LinkedHashSet<String>();
+    for (JsonNode item : value) {
+      if (!item.isTextual() || !result.add(item.textValue()))
+        throw new IllegalArgumentException("Distinct discovery strings required");
+    }
+    return Set.copyOf(result);
   }
 
   private static Provider provider(JsonNode node, Path base, boolean control) {

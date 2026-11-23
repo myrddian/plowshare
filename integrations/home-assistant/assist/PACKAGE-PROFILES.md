@@ -8,7 +8,7 @@ Applications, grants, credentials or evidence that devices were tested.
 
 | Directory | Project | Explicit agents |
 | --- | --- | --- |
-| [readonly](readonly/) | `home-assistant-readonly` | `house_reader` with four read tools; `house_task` without tools |
+| [readonly](readonly/) | `home-assistant-readonly` | `house_reader` with four capability-mode read tools; `house_task` without tools |
 | [control](control/) | `home-assistant-control` | `house_reader`, `house_controller` with read plus two control tools, `house_task` without tools |
 | [task](task/) | `home-assistant-task` | `house_task` without providers/tools |
 
@@ -38,8 +38,13 @@ The control root intentionally supplies reader/controller/task agents in one
 project/principal, permitting a single HA entry to select each route explicitly.
 Their grants differ by exact agent/tool assignment. Merely setting an HA UI flag
 cannot change server authority. Future provider tools are not automatically
-granted. The four read tools are `ha_read_search`, `ha_read_describe`, `ha_read_read`
-and `ha_read_list_actions`; the controller adds `ha_control_describe_action` and
+granted. The read-only root grants capability-mode `ha_read_health`,
+`ha_read_resolve`, `ha_read_describe_fields` and `ha_read_read_fields`. Configure
+the matching provider discovery mode; old static data handlers are not published
+in that mode, so they cannot bypass its field exclusions or exposure revocation.
+The control root retains legacy `ha_read_search`, `ha_read_describe`,
+`ha_read_read`, `ha_read_list_actions`, `ha_read_health` and `ha_read_diagnose`;
+the controller adds `ha_control_describe_action` and
 `ha_control_execute_action`. Generation agents disable dynamic tools and gain no
 device access. See [INSTALL.md](../INSTALL.md) for HA field selection and lifecycle.
 

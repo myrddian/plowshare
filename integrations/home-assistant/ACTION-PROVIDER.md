@@ -14,8 +14,8 @@ provider or authorize device actions.
 Control requires its own `RelayTools.Binding` provider identity and a prefix that
 does not overlap the read-only prefix. Both bindings name the same configured
 project. The constructor takes both configurations and refuses accidental provider
-reuse or prefix overlap. `HomeAssistantReadTools` still declares exactly its four
-read tools. Publishing the control catalogue never adds execution to a read-only
+reuse or prefix overlap. `HomeAssistantReadTools` declares exactly its six
+read-only tools, including health and entity diagnostics. Publishing the control catalogue never adds execution to a read-only
 provider wildcard.
 
 Install a separate explicit provider and Application tool scope for control. Grant

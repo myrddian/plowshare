@@ -14,6 +14,7 @@ from homeassistant.util.hass_dict import HassKey
 
 from .agent import GatewayPort
 from .const import CLEANUP_TIMEOUT
+from .diagnostic_models import DiagnosticSource, RuntimeDiagnostics
 from .storage import CorrelationPersistence
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +51,21 @@ class EntryRuntime:
         self._forwards: dict[Platform, asyncio.Task[None]] = {}
         self._unloads: dict[Platform, asyncio.Task[bool]] = {}
         self._remaining_platforms: set[Platform] = set()
+
+    def diagnostics_snapshot(self) -> RuntimeDiagnostics:
+        """Inspect retained owners even while entity intake is fenced for cleanup."""
+        return RuntimeDiagnostics(
+            self._attached,
+            self._setup_finished.is_set(),
+            self._closing,
+            len(self._remaining_platforms),
+            self._conversation.diagnostics_snapshot()
+            if isinstance(self._conversation, DiagnosticSource)
+            else None,
+            self._task.diagnostics_snapshot()
+            if isinstance(self._task, DiagnosticSource)
+            else None,
+        )
 
     @property
     def conversation(self) -> GatewayPort | None:

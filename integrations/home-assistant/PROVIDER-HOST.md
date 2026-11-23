@@ -57,8 +57,12 @@ Application's supported operator workflow. The host creates no grants or
 templates grant no account access by themselves. See the public
 [provider-scope guide](https://github.com/myrddian/plowshare/blob/main/docs/tool-scopes.md).
 
-The read catalogue exposes the four configured-prefix tools `search`, `describe`,
-`read` and `list_actions`. Optional control exposes only its separate prefix's
+Without `discovery`, the legacy read catalogue exposes six configured-prefix tools:
+`search`, `describe`, `read`, `list_actions`, `health` and `diagnose`. With explicit
+`discovery`, the read catalogue instead exposes `health`, `resolve`,
+`describe_fields` and `read_fields`. Legacy alias-reading declarations are absent
+in that mode so they cannot bypass its selection or field policy. Optional
+legacy control exposes only its separate prefix's
 `describe_action` and `execute_action`. Its nonempty `allowedActions` must select
 configured fixed action profiles whose complete targets are disclosed by the
 same HA entity policy. It cannot select arbitrary services/targets or inference
@@ -167,3 +171,88 @@ Live acceptance should begin with scoped discovery/read, then only an explicitly
 authorized reversible action with a separate state observation. Keep its original
 receipt identity after a timeout or restart. This package performs no live
 acceptance, backend cache measurement or automatic HA update.
+
+## Updating a catalogue for diagnostics
+
+The two read-only diagnostic declarations require exact server tool-scope grants;
+old four-tool grants do not authorize them. Updating profile files does not update a
+running Application. Keep control absent/disabled and preserve the existing entity
+and attribute ceiling when applying those two grants.
+
+Adding declarations changes the durable catalogue identity. Drain the old provider,
+reconcile all original publication/result receipts, and confirm catalogue withdrawal
+before opening a new private journal for the changed declaration set. Preserve the
+old journal/configuration for audit and unresolved receipts; never edit its identity,
+delete receipts, or point the new process at the incompatible old journal. If any
+receipt remains uncertain, retain that owner and stop the rollout until read-only
+reconciliation establishes its outcome. See [tool diagnostics](https://github.com/myrddian/plowshare/blob/main/integrations/home-assistant/TOOL-PROVIDER.md#diagnostic-evidence-and-limits)
+for what each observation can and cannot establish.
+
+## Capability-based read discovery
+
+The read-only example enables an explicit `discovery` configuration:
+
+```json
+"discovery": {
+  "mode": "fixed",
+  "profile": "standard_measurements",
+  "excludedEntities": [],
+  "excludedFields": [],
+  "identityJournal": "private/identities"
+}
+```
+
+The `fixed` mode begins with `homeAssistant.entities` and pins available registry
+identities in its private identity store. A verified rename can retain its opaque
+resource reference across restart; another entity reusing its locator cannot
+inherit that reference. Missing or contradictory identity remains explicit.
+Resources without registry identity have connection-scoped locator references;
+they do not establish continuity through a restart or reconnect.
+
+The `standard_measurements` profile includes known measurement fields on selected
+resources, including climate current temperature separately from its target
+temperature. Explicitly selected attributes remain bounded additions. The
+`explicit` profile restricts fields to the configured state/attribute selection.
+Exclusions win in either profile. Discovery returns typed fields with capability,
+measurement role, unit and support status; unfamiliar meaning is `unknown`, and
+nested unsupported values are not exported as generic objects. No field discovery
+grants control or changes Plowshare tool authority.
+
+`resolve` matches names, aliases, locations and field capabilities, returning all
+matching resource/field candidates through bounded pages. `AMBIGUOUS` describes
+the complete permitted match set, even on a one-candidate page. Availability never
+breaks a name tie. Request `CURRENT` for measured temperature and `TARGET` for a
+setpoint. Use exact returned references and revisions with `describe_fields` and
+`read_fields`; each returned value preserves its own source, time and unit.
+
+The separately provided `examples/outbound/readonly/provider-assist-exposed.json`
+selects `assist_exposed` mode. It requires the matching HA companion and its
+admin-only version-1 `plowshare/discovery/selection` command. Effective conversation
+exposure is checked at the bounded native read-admission/observation boundary
+using HA's canonical rules, including its
+normal materialization of default preferences. Missing, denied or malformed
+support fails explicitly, without a stock-list or all-entities fallback. The
+configuration is an example, not activation of live exposure tracking.
+
+HA selection and SDK result publication do not share an atomic transaction.
+A later exposure change prevents new reads after the adapter observes it; it
+does not rewrite an already accepted immutable SDK result. Retained results
+reconcile under their original identities without recollection, scrubbing or
+replay. Observation and publication timestamps remain distinct evidence.
+
+Capability discovery requires a read-only configuration with no control block.
+Its four exact grants replace the legacy six grants in the read-only templates;
+control/task templates retain their separate legacy/no-tool assignments. The
+identity journal is a private, bounded, exclusively owned store, separate from the
+SDK invocation journal. Its path resolves beside the configuration. Preserve both
+journals and their matching configuration during drain/reconciliation and rollback.
+Corruption or owner mismatch does not authorize resetting identities. Selection,
+profile and exclusions contribute to provider ownership, so configuration changes
+cannot adopt earlier receipt authority merely by retaining a policy label.
+
+Live startup checks retained SDK receipt files/ownership markers before opening
+connections. If they remain but the identity snapshot is missing, startup refuses
+to bootstrap replacement identity state. The offline configuration check still
+does not inspect or create private journals. Loss of both stores and all markers
+cannot be distinguished from first installation; keep consistent backups of both
+and their configuration. This guard does not reconstruct lost receipt history.

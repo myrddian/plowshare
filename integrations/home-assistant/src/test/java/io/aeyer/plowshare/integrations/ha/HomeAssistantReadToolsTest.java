@@ -27,6 +27,7 @@ import io.aeyer.plowshare.protocol.SchemaCodec;
 import io.aeyer.plowshare.protocol.ToolSchemas;
 import io.aeyer.plowshare.protocol.ToolValue;
 import io.aeyer.plowshare.sdk.RelayTools;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,6 +37,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class HomeAssistantReadToolsTest {
   static final Binding SOURCE = new Binding("fixture-house", "credential-generation-a");
@@ -50,6 +53,10 @@ class HomeAssistantReadToolsTest {
     ReadRequest lastRead;
     OperationBudget lastBudget;
     boolean oversized;
+    boolean readFailure;
+    boolean stale;
+    Optional<Instant> sourceUpdatedAt = Optional.empty();
+    Availability availability = Availability.AVAILABLE;
 
     @Override
     public Page search(Search search, OperationBudget budget) {
@@ -79,8 +86,9 @@ class HomeAssistantReadToolsTest {
     }
 
     @Override
-    public ReadBatch read(ReadRequest request, OperationBudget budget) {
+    public ReadBatch read(ReadRequest request, OperationBudget budget) throws IOException {
       reads++;
+      if (readFailure) throw new IOException("private native origin and credential");
       lastRead = request;
       lastBudget = budget;
       return new ReadBatch(
@@ -90,17 +98,21 @@ class HomeAssistantReadToolsTest {
                   reference ->
                       new State(
                           reference,
-                          Availability.AVAILABLE,
-                          Optional.of(oversized ? "\n".repeat(4096) : "21"),
-                          Map.of(
-                              "unit",
-                              new TextParameter("C"),
-                              "already_permitted_other",
-                              new TextParameter("selected-by-host")),
-                          Set.of("nested"),
-                          Optional.empty(),
+                          availability,
+                          availability == Availability.MISSING
+                              ? Optional.empty()
+                              : Optional.of(oversized ? "\n".repeat(4096) : "21"),
+                          availability == Availability.MISSING
+                              ? Map.of()
+                              : Map.of(
+                                  "unit",
+                                  new TextParameter("C"),
+                                  "already_permitted_other",
+                                  new TextParameter("selected-by-host")),
+                          availability == Availability.MISSING ? Set.of() : Set.of("nested"),
+                          sourceUpdatedAt,
                           Instant.EPOCH,
-                          false))
+                          stale))
               .toList());
     }
   }
@@ -168,6 +180,10 @@ class HomeAssistantReadToolsTest {
     var revision = new ToolValue.ObjectValue(revision());
     for (var declaration : tools.declarations()) {
       var schema = Json.MAPPER.readTree(Json.MAPPER.writeValueAsString(declaration.schema()));
+      if (declaration.name().equals(PREFIX + "health")) {
+        ToolSchemas.validate(declaration.schema(), new ToolValue.ObjectValue(Map.of()));
+        continue;
+      }
       assertFalse(schema.has("$defs"));
       assertFalse(schema.toString().contains("\"$ref\""));
       var arguments = new LinkedHashMap<String, ToolValue>();
@@ -216,7 +232,13 @@ class HomeAssistantReadToolsTest {
     var source = new Resources();
     var tools = new HomeAssistantReadTools(SOURCE, PREFIX, source, source);
     assertEquals(
-        List.of("house_search", "house_describe", "house_read", "house_list_actions"),
+        List.of(
+            "house_search",
+            "house_describe",
+            "house_read",
+            "house_list_actions",
+            "house_health",
+            "house_diagnose"),
         tools.declarations().stream().map(RelayTools.Declaration::name).toList());
     assertThrows(
         IllegalArgumentException.class,
@@ -390,5 +412,165 @@ class HomeAssistantReadToolsTest {
         "light.turn_on",
         Json.MAPPER.readTree(actions.text()).path("actions").get(0).path("service").textValue());
     assertEquals(0, source.reads);
+  }
+
+  private static HomeAssistantReadDiagnostics diagnosticSource() {
+    return new HomeAssistantReadDiagnostics() {
+      @Override
+      public Snapshot snapshot() {
+        return new Snapshot(
+            Instant.EPOCH,
+            ConnectionObservation.UNAVAILABLE,
+            CatalogueObservation.CONFIRMED_LOCAL_LEASE,
+            Optional.of(Instant.EPOCH));
+      }
+
+      @Override
+      public Optional<Set<String>> permittedAttributes(Reference reference, Revision revision) {
+        return Optional.of(Set.of("unit", "nested", "missing"));
+      }
+    };
+  }
+
+  private static Map<String, ToolValue> diagnoseArguments(String alias) {
+    return Map.of(
+        "alias",
+        new TextParameter(alias),
+        "revision",
+        new ToolValue.ObjectValue(revision()),
+        "attributes",
+        new ToolValue.Array(
+            List.of(
+                new TextParameter("unit"),
+                new TextParameter("nested"),
+                new TextParameter("missing"),
+                new TextParameter("current_temperature"))));
+  }
+
+  @Test
+  void diagnosticsDistinguishUnavailableEntityAndAttributeRestrictionsWithoutValues()
+      throws Exception {
+    var resources = new Resources();
+    resources.availability = Availability.UNAVAILABLE;
+    var tools =
+        new HomeAssistantReadTools(
+            SOURCE, PREFIX, resources, resources, Duration.ofSeconds(2), diagnosticSource());
+    var result = tools.execute(call(tools, "diagnose", diagnoseArguments("first")), budget());
+    assertEquals(RelayTools.State.COMPLETED, result.state());
+    var json = Json.MAPPER.readTree(result.text());
+    assertEquals("OBSERVED", json.path("status").textValue());
+    assertEquals("UNAVAILABLE", json.path("availability").textValue());
+    assertEquals("NOT_ESTABLISHED", json.path("cause").textValue());
+    assertEquals("1970-01-01T00:00:00Z", json.path("observedAt").textValue());
+    assertFalse(json.path("stale").booleanValue());
+    var statuses = new LinkedHashMap<String, String>();
+    json.path("requestedAttributes")
+        .forEach(
+            value ->
+                statuses.put(value.path("name").textValue(), value.path("status").textValue()));
+    assertEquals(
+        Map.of(
+            "unit",
+            "PERMITTED_PRESENT",
+            "nested",
+            "UNSUPPORTED",
+            "missing",
+            "PERMITTED_ABSENT",
+            "current_temperature",
+            "NOT_EXPOSED_BY_POLICY"),
+        statuses);
+    assertFalse(result.text().contains("selected-by-host"));
+    assertFalse(json.has("value"));
+    assertEquals(1, resources.reads);
+    assertEquals(0, resources.searches);
+  }
+
+  @Test
+  void invisibleDiagnosticNeverProbesNativeStateAndErrorsDoNotClaimTheirCause() throws Exception {
+    var resources = new Resources();
+    var tools = new HomeAssistantReadTools(SOURCE, PREFIX, resources, resources);
+    var hidden =
+        tools.execute(call(tools, "diagnose", diagnoseArguments("absent-or-denied")), budget());
+    assertEquals("NOT_VISIBLE", Json.MAPPER.readTree(hidden.text()).path("status").textValue());
+    assertEquals(0, resources.reads);
+    resources.readFailure = true;
+    var unavailable = tools.execute(call(tools, "diagnose", diagnoseArguments("first")), budget());
+    assertEquals(
+        "OBSERVATION_UNAVAILABLE",
+        Json.MAPPER.readTree(unavailable.text()).path("status").textValue());
+    assertFalse(unavailable.text().contains("private"));
+    assertFalse(unavailable.text().contains("credential"));
+    assertEquals(1, resources.reads);
+  }
+
+  @Test
+  void healthReportsLocalObservationsWithoutImplyingEndToEndConnectivity() throws Exception {
+    var resources = new Resources();
+    var tools =
+        new HomeAssistantReadTools(
+            SOURCE, PREFIX, resources, resources, Duration.ofSeconds(2), diagnosticSource());
+    var result = tools.execute(call(tools, "health", Map.of()), budget());
+    var json = Json.MAPPER.readTree(result.text());
+    assertEquals("UNAVAILABLE", json.path("homeAssistantConnection").textValue());
+    assertEquals("CONFIRMED_LOCAL_LEASE", json.path("providerCatalogue").textValue());
+    assertEquals("NOT_CHECKED", json.path("endToEnd").textValue());
+    assertEquals("NOT_OBSERVED", json.path("lastSuccessfulHomeAssistantCommunication").textValue());
+    assertEquals(0, resources.reads);
+    assertEquals(0, resources.searches);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            tools.execute(
+                call(tools, "health", Map.of("origin", new TextParameter("private"))), budget()));
+  }
+
+  @Test
+  void diagnosticsRejectForeignRevisionAndMalformedInputBeforeObserving() throws Exception {
+    var resources = new Resources();
+    var tools = new HomeAssistantReadTools(SOURCE, PREFIX, resources, resources);
+    var foreign = new LinkedHashMap<>(revision());
+    foreign.put("credential", new TextParameter("different"));
+    var args = new LinkedHashMap<>(diagnoseArguments("first"));
+    args.put("revision", new ToolValue.ObjectValue(foreign));
+    assertEquals(
+        RelayTools.State.REJECTED, tools.execute(call(tools, "diagnose", args), budget()).state());
+    args.put("revision", new TextParameter("encoded-json"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> tools.execute(call(tools, "diagnose", args), budget()));
+    assertEquals(0, resources.reads);
+  }
+
+  @ParameterizedTest
+  @EnumSource(Availability.class)
+  void diagnosticsPreserveEveryNativeAvailabilityAndFreshnessFlag(Availability availability)
+      throws Exception {
+    var resources = new Resources();
+    resources.availability = availability;
+    resources.stale = true;
+    resources.sourceUpdatedAt = Optional.of(Instant.EPOCH.minusSeconds(86400));
+    var tools = new HomeAssistantReadTools(SOURCE, PREFIX, resources, resources);
+    var result = tools.execute(call(tools, "diagnose", diagnoseArguments("first")), budget());
+    var json = Json.MAPPER.readTree(result.text());
+    assertEquals(availability.name(), json.path("availability").textValue());
+    assertTrue(json.path("stale").booleanValue());
+    assertEquals("1969-12-31T00:00:00Z", json.path("sourceUpdatedAt").textValue());
+    assertEquals("NOT_ESTABLISHED", json.path("cause").textValue());
+    assertEquals(1, resources.reads);
+  }
+
+  @Test
+  void diagnosticAttributeIdentifiersRejectBlankAndControlValuesBeforeNativeReads()
+      throws Exception {
+    var resources = new Resources();
+    var tools = new HomeAssistantReadTools(SOURCE, PREFIX, resources, resources);
+    for (var name : List.of(" ", "private\nattribute", " leading")) {
+      var args = new LinkedHashMap<>(diagnoseArguments("first"));
+      args.put("attributes", new ToolValue.Array(List.of(new TextParameter(name))));
+      assertEquals(
+          RelayTools.State.REJECTED,
+          tools.execute(call(tools, "diagnose", args), budget()).state());
+    }
+    assertEquals(0, resources.reads);
   }
 }

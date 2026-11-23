@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.integrations.ha;
 
 import io.aeyer.plowshare.integrations.ha.HomeAssistantProviderConfiguration.Timing;
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.sdk.Plowshare;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -110,6 +111,7 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
   private static final class SharedResources implements Maintenance {
     private final HomeAssistantAdapter adapter;
     private Plowshare sdk;
+    private HomeAssistantResourceCapabilities capabilities;
 
     SharedResources(HomeAssistantAdapter adapter) {
       this.adapter = adapter;
@@ -121,7 +123,10 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
     }
 
     @Override
-    public void close() {
+    public void close() throws IOException {
+      // The supervisor reaches shared cleanup only after every borrowing SDK provider has
+      // physically settled. Keep the identity-store lock until that same ownership boundary.
+      if (capabilities != null) capabilities.close();
       adapter.close();
       if (sdk != null) sdk.close();
     }
@@ -175,11 +180,37 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
       resourcesOwner.sdk = sdk;
       if (host.stop.getCount() == 0) return host;
       var read = configuration.read().runtime(timing);
-      var readTools =
+      var diagnostics = new HomeAssistantProviderDiagnostics(source, policy);
+      // The SDK connect handshake succeeded; later timestamps mean completed public lifecycle
+      // calls.
+      diagnostics.sdkSucceeded();
+      HomeAssistantToolHandlers readTools =
           new HomeAssistantReadTools(
-              source.binding(), read.prefix(), resources, resources, timing.requestTimeout());
-      host.providers.add(
-          openProvider(configuration, configuration.read(), sdk, readTools, haToken));
+              source.binding(),
+              read.prefix(),
+              resources,
+              resources,
+              timing.requestTimeout(),
+              diagnostics);
+      if (configuration.discovery().isPresent()) {
+        var discovery = configuration.discovery().orElseThrow();
+        var capabilities =
+            HomeAssistantCapabilityCatalog.open(
+                adapter,
+                configuration.binding(),
+                discovery,
+                configuration.homeAssistant(),
+                providerOwner(configuration, configuration.read(), haToken));
+        // Retain the newly opened private owner before another constructor can fail.
+        resourcesOwner.capabilities = capabilities;
+        readTools =
+            new HomeAssistantCapabilityTools(read.prefix(), capabilities, timing.requestTimeout())
+                .withHealth(readTools);
+      }
+      var readProvider =
+          openProvider(configuration, configuration.read(), sdk, readTools, haToken, diagnostics);
+      diagnostics.attach(readProvider::available);
+      host.providers.add(readProvider);
       if (host.stop.getCount() != 0 && configuration.control().isPresent()) {
         var selected = configuration.control().orElseThrow();
         var control = selected.provider().runtime(timing);
@@ -194,7 +225,8 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
                 resources,
                 controlPolicy,
                 adapter.actionExecutor(configuration.binding()));
-        host.providers.add(openProvider(configuration, selected.provider(), sdk, tools, haToken));
+        host.providers.add(
+            openProvider(configuration, selected.provider(), sdk, tools, haToken, null));
       }
       return host;
     } catch (IOException | RuntimeException failure) {
@@ -221,16 +253,11 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
       HomeAssistantProviderConfiguration.Provider selected,
       Plowshare sdk,
       HomeAssistantToolHandlers handlers,
-      String haToken)
+      String haToken,
+      HomeAssistantProviderDiagnostics diagnostics)
       throws IOException {
     var runtime = selected.runtime(configuration.timing());
-    String owner =
-        HomeAssistantToolProvider.ownerFingerprint(
-            configuration.plowshare(),
-            configuration.homeAssistant().endpoint(),
-            haToken,
-            configuration.policyRevision(),
-            runtime.binding());
+    String owner = providerOwner(configuration, selected, haToken);
     var provider =
         HomeAssistantToolProvider.open(runtime, sdk, handlers, selected.journal(), owner);
     return new Provider() {
@@ -242,11 +269,13 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
       @Override
       public void renew() throws IOException {
         provider.renewCatalogue();
+        if (diagnostics != null) diagnostics.sdkSucceeded();
       }
 
       @Override
       public void poll() throws IOException {
         provider.poll();
+        if (diagnostics != null) diagnostics.sdkSucceeded();
       }
 
       @Override
@@ -257,6 +286,7 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
       @Override
       public void withdraw() throws IOException {
         provider.withdrawCatalogue();
+        if (diagnostics != null) diagnostics.sdkSucceeded();
       }
 
       @Override
@@ -266,9 +296,37 @@ public final class HomeAssistantProviderHost implements HomeAssistantProviderLif
     };
   }
 
+  private static String providerOwner(
+      HomeAssistantProviderConfiguration configuration,
+      HomeAssistantProviderConfiguration.Provider selected,
+      String haToken) {
+    String policy = configuration.policyRevision();
+    if (configuration.discovery().isPresent())
+      policy =
+          RelayPort.hash(
+              policy
+                  + "\0"
+                  + configuration
+                      .discovery()
+                      .orElseThrow()
+                      .fingerprint(configuration.homeAssistant()));
+    return HomeAssistantToolProvider.ownerFingerprint(
+        configuration.plowshare(),
+        configuration.homeAssistant().endpoint(),
+        haToken,
+        policy,
+        selected.runtime(configuration.timing()).binding());
+  }
+
   static void requirePrivatePaths(HomeAssistantProviderConfiguration configuration)
       throws IOException {
     requireNoSymlink(configuration.read().journal());
+    if (configuration.discovery().isPresent()) {
+      var identities = configuration.discovery().orElseThrow().identityJournal();
+      requireNoSymlink(identities);
+      HomeAssistantCapabilityIdentityStore.requireRetainedSnapshot(
+          identities, HomeAssistantToolJournal.hasRetainedState(configuration.read().journal()));
+    }
     if (configuration.control().isPresent())
       requireNoSymlink(configuration.control().orElseThrow().provider().journal());
   }

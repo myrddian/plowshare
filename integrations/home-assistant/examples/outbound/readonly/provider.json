@@ -2,7 +2,7 @@
   "version": 1,
   "plowshare": "https://plowshare.example.invalid",
   "binding": "house",
-  "policyRevision": "outbound-v1",
+  "policyRevision": "outbound-capabilities-v1",
   "homeAssistant": {
     "endpoint": "https://home-assistant.example.invalid",
     "tokenEnv": "HA_TOKEN",
@@ -13,6 +13,10 @@
       },
       "office.occupancy": {
         "entity": "binary_sensor.example_office_occupancy",
+        "attributes": []
+      },
+      "office.climate": {
+        "entity": "climate.example_office",
         "attributes": []
       }
     },
@@ -35,5 +39,12 @@
     "pollIntervalMillis": 500,
     "renewEveryMillis": 10000,
     "metadataMaxAgeMillis": 30000
+  },
+  "discovery": {
+    "mode": "fixed",
+    "profile": "standard_measurements",
+    "excludedEntities": [],
+    "excludedFields": [],
+    "identityJournal": "private/identities"
   }
 }

@@ -361,7 +361,7 @@ class HomeAssistantActionToolsTest {
             new HomeAssistantActionTools(
                 BINDING, overlap, READ, discovery, discovery, policy(), new Executor()));
     assertEquals(
-        4,
+        6,
         new HomeAssistantReadTools(
                 BINDING,
                 READ.prefix(),

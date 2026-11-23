@@ -1,7 +1,7 @@
 # Home Assistant package delivery graph
 
 Created: 17 November 2026. Coordinator: `/root` (this chat's primary agent).
-Last reconciled: 22 November 2026 against main `6de685f63e060f3003cb93233d2567e004269755`.
+Last reconciled: 24 November 2026 against main `f33a10daeaf09f84189edfba1039ee98c0b8ec9e`.
 Approval and current delivery progress are recorded in the linked ledger.
 The node table below is the initial planning snapshot, not a live status board.
 Baseline commit: `2d95d9ce4fb75e906b61e8f2afa940d04cf9bf2e` **plus the existing dirty working tree**. A commit ID alone
@@ -41,14 +41,91 @@ correct HA's prefix behavior. Preserve its rendering, ordering and freshness.
 Attachments, image generation, evaluation and HA configuration editing remain
 outside this delivery graph until separately scoped.
 
-The user has authorized committing and publishing this HA integration/recovery
-working tree as a pull request, with control disabled and validation evidence
-included. Merge is not part of the current request. The separately authorized
-read-only Production installation, Assist connection and automatic provider
-recovery are complete and independently approved below. Broader LIVE-01/device
+The HA integration/recovery was published and merged in PR #315. Its frozen
+publication handoff remains historical evidence. The current request adds
+read-only diagnostics using the existing SDK, with independent implementers and
+reviewers. The separately authorized read-only installation, Assist connection
+and automatic provider recovery are already recorded below. Broader LIVE-01/device
 control and optional cache measurements retain their explicit scope boundaries.
-The earlier PR #300 merge and frozen source-readiness evidence are historical;
-the current publication handoff records the later adapter fixes and recovery.
+
+## 24 November diagnostics amendment
+
+The [diagnostics contract](reviews/home-assistant-diagnostics-contract.md) defines
+the added tools, disclosure limits and failure cases before source acceptance.
+The ledger records actual dispatch, evidence, independent review and milestones.
+
+```mermaid
+graph LR
+  RECOVER01[RECOVER-01 accepted] --> DIAG01[DIAG-01 provider diagnostics]
+  HAFIX01[HA-FIX-01 accepted] --> DIAG02[DIAG-02 HA diagnostics download]
+  DIAG01 --> DIAG03[DIAG-03 integrated verification]
+  DIAG02 --> DIAG03
+```
+
+| Node | Deliverable | Implementer | Independent reviewer |
+| --- | --- | --- | --- |
+| DIAG-01 | Read-only health and admitted-resource diagnosis tools, exact grants and migration guidance | `/root/ha_diagnostics_provider_implementer` | `/root/ha_diagnostics_reviewer` |
+| DIAG-02 | HA diagnostics download independent of provider connectivity | `/root/ha_diagnostics_download_implementer` | `/root/ha_diagnostics_reviewer` |
+| DIAG-03 | Integrated package/check evidence and completion records | `/root` | `/root/ha_diagnostics_reviewer` |
+
+Control remains disabled and the entity/attribute allowlist stays unchanged.
+Diagnostics distinguish an unavailable entity from a failed operation and report
+unknown causes honestly. The integration's download data excludes credentials,
+private identifiers, origins, prompts, results and journals; HA supplies its own
+native metadata envelope and filename. No core/SDK changes, prompt rewriting or
+uncertain-work replay is authorized. Source acceptance does not establish a
+diagnostics rollout or live verification; those milestones stay explicit.
+
+## 24 November generic capability discovery amendment
+
+The user authorized documenting and implementing generic discovery/resolution
+using the existing SDK, independent implementers/reviewers and disabled control.
+The [design amendment](home-assistant-integration-design-and-plan.md#24-november-generic-read-discovery-amendment)
+and [typed capability contract](reviews/home-assistant-capability-contract.md)
+control this source delivery. The reviewed dirty diagnostics candidate is the
+baseline; its evidence/reports remain immutable. No live selection, publication
+or rollout is inferred from this implementation request.
+
+```mermaid
+graph LR
+  DIAG03[DIAG-03 accepted] --> CAPPLAN[CAP-PLAN design and contract]
+  CAPPLAN --> CAPEXPOSURE[CAP-EXPOSURE effective HA selection]
+  CAPPLAN --> CAP01[CAP-01 resource and field catalogue]
+  CAPEXPOSURE --> CAP01
+  CAP01 --> CAP02[CAP-02 SDK tools and profiles]
+  CAP01 --> CAP03[CAP-03 integrated acceptance]
+  CAPEXPOSURE --> CAP03
+  CAP02 --> CAP03
+```
+
+| Node | Deliverable | Implementer | Independent reviewer |
+| --- | --- | --- | --- |
+| CAP-PLAN | Design, narrow typed contracts, graph and acceptance cases | `/root` | `/root/ha_capability_reviewer` |
+| CAP-EXPOSURE | Versioned admin-only HA endpoint for effective conversation exposure, actual HA tests | `/root` | `/root/ha_capability_reviewer` |
+| CAP-01 | Stable identities, selected profiles, typed fields, native collection and catalogue reconciliation | `/root/ha_capability_foundation_implementer` | `/root/ha_capability_reviewer` |
+| CAP-02 | Policy-aware four-tool mode, composition, exact grants, disambiguation guidance and protocol tests | `/root/ha_capability_tools_implementer` | `/root/ha_capability_reviewer` |
+| CAP-03 | Combined regression/package evidence and completion records | `/root` | `/root/ha_capability_reviewer` |
+
+Implementation files stay disjoint. Root owns Python companion exposure support,
+design/plan/ledger and final evidence. CAP-01 owns native adapter/configuration and
+new capability/identity/source classes; CAP-02 owns tools/composition, examples,
+operator guidance and protocol fixtures. CAP-01 native implementation and the HA
+endpoint can proceed against their approved protocol independently. CAP-02 may
+proceed against the independently approved CAP-01 interface; node acceptance
+requires completed dependency reviews. Root serializes Gradle and source freezes.
+
+Absent discovery configuration preserves existing six-tool frozen behavior. New
+configuration opts into frozen or effective Assist selection and explicit or
+standard measurement fields; capability mode publishes only `health`, `resolve`,
+`describe_fields` and `read_fields`. Legacy data handlers cannot bypass that mode's
+policy, even with an old grant. Absent discovery configuration retains six tools. Unknown
+semantics, incompatible schemas, denied exposure and identity replacement remain
+explicit. The acceptance matrix covers name collisions, current versus target,
+field/schema changes, rename/replacement across restart, policy revocation,
+corrupt/wrong-owner stores, malformed/scoped input, metadata bounds and public SDK
+recovery without actions. Full non-database repository checks, actual HA Python
+checks and both package checks bind the final integrated source before approval.
+No core/SDK/shared-runtime extension or prompt/cache change is part of any node.
 
 Implementation amendment: the user subsequently instructed “Start it”; the
 coordinator-owned ledger records that authorization and the later decision to

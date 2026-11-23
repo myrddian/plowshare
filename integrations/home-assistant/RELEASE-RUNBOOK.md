@@ -114,6 +114,53 @@ are optional and do not block source or release readiness.
 
 ## Recover without repeating uncertain work
 
+### Diagnostics update
+
+The diagnostic tool declarations add two exact read grants and change the read
+provider's catalogue fingerprint. Do not start the new declarations against an
+old journal with a different identity. Drain the original owner, reconcile its
+catalogue and retained receipts through the supported SDK lifecycle, preserve the
+old configuration/artifact/journal, and select a new owned journal for the new
+catalogue. An unresolved receipt or uncertain withdrawal needs reconciliation;
+changing a path does not make that work safe to repeat. Keep entity selections,
+attribute policy and disabled control unchanged during this update.
+
+The HA diagnostics download is part of the Assist component archive, independent
+of the outbound provider. Install the reviewed archive through the ordinary HA
+component update process and retain its correlation storage. Downloading the
+integration's diagnostics does not create a new chat, retry a job, test the
+provider connection or cancel retained work. HA adds its own native download
+envelope and filename; inspect those before sharing the file.
+
+The frozen artifacts listed earlier describe the earlier release. Use the
+diagnostics amendment's final source/package evidence for this update; an earlier
+archive hash or review does not establish that the added diagnostic code is
+installed. Source acceptance, publication, installation and live verification
+remain separately recorded milestones.
+
+### Retained work
+
+A capability-mode update changes the catalogue from six legacy declarations to
+four read-only declarations and adds a separately owned identity journal. Back up
+and retain that journal alongside the SDK invocation journal. Its configuration
+digest includes selectors, field permissions and exclusions; retain the matching
+configuration for reconciliation and rollback. Do not change that digest or
+delete/reset a store to adopt earlier receipt authority. Apply the four exact
+read grants from the read-only template, preserve disabled control, and verify
+that legacy data declarations are absent after the separately authorized switch.
+
+The optional follow-Assist configuration also needs the matching companion's
+effective-exposure command. An unsupported command or incompatible version is a
+failed capability observation, not permission to use cached exposure, the stock
+preferences list or every entity. Test the intended target version before marking
+that mode live-validated.
+
+Startup refuses a missing identity snapshot when original SDK receipt/owner
+markers remain, before opening native or SDK connections. Preserve those markers
+and restore consistent state rather than bootstrapping another identity store.
+If both stores and all markers are lost, local startup cannot prove a prior
+installation existed; retain paired backups and configuration for that case.
+
 On timeout, lost acknowledgment, failed cleanup or startup error, stop intake and
 inspect the original retained job/receipt through supported Plowshare/operator
 controls. Preserve original identities. Do not repeat an action, create a new

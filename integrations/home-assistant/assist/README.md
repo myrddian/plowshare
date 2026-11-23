@@ -192,3 +192,63 @@ separate. Offline checks establish neither deployed identity nor live voice,
 authority, device state or notification delivery. Follow the
 [release and live acceptance plan](https://github.com/myrddian/plowshare/blob/main/docs/home-assistant-delivery-plan.md)
 for separately authorized operational work.
+
+## Download local diagnostics
+
+Open **Settings → Devices & services → Plowshare → the entry menu → Download
+diagnostics** as a Home Assistant administrator. The component implements HA's
+normal config-entry diagnostics API, including when setup failed or the separate
+outbound read provider is unreachable. Downloading performs no network probe,
+model submission, journal I/O, retry or device action.
+
+The Plowshare data section contains only version/configuration flags, entry and
+retained-runtime lifecycle, aggregate counts of pending/uncertain correlation
+records, and local SDK observations. It excludes credentials, origins, project/
+agent/account/user/session/job identifiers, prompts, device values, results and
+raw journal/configuration dumps. HA adds its own standard system/integration
+metadata and filename outside this section; review the complete download before
+sharing it.
+
+SDK connections are opened per request, so a previous successful connection or
+reply is historical evidence, **not current connectivity**. Observation timestamps
+are UTC and reset when the HA process restarts. Only fixed failure categories
+(transport, timeout, I/O, refusal, verification or storage) are retained, without
+exception text. Refusal does not establish a specific permission or allowance
+cause; transport failure does not establish a device fault. The latest gateway
+result status and its timestamp remain separate from the last failure and last
+successful SDK request. Shared correlation counts appear once even with both
+Conversation and AI Task enabled. Sending/uncertain rows remain fenced and are
+never replayed to obtain a diagnostic answer.
+
+The download does not observe the separate outbound provider or individual HA
+entity health. Use the provider's explicitly granted health/diagnose tools in
+legacy mode, or health and typed field observations in capability mode.
+A provider-hosted tool cannot answer while its own
+process is down, which is why the independent local download remains useful.
+Neither diagnostic path enables control or expands the selected entity/attribute
+policy.
+
+## Optional effective Assist selection
+
+The outbound provider's optional `assist_exposed` discovery mode uses this
+component's versioned native WebSocket command `plowshare/discovery/selection`.
+It observes effective `conversation` exposure using HA's canonical rules, including
+default exposure, explicit exclusions and subsequent revocation. The stock HA
+exposure-list command supplies stored preferences and is not used as a substitute.
+Frozen provider selection has no dependency on this command.
+
+The command is registered once at component setup, independently of Conversation/
+AI Task gateway availability. It requires an authenticated HA administrator,
+accepts only native request ID/type, and returns schema version 1, assistant
+`conversation` and a complete bounded entity-ID selection. It cannot select a
+different assistant, modify devices or submit Plowshare work. Missing HA exposure
+initialization, excessive inventory/response size and the finite observation
+deadline return explicit errors without a partial selection. The provider fails
+honestly when this capability is absent or denied, with no broader fallback.
+
+HA's exposure helper can materialize default preferences in its own entity
+registry or exposure store while determining effective selection. The component
+preserves that HA-owned behavior. It does not invoke device services, change
+control grants or touch Plowshare correlation journals. Only explicit provider
+configuration enables follow mode; installing this component does not change the
+provider's existing frozen scope or enable control.

@@ -1,0 +1,575 @@
+{
+  "schema_version": 1,
+  "candidate_id": "ha-diagnostics-v1",
+  "base_commit": "f33a10daeaf09f84189edfba1039ee98c0b8ec9e",
+  "date": "2026-11-24",
+  "scope": "Adapter-only read diagnostics and native HA diagnostics download; existing SDK; control disabled; selected entities/attributes unchanged.",
+  "source_sha256": {
+    "docs/home-assistant-delivery-plan.md": "360c6b1871ebfdd06ee2559520c6bf10a1ead8333556554cc8d26194844feec4",
+    "docs/reviews/home-assistant-diagnostics-contract.md": "23ce30580f90d3d2558cc8af0780defebda3002738b04619eed0052427f1f260",
+    "docs/reviews/home-assistant-diagnostics-delivery.md": "5a6604fd0050e0ce3418f541d0dea4115d23c463dd3982909357d77c762bc122",
+    "integrations/home-assistant/ACTION-PROVIDER.md": "77fe587c8ecdf020de6a69e2c399e7082711904908a5cb8a5e395156d53a6a20",
+    "integrations/home-assistant/OBSERVATION-ROUTES.md": "7aa3092688d1749938979e7d879ca8c4085f2f2539cdeaa8a73f587e5ca0231a",
+    "integrations/home-assistant/PROVIDER-HOST.md": "3838641f1ec6064088755b4a3e9e172e76f83b854fd1cc2d62eb27743c106695",
+    "integrations/home-assistant/README.md": "3430860080959b87e5f706214566496260078b7fe611df447296e0eb2801c02f",
+    "integrations/home-assistant/RELEASE-RUNBOOK.md": "e48f437b7e2de0eea115538036e38def51db2657a14429b72b89dd565057d290",
+    "integrations/home-assistant/RESOURCE-CONTRACTS.md": "dd64f459d73621ea697a40c571cb232d77ad6dc1dd76ea22b4ed488764e88882",
+    "integrations/home-assistant/TOOL-PROVIDER.md": "da1866dab736e610cce95746b68357a6371676cd58ef1b9b7ed4d9f035ce1871",
+    "integrations/home-assistant/assist/PACKAGE-PROFILES.md": "b1167bf1a8cfaca90bd7ddedef283f9993ebef60d190569ca0b82999aa097e76",
+    "integrations/home-assistant/assist/README.md": "77d4f61175c4617906852abee7c670d5bf54dce32af87ff965b0b790f7fece7a",
+    "integrations/home-assistant/assist/custom_components/plowshare/__init__.py": "210b79f9782601ef6b85a72ccf0929b2521a48153873ddb541421ed31ae98fb2",
+    "integrations/home-assistant/assist/custom_components/plowshare/agent.py": "dfeb69e32b8fa44b71cc57c92148b76c80f418c86f16052094fefe220dac0051",
+    "integrations/home-assistant/assist/custom_components/plowshare/ai_task.py": "28d806febd0a7918c1227bfbf665368789131c0e6e644bbb6baeb3d7cabf7103",
+    "integrations/home-assistant/assist/custom_components/plowshare/config.py": "0e8a1845335fb7173ad0ea2a01a2ea0f5db0d5a5d506cdd29241c3d33def81b1",
+    "integrations/home-assistant/assist/custom_components/plowshare/config_flow.py": "2b61f7f74181897edfef0cc8fc04a07e5e76464fab4277ecc522413ec45912e5",
+    "integrations/home-assistant/assist/custom_components/plowshare/const.py": "efa562a954999259dd45b28970c8d7d197d65719afb5e16749921af34c8b6601",
+    "integrations/home-assistant/assist/custom_components/plowshare/conversation.py": "746df42a7b8f71a44327654cc80d165b8cb8f551464f255b2828f506ef6b8de8",
+    "integrations/home-assistant/assist/custom_components/plowshare/diagnostic_models.py": "4a858b1e4d94dfa9dd22e4c125b95759b8de50e3d86ef484b551d81fb527f6d0",
+    "integrations/home-assistant/assist/custom_components/plowshare/diagnostics.py": "91f964843a401d622ef7ef313bc2e61174381bf5d3189e7a0e052222c25a1796",
+    "integrations/home-assistant/assist/custom_components/plowshare/manifest.json": "7d01329632e393be487aa9c7a926a1debe8d780a2134f6002a8e919a938cf2d7",
+    "integrations/home-assistant/assist/custom_components/plowshare/models.py": "1289cc93024ba4d05fe0e86db854afefabb561e79e61e202b4eb48dc2389262f",
+    "integrations/home-assistant/assist/custom_components/plowshare/requests.py": "15a6cd457b02c7236e52d77a56a7cd47357b91409524fa569e2b50ed8ba3ba23",
+    "integrations/home-assistant/assist/custom_components/plowshare/runtime.py": "22bc9b7e27917da0bfef3bdb2b0ab76194e67a22d0e0c2d5dc8bc72d04475b00",
+    "integrations/home-assistant/assist/custom_components/plowshare/storage.py": "4161b97a7f1330ec1a5e13a34e1ad0c861730a4911738899e2089fa3cd16b257",
+    "integrations/home-assistant/assist/custom_components/plowshare/strings.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/custom_components/plowshare/structured.py": "1d60788b772f7c2ec6f3c4d79acc5ee23a914be4b33fc70df8092803dcc50b5b",
+    "integrations/home-assistant/assist/custom_components/plowshare/translations/en.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+    "integrations/home-assistant/assist/custom_components/plowshare/validation.py": "a4b081f8ca396e62a9f87e1a6d2dfa5c72ac1ceb71e6aa24760b8e54f63cbfa5",
+    "integrations/home-assistant/assist/pyproject.toml": "01c3de637c44fc6a086365dc91e4349cf6b54ecb2ca00a21812f350f2da824af",
+    "integrations/home-assistant/assist/scripts/check.py": "49c23ec87a8f11c569ddec5253114b76933bc4a6c7caadd594ca51dde8c2ecee",
+    "integrations/home-assistant/assist/scripts/package.py": "ff10046a02786d8cc980b79328e1011ea8d7a495452f5737b2684a23f57f519e",
+    "integrations/home-assistant/assist/tests/installed_contract.py": "75e6c93dc43877008b1cb3f2ce583cf8e5d8448c1a6123d75e325312308cea09",
+    "integrations/home-assistant/assist/tests/support.py": "f840b543eb4cda7446a8bfe6156717a2525fa881a5d4fd0f126249d665754943",
+    "integrations/home-assistant/assist/tests/test_agent.py": "0e11cd5d5c9f0d82760d43457f2d24fc33234f44922337c6569597f3e43ce92c",
+    "integrations/home-assistant/assist/tests/test_ai_task.py": "22f89695978307fa7095408396aed8d1626c5b034d217e35a46d4b557aa64c07",
+    "integrations/home-assistant/assist/tests/test_assist_pipeline.py": "30a73cd5d7bed02bfec3008d95a10b62dc85637849da30984df27f7647f46226",
+    "integrations/home-assistant/assist/tests/test_conversation_config.py": "e2271007aeada442b8cba5fcdbf134bb0ebe1c566a5cc58facd9ff5b7d0f1f9a",
+    "integrations/home-assistant/assist/tests/test_diagnostics.py": "46e0cf90e1a00b313ea5ad1ed4730794d26fb78aa23d0c123eb6fbe718e1cda1",
+    "integrations/home-assistant/assist/tests/test_entry_setup.py": "ad4c17b000b24562479d40419879138eed4066c413789bf95e311b4923b5764c",
+    "integrations/home-assistant/assist/tests/test_gateway.py": "a3484daa56e8d8e02af8acd990c0e16b3fe156b8206cbd224803342f7b6f0e3a",
+    "integrations/home-assistant/assist/tests/test_home_assistant.py": "289e2ad6a0931eecf5d074cc00a8c13295b5c93378692268dada4b5640cef9f9",
+    "integrations/home-assistant/assist/tests/test_install_lifecycle.py": "0bb33e47248391ad8c8e7ec2aaec29bb686267b461a68ee74694bee1afd1e5ab",
+    "integrations/home-assistant/assist/tests/test_installed_contract.py": "bba12505679d9b2334b43bfe881dad576acc32a531bbb1913e6b3a11f291ffc1",
+    "integrations/home-assistant/assist/tests/test_packaging.py": "eff695f81f6087bbe852b67431dede718563221a8fc3a395f798c6f5f60fc553",
+    "integrations/home-assistant/assist/tests/test_socket.py": "93e0cef063178106cf12c3fd7ea08b92d49434c81f9bbbaa7c548852bcde8c38",
+    "integrations/home-assistant/assist/tests/test_storage.py": "5fe70f0ead268e08e2cf087639c77bcfc8a5a423c62c418cbae97697417daa50",
+    "integrations/home-assistant/assist/tests/test_structured.py": "304cbdb7631acc76b372fa6be42bbaf2f7c15c1f23ca4fe6a9f5281c9406ead0",
+    "integrations/home-assistant/build.gradle.kts": "f6c26532ed02fe90c764c1ed95e238025a165c67ec2c840294979648251da267",
+    "integrations/home-assistant/examples/application/README.md": "31d763d7e65371296d0d1cb942c2e535577cf43f8b46eb494ef3d9acd6ac9092",
+    "integrations/home-assistant/examples/application/agents/house_coordinator.md": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
+    "integrations/home-assistant/examples/application/orchestrations/investigate_office_heat.md": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
+    "integrations/home-assistant/examples/application/plowshare.json": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_controller.md": "b52a4607ef6885e4a1eef1dcf8d3346925b55fd5fd249a681f6df2949bc7a7ca",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+    "integrations/home-assistant/examples/application/profiles/control/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/control/plowshare.json": "401fb5d60217d00260c758471f8de29d1219804c15bac8de7df5703f7624bcb0",
+    "integrations/home-assistant/examples/application/profiles/control/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/application/profiles/readonly/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+    "integrations/home-assistant/examples/application/profiles/readonly/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/readonly/plowshare.json": "47df000af98e7cc6933c7bfba32af102e3b9f41b3991bf5111e383adf1b9cf8a",
+    "integrations/home-assistant/examples/application/profiles/readonly/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/application/profiles/task/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+    "integrations/home-assistant/examples/application/profiles/task/plowshare.json": "eb30e577c8057fc4f1a0310e1a6e1ead302170bf2d67031abb23150ae7ab3fb1",
+    "integrations/home-assistant/examples/application/skills/house-evidence/SKILL.md": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
+    "integrations/home-assistant/examples/config.json": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
+    "integrations/home-assistant/examples/office.mjs": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
+    "integrations/home-assistant/examples/outbound/README.md": "7b56fd2d07382551fb42e86c83602188daa121b48c5fb628bcc8a32f804353b3",
+    "integrations/home-assistant/examples/outbound/control/application/agents/house_controller.md": "24d3a5734b6189c044739be6ac54cc2aa3284c85ce7a35bc05601e41d82c1e2f",
+    "integrations/home-assistant/examples/outbound/control/application/plowshare.json": "ccce2a7bc5f01af7c0ca3c71db4253ce679e5887a93a7e2421d1eebebc5b7e4a",
+    "integrations/home-assistant/examples/outbound/control/application/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+    "integrations/home-assistant/examples/outbound/control/provider.json": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+    "integrations/home-assistant/examples/outbound/readonly/application/agents/house_reader.md": "5753e4997525297e14b9cc32bdf8c5be4f0bc992d1d8934c2849cf3350e5c748",
+    "integrations/home-assistant/examples/outbound/readonly/application/plowshare.json": "e1daf4fc03d1a7c5cba39e7c3914468ecd61dd0f36545acf3b2d8ae551f4bd5b",
+    "integrations/home-assistant/examples/outbound/readonly/application/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+    "integrations/home-assistant/examples/outbound/readonly/provider.json": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+    "integrations/home-assistant/scripts/check-outbound-package.py": "5281be2b97a660bf16f2468f3fa7805e751305793788e3de786cc79346f1620c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionExecutor.java": "c861895a316e1f8803087ea9c22eff826397bd45032904aa568914cd131bfa6e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionOfferValidator.java": "8397c83dc70604e7a076f7ba0167e70ea0b6336e4d4a18e8316f2e5f938004ef",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ActionVerifier.java": "b47fed524cae1924f28cac34edb3a5e9e4941bb2c86056c5da15d622f3621944",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionPolicy.java": "c1a3da9d5d6408848993bbbd082f1ca901f74ef92d12c56122ad15ac223e505b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProfiles.java": "9b6692f03e587019a38b985dda2c5dd92d4fcf103fe150a2cac741642124b0b4",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionTools.java": "2c8d62d69b30ebf7c4cd39040c3f79cb30b25e493a0d96e737ca18ba19a7dc1e",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifier.java": "579e5c42c0996e20c9e829b60f08fd171356416186f017c719ad927e1eda861c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapter.java": "24baa8a0c5116b71f989ff16903ba5ba134c312409d2f48b8a1bae7b1a1f21ce",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServices.java": "37171d5e34242e48f1cd13a939bbd249d23d54c6972a55f2aecb3e8250071df4",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantDiscoveryPolicy.java": "05828ef6f9dd4e4168fa03ff4852117a5d0111d7057f32ef6809a529f7f769be",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantFactory.java": "daca8f08ecfd81309e5b2dd384c34a83473ca40b9f27e8d8ea58e8fd0a0d42b5",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMain.java": "85d8767ecf393345bf5f887b5969dd8d64866da70ef8a70e60edc93293fcead2",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantObservations.java": "822d56f25881eef7092d058f251884d1aad10a510f324fe6da1da7d0da97860c",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfiguration.java": "db8983c94a3e9811f721ceee1bb34bcb92fd0e004ff92183ec5bd4aa9f8f631b",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderDiagnostics.java": "49c391e7b7d38724badf1741b9bbe18e2e4b8cfbcc28283577a4c2f606d0e619",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHost.java": "508e84f2a7381631ffc81ceb6a48d6cee28a8d38dc48e14b4da2c68a8d77fc03",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderJournal.java": "6b6762a050d34f91cf2daa180dd724279b807b57065ab27cb1e2f83cac8ff3a6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderLifecycle.java": "85ce158535b4ae1b3682e22e49f6c8aa942005c4595b080e73960442b6090ca6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadDiagnostics.java": "41c49be63b62ec99c661a21ced4bcf04eb475d7550354cd9d3fe6ca9f6b29738",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadTools.java": "fe4bf133ed1e6fd4611e639455b19d2f131e6b00f11794d0d1b270db1a3fcd24",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalog.java": "186f5dddbb62622a3e57f192882a2acd3ca4f93cda66f5cd93abd7c6b1c46acb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceSource.java": "17940d584e64aaa0fd2940bcf8a6be5c0e22f1bfec28edf3163faa9ce0f36623",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResources.java": "b8d8671e10b78a27665b6bb9aa5f683f6fd62f56b8868ea9c587cf0bdfb3ed56",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantSettings.java": "ce80e740018e1ae17f743c8c1e9054b0b71b6c3ee1da569c51688b076cbc8652",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolHandlers.java": "bea32d08c93c6a77e0e46e333fa454b1ba3f9d72bd7deca97f1772b6db749918",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournal.java": "843b2e15f2ba84e2939047166a2c134919427dc7dd72da175da6d6b0b4df1378",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProvider.java": "438f44f75e3f9a2419e5dbd835302d0c89efa15263b1d5494d997bab7b2b11e6",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransport.java": "e05acd7aee44abcea06f63629d48a2bf1411afc19641a28a538213f0acd9aa02",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/HomeAssistantWire.java": "34477a58ce99edc6677c61e9079ae7468c88f85350bb38519a7d9e0c608504cb",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceDiscovery.java": "335f9b36528b451afca8e73f1c344602f3c0d12803a55aa2dc64434fbc1ebc3d",
+    "integrations/home-assistant/src/main/java/io/aeyer/plowshare/integrations/ha/ResourceReader.java": "02caa379adcf11b8ad66398a01444dc8bb0d442cb5504738f3bbcfbb64632b53",
+    "integrations/home-assistant/src/main/resources/META-INF/services/io.aeyer.plowshare.integrations.AdapterFactory": "658709c5d6bf80ea27d598eb632d84d45140a8d6a68a883b8bf86fab9f24fd2b",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ApplicationProfilesTest.java": "2bacbb67567e389f2699a4071ac416afd904eb128ee6533f97e0cbdf260a090f",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HarnessPipelineTest.java": "057a136ede88a26ba5fe6121c1792aa41f0b07303d639c109dd9ed860d2ae4eb",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionOfferFenceTest.java": "1ae2bda7b5f55f9cc0f01f94a6f8dc9c2511ac44d6a4a7fa836cbec5620adb25",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionProviderTest.java": "adc9a1d4c8e108322f6efcaf07a8b12b0fd78c2a2c29703e44b4a844bd2eeade",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionToolsTest.java": "472c4101d5276f35d439cf012764b4924c0dab8adcb1f0090aa67798c98c9673",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantActionVerifierTest.java": "88d382e445909466ac29a0d131a8f0f5a3f95e3e9b26db787f8d04a7aa91fc9d",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantAdapterTest.java": "5009ccc209c6bf055f14ed59f16da29aacfce342547368f4fc97de634a5802b0",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantControlServicesTest.java": "a39bd9c433c6c048a4c43a7ef1a9a015937b94237f871965581f20075683b804",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantMainTest.java": "d375a59a60cd1adf41ee9c0aa38daeeb0273901376a3e6a75b669bc9750114b8",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeActionsTest.java": "5fe5c2d276c872a01c25fe9faf3f1927464be95e26a0499fd9d9de5f0ecddc01",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantNativeResourcesTest.java": "15ed225e175e9b64c9afce076d26c4bcd7db1b7654ab43a8c61f92f07f18491e",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantObservationLifecycleTest.java": "71f0565fd71d6ff28e3e72d9e789c0e40b03a1549ce780980271a7ca9e88d58c",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderConfigurationTest.java": "135eba7cc8a02ede436128f2725f3d9e4a1ec50b3355455753d37891d12ad355",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderDiagnosticsTest.java": "62ac9ef265c80c99cf90823978c3afa5e3181dfe017e36b90f3d887591cfd28a",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantProviderHostTest.java": "ec828a3c9bc4c161d7f385e2438b1fabd0f88466cd3ddb386267a084bc62e270",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantReadToolsTest.java": "9b7606077c37cee927660ac4817dffb57823e0860de6e985926d242cbc0a252f",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceCatalogTest.java": "465be766d24dbb571054c4eb1da859cc79daac238383fd44443823d37352c23c",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantResourceContractsTest.java": "beb90d8c2225ca5dc3b2cf02878133a9a854e805c24039e1fd525e90009c99f9",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolJournalTest.java": "219deafb9a791287bcbf453bc92abe6c5bbb2f2ab3fe8cb441196740d595d961",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolProviderTest.java": "1065a986562afab15974d36cf107e6f5cd41cb7d285a4bc64d9f472e143cb375",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/HomeAssistantToolTransportTest.java": "a4f8cb1855585025360b2530a86304eaa69ce32c3b5a9d2c0577c59e1a32f236",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProfilesTest.java": "1391bfcf550401960bddf58b6c4d57696b367a54f77d4352ecf27ee79881a938",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/OutboundProviderSdkValidationTest.java": "005ec3d8e6110448f80934709bbff7a2b6fe3d3fb1704c05241c3fa0921acb03",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/PipelineTest.java": "8a73f14f0c78317f5bdc89268c92e820c36e4ac6e7412d5967a136398645147a",
+    "integrations/home-assistant/src/test/java/io/aeyer/plowshare/integrations/ha/ProjectExamplesTest.java": "653633b10113422ce8c97643c83bd778a3b7b9edabbb3da894cfbd3df0a896ae"
+  },
+  "source_snapshot_sha256": "45a63f0cc51a2f17362677c8d55460596a7237319dd451cc724fb4e409f6ffd0",
+  "source_scope_note": "All HA source inputs plus coordinator contract/plan/delivery. Mutable ledger closure metadata and independent reviewer reports are excluded to avoid recursive evidence hashes; their own identities are recorded in the ledger.",
+  "checks": [
+    {
+      "command": "Python3.14 integrations/home-assistant/assist/scripts/check.py",
+      "result": "PASS: Ruff check/format; 150 tests; HA2026.9.4",
+      "log_sha256": "a435f1a0f78a7e9dd37e751b736b78dbfd84fa540f4c7870775e1633242fa6d9"
+    },
+    {
+      "command": "./gradlew format formatCheck check :plowshare-integration-home-assistant:installDist --max-workers=2",
+      "result": "PASS in 4m44s; 165 tasks; no full-db",
+      "log_sha256": "66729a649ce511148f44b6b59ea4350e5801357cd02e1cd603f1e5e5b928db1d",
+      "ha_test_xml": {
+        "tests": 200,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "ha_suite_count": 24
+    },
+    {
+      "command": "./gradlew :plowshare-integration-home-assistant:installDist --max-workers=2",
+      "result": "PASS: final guide refresh; source/distribution guide identical",
+      "log_sha256": "a6a3cf1ed10e3372aef8b94acb75dbcebb7880a01a25a1d95e1a093b484a4ccb"
+    },
+    {
+      "command": "python3 integrations/home-assistant/scripts/check-outbound-package.py --distribution <fresh-install> --report <private-report>",
+      "result": "PASS: eight checks, 56 files",
+      "log_sha256": "45c412d228cda8276033e6996a406179383c57ba0eaf316cab7e0744ff940889"
+    }
+  ],
+  "assist_artifact": {
+    "result": "PASS",
+    "version": "0.1.2",
+    "archive_sha256": "e1a82d72e4ceff3a0849e6c28d84a2f87221a9c898089883fd14abecd161ea5a",
+    "entry_count": 53,
+    "contents_manifest_verified": true,
+    "sdk_source_unchanged": true,
+    "bundled_sdk_file_count": 19,
+    "sha256": {
+      "INSTALL.md": "77d4f61175c4617906852abee7c670d5bf54dce32af87ff965b0b790f7fece7a",
+      "custom_components/plowshare/__init__.py": "210b79f9782601ef6b85a72ccf0929b2521a48153873ddb541421ed31ae98fb2",
+      "custom_components/plowshare/_vendor/LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "custom_components/plowshare/_vendor/__init__.py": "4120095377ed9f0ee258ae59f1286da7ac0ee770df340dd75120991cfb67045f",
+      "custom_components/plowshare/_vendor/plowshare/__init__.py": "3d2339236f43f12e18baaf0e3927c5981846b8bf45c57fefaf50716f4f0d14f3",
+      "custom_components/plowshare/_vendor/plowshare/_codec.py": "82cd489ac37b4e5dbb064303491e5fdce73e138192136452949bd870e343e303",
+      "custom_components/plowshare/_vendor/plowshare/_interchange.py": "900f3870e85106ee89d1f85e0bc4de270f4ea465a7b511cfd64661273db1eecc",
+      "custom_components/plowshare/_vendor/plowshare/_packets.py": "3cc90ac5ce4c57308b1add18ce923cca57f31c6d6f3da0b8a3fedc70b2f1c1f1",
+      "custom_components/plowshare/_vendor/plowshare/_protocol.py": "174f933d80a6d0388b273dee515591c19564795fb22b2eafad292d21e87fe257",
+      "custom_components/plowshare/_vendor/plowshare/_schemas.json": "5f61347547a2fa35ae7e784d05c41c3d7870b1652813c8c6bdf43cbe662d550d",
+      "custom_components/plowshare/_vendor/plowshare/_validation.py": "b6eb833c83ea10d773f281ec363ff0cd3dd2a91719c11a29bb81bd982668ef15",
+      "custom_components/plowshare/_vendor/plowshare/_values.py": "7b131006e6ebd4b4777545b8d0925fd702ea0fedd59e6a90c7d5f24259165052",
+      "custom_components/plowshare/_vendor/plowshare/acting.py": "52f7ca29bda1ca4db61e1a187d4da43884d5d61ebd159018270268e494ad3501",
+      "custom_components/plowshare/_vendor/plowshare/auth.py": "8ccb6c47ec63374c63a586b209811faf51d62e20f6a48a586c27a0318cbc0bdb",
+      "custom_components/plowshare/_vendor/plowshare/client.py": "17a253c3bd91df637956df92e3eaeffda10c65a6e9041c59d971afab14b77805",
+      "custom_components/plowshare/_vendor/plowshare/contracts.py": "ee0d4c54ab28ccc825a0ae7b6b783d00a3a967ce74430fb6b116c98a4b71cb46",
+      "custom_components/plowshare/_vendor/plowshare/credentials.py": "65bbf295f103f25fb2e75a9770f306f504366c43e49bc20f49519f362e657888",
+      "custom_components/plowshare/_vendor/plowshare/py.typed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "custom_components/plowshare/_vendor/plowshare/relay_blobs.py": "b9e5b1a36e7f98ca5fafa973dfb9df310d5f49b36bc048d95768d83270133de0",
+      "custom_components/plowshare/_vendor/plowshare/schema_definition.py": "051704a5387cde95e957b6fe14b164c5b62a0eec8604a3b3c60f94739adab5e5",
+      "custom_components/plowshare/_vendor/plowshare/tool_journal.py": "2848e5d4d0f4f388a6fb50112559f41fba857ab726df0d0f9b2adc8bb1145edc",
+      "custom_components/plowshare/_vendor/plowshare/tool_schemas.py": "5a990cf801957b29792e749ef84ac6239f8f9f87350c8588fbb221d501f2343a",
+      "custom_components/plowshare/_vendor/plowshare/tools.py": "e6fe1e412195246eb17db0133858579c6217f052a371c03287eee741a951ef26",
+      "custom_components/plowshare/agent.py": "dfeb69e32b8fa44b71cc57c92148b76c80f418c86f16052094fefe220dac0051",
+      "custom_components/plowshare/ai_task.py": "28d806febd0a7918c1227bfbf665368789131c0e6e644bbb6baeb3d7cabf7103",
+      "custom_components/plowshare/config.py": "0e8a1845335fb7173ad0ea2a01a2ea0f5db0d5a5d506cdd29241c3d33def81b1",
+      "custom_components/plowshare/config_flow.py": "2b61f7f74181897edfef0cc8fc04a07e5e76464fab4277ecc522413ec45912e5",
+      "custom_components/plowshare/const.py": "efa562a954999259dd45b28970c8d7d197d65719afb5e16749921af34c8b6601",
+      "custom_components/plowshare/conversation.py": "746df42a7b8f71a44327654cc80d165b8cb8f551464f255b2828f506ef6b8de8",
+      "custom_components/plowshare/diagnostic_models.py": "4a858b1e4d94dfa9dd22e4c125b95759b8de50e3d86ef484b551d81fb527f6d0",
+      "custom_components/plowshare/diagnostics.py": "91f964843a401d622ef7ef313bc2e61174381bf5d3189e7a0e052222c25a1796",
+      "custom_components/plowshare/manifest.json": "7d01329632e393be487aa9c7a926a1debe8d780a2134f6002a8e919a938cf2d7",
+      "custom_components/plowshare/models.py": "1289cc93024ba4d05fe0e86db854afefabb561e79e61e202b4eb48dc2389262f",
+      "custom_components/plowshare/requests.py": "15a6cd457b02c7236e52d77a56a7cd47357b91409524fa569e2b50ed8ba3ba23",
+      "custom_components/plowshare/runtime.py": "22bc9b7e27917da0bfef3bdb2b0ab76194e67a22d0e0c2d5dc8bc72d04475b00",
+      "custom_components/plowshare/storage.py": "4161b97a7f1330ec1a5e13a34e1ad0c861730a4911738899e2089fa3cd16b257",
+      "custom_components/plowshare/strings.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+      "custom_components/plowshare/structured.py": "1d60788b772f7c2ec6f3c4d79acc5ee23a914be4b33fc70df8092803dcc50b5b",
+      "custom_components/plowshare/translations/en.json": "c0aab416beaaa93b741bf6477de827c6a3d65785be153758f8e5c286c26ddd23",
+      "custom_components/plowshare/validation.py": "a4b081f8ca396e62a9f87e1a6d2dfa5c72ac1ceb71e6aa24760b8e54f63cbfa5",
+      "profiles/README.md": "b1167bf1a8cfaca90bd7ddedef283f9993ebef60d190569ca0b82999aa097e76",
+      "profiles/control/agents/house_controller.md": "b52a4607ef6885e4a1eef1dcf8d3346925b55fd5fd249a681f6df2949bc7a7ca",
+      "profiles/control/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+      "profiles/control/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "profiles/control/plowshare.json": "401fb5d60217d00260c758471f8de29d1219804c15bac8de7df5703f7624bcb0",
+      "profiles/control/server/tools.json": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+      "profiles/readonly/agents/house_reader.md": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+      "profiles/readonly/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "profiles/readonly/plowshare.json": "47df000af98e7cc6933c7bfba32af102e3b9f41b3991bf5111e383adf1b9cf8a",
+      "profiles/readonly/server/tools.json": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+      "profiles/task/agents/house_task.md": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+      "profiles/task/plowshare.json": "eb30e577c8057fc4f1a0310e1a6e1ead302170bf2d67031abb23150ae7ab3fb1"
+    }
+  },
+  "outbound_artifact": {
+    "result": "PASS",
+    "scope": "fresh installed POSIX launcher and jars; no real server, HA, model or database",
+    "java_major": 21,
+    "platform": "darwin",
+    "checks": [
+      "readonly: offline provider config",
+      "control: offline provider config",
+      "legacy: offline manual-alias config",
+      "readonly: retained journals untouched",
+      "control: retained journals untouched",
+      "prompt input remains refused",
+      "contradictory control principal refused",
+      "malformed provider CLI refused"
+    ],
+    "payload_checks": {
+      "runtime_jars": 26,
+      "local_document_links": 11
+    },
+    "artifacts": [
+      {
+        "path": "PROVIDER-HOST.md",
+        "sha256": "3838641f1ec6064088755b4a3e9e172e76f83b854fd1cc2d62eb27743c106695",
+        "bytes": 11929
+      },
+      {
+        "path": "bin/plowshare-integration-home-assistant",
+        "sha256": "dfcd1adf9034d2c411c3593f57d93c520739001cf142d7369fe03cd20268fbbc",
+        "bytes": 9923
+      },
+      {
+        "path": "bin/plowshare-integration-home-assistant.bat",
+        "sha256": "1ecc590a0c30da5a53ad7280dd057561188d9e853023637fd7c630b7286ab147",
+        "bytes": 4162
+      },
+      {
+        "path": "examples/application/README.md",
+        "sha256": "31d763d7e65371296d0d1cb942c2e535577cf43f8b46eb494ef3d9acd6ac9092",
+        "bytes": 7295
+      },
+      {
+        "path": "examples/application/agents/house_coordinator.md",
+        "sha256": "5ac32c02fa50526a73b378dd0f106b3061fc689ae3f0f872e0ec46bebd19a816",
+        "bytes": 2469
+      },
+      {
+        "path": "examples/application/orchestrations/investigate_office_heat.md",
+        "sha256": "d245844c8ac269e87b9520ce5f30560141495e8330c3506e185ad7da644cdd50",
+        "bytes": 1654
+      },
+      {
+        "path": "examples/application/plowshare.json",
+        "sha256": "1b8bd8a2187f2751d5321cf39dcf10256c93c43b14f5b47b56bfe4444b856b6a",
+        "bytes": 301
+      },
+      {
+        "path": "examples/application/profiles/control/agents/house_controller.md",
+        "sha256": "b52a4607ef6885e4a1eef1dcf8d3346925b55fd5fd249a681f6df2949bc7a7ca",
+        "bytes": 1982
+      },
+      {
+        "path": "examples/application/profiles/control/agents/house_reader.md",
+        "sha256": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+        "bytes": 1592
+      },
+      {
+        "path": "examples/application/profiles/control/agents/house_task.md",
+        "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+        "bytes": 1025
+      },
+      {
+        "path": "examples/application/profiles/control/plowshare.json",
+        "sha256": "401fb5d60217d00260c758471f8de29d1219804c15bac8de7df5703f7624bcb0",
+        "bytes": 1047
+      },
+      {
+        "path": "examples/application/profiles/control/server/tools.json",
+        "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+        "bytes": 378
+      },
+      {
+        "path": "examples/application/profiles/readonly/agents/house_reader.md",
+        "sha256": "8a3e2daa446ae30fc5860805a48da496d0f2274cb3c33bd0ebadb8a5af5e8ec6",
+        "bytes": 1592
+      },
+      {
+        "path": "examples/application/profiles/readonly/agents/house_task.md",
+        "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+        "bytes": 1025
+      },
+      {
+        "path": "examples/application/profiles/readonly/plowshare.json",
+        "sha256": "47df000af98e7cc6933c7bfba32af102e3b9f41b3991bf5111e383adf1b9cf8a",
+        "bytes": 718
+      },
+      {
+        "path": "examples/application/profiles/readonly/server/tools.json",
+        "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+        "bytes": 216
+      },
+      {
+        "path": "examples/application/profiles/task/agents/house_task.md",
+        "sha256": "e7c57ace2b999b93b1159b2af03f2d8e22f1a49a84af818f35c0891630dc82f3",
+        "bytes": 1025
+      },
+      {
+        "path": "examples/application/profiles/task/plowshare.json",
+        "sha256": "eb30e577c8057fc4f1a0310e1a6e1ead302170bf2d67031abb23150ae7ab3fb1",
+        "bytes": 376
+      },
+      {
+        "path": "examples/application/skills/house-evidence/SKILL.md",
+        "sha256": "9c1b41ee03d2ba4da2bc03087597d19dcb3a08cb56a7cbd23480e5bf43fda13b",
+        "bytes": 894
+      },
+      {
+        "path": "examples/config.json",
+        "sha256": "bd1679e4c41b06bc55da3695bf66f14b1a79678e3dde3940ce79dc291607d7a9",
+        "bytes": 2601
+      },
+      {
+        "path": "examples/office.mjs",
+        "sha256": "cde2e1f8ab9825c6225b4fc7e53e83b434e25c7dbb4f281726e046a8e64a72db",
+        "bytes": 821
+      },
+      {
+        "path": "examples/outbound/README.md",
+        "sha256": "7b56fd2d07382551fb42e86c83602188daa121b48c5fb628bcc8a32f804353b3",
+        "bytes": 5767
+      },
+      {
+        "path": "examples/outbound/control/application/agents/house_controller.md",
+        "sha256": "24d3a5734b6189c044739be6ac54cc2aa3284c85ce7a35bc05601e41d82c1e2f",
+        "bytes": 2039
+      },
+      {
+        "path": "examples/outbound/control/application/plowshare.json",
+        "sha256": "ccce2a7bc5f01af7c0ca3c71db4253ce679e5887a93a7e2421d1eebebc5b7e4a",
+        "bytes": 975
+      },
+      {
+        "path": "examples/outbound/control/application/server/tools.json",
+        "sha256": "d6cae5e5a4ea7ae1681bbcf6dd75bebcfe04e3c54b21f0316a228b9c7104763f",
+        "bytes": 378
+      },
+      {
+        "path": "examples/outbound/control/provider.json",
+        "sha256": "a64433e52b85e5254848723e0ae99f7e0da32faceb58295c469e4caf58591e96",
+        "bytes": 1422
+      },
+      {
+        "path": "examples/outbound/readonly/application/agents/house_reader.md",
+        "sha256": "5753e4997525297e14b9cc32bdf8c5be4f0bc992d1d8934c2849cf3350e5c748",
+        "bytes": 1553
+      },
+      {
+        "path": "examples/outbound/readonly/application/plowshare.json",
+        "sha256": "e1daf4fc03d1a7c5cba39e7c3914468ecd61dd0f36545acf3b2d8ae551f4bd5b",
+        "bytes": 719
+      },
+      {
+        "path": "examples/outbound/readonly/application/server/tools.json",
+        "sha256": "9418cd32d5f64a8c3e34bab9027a23e4c26b3e8221d9092eae19e1a4e02cdb0c",
+        "bytes": 216
+      },
+      {
+        "path": "examples/outbound/readonly/provider.json",
+        "sha256": "95a7fcd5308e56db9d42772d64fb4db45120ad611abac6a40a69a650cbf5aa2b",
+        "bytes": 1037
+      },
+      {
+        "path": "lib/annotations-13.0.jar",
+        "sha256": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+        "bytes": 17536
+      },
+      {
+        "path": "lib/collections-23.1.12.jar",
+        "sha256": "54a6c6d50be1a7f732cc294b2feb930b5771ce8afd6cd7c2b4a831f85bb25aef",
+        "bytes": 121580
+      },
+      {
+        "path": "lib/icu4j-23.1.12.jar",
+        "sha256": "2c9ab5dfd797cc145ebfb0b1320ce831aa9b76c0adc70945a580bef1a8730dd0",
+        "bytes": 39645881
+      },
+      {
+        "path": "lib/jackson-annotations-2.17.2.jar",
+        "sha256": "873a606e23507969f9bbbea939d5e19274a88775ea5a169ba7e2d795aa5156e1",
+        "bytes": 78492
+      },
+      {
+        "path": "lib/jackson-core-2.17.2.jar",
+        "sha256": "721a189241dab0525d9e858e5cb604d3ecc0ede081e2de77d6f34fa5779a5b46",
+        "bytes": 581927
+      },
+      {
+        "path": "lib/jackson-databind-2.17.2.jar",
+        "sha256": "c04993f33c0f845342653784f14f38373d005280e6359db5f808701cfae73c0c",
+        "bytes": 1649454
+      },
+      {
+        "path": "lib/jackson-datatype-jsr310-2.17.2.jar",
+        "sha256": "9b80024a9822e70b07f6bb13824c76c137c1064a1b5eb518374ab141870fdbcc",
+        "bytes": 132264
+      },
+      {
+        "path": "lib/jniutils-23.1.12.jar",
+        "sha256": "7489745b9889851d7586d89f8e2698ea7374ae78ffdebf1ed4550dd58117dc48",
+        "bytes": 275246
+      },
+      {
+        "path": "lib/js-language-23.1.12.jar",
+        "sha256": "3639558b4a776147d22acd2dc61a03a90d340064ef744916c5adf37c0d9cf2c1",
+        "bytes": 27289717
+      },
+      {
+        "path": "lib/kotlin-stdlib-1.9.10.jar",
+        "sha256": "55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504",
+        "bytes": 1708006
+      },
+      {
+        "path": "lib/kotlin-stdlib-common-1.9.10.jar",
+        "sha256": "cde3341ba18a2ba262b0b7cf6c55b20c90e8d434e42c9a13e6a3f770db965a88",
+        "bytes": 225141
+      },
+      {
+        "path": "lib/kotlin-stdlib-jdk7-1.9.10.jar",
+        "sha256": "ac6361bf9ad1ed382c2103d9712c47cdec166232b4903ed596e8876b0681c9b7",
+        "bytes": 959
+      },
+      {
+        "path": "lib/kotlin-stdlib-jdk8-1.9.10.jar",
+        "sha256": "a4c74d94d64ce1abe53760fe0389dd941f6fc558d0dab35e47c085a11ec80f28",
+        "bytes": 965
+      },
+      {
+        "path": "lib/nativeimage-23.1.12.jar",
+        "sha256": "8b7ec0f100d4eeaebbdc02be2bf4f57147f1873cbea6cf8597beb555b03134ae",
+        "bytes": 217333
+      },
+      {
+        "path": "lib/okhttp-4.12.0.jar",
+        "sha256": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+        "bytes": 789531
+      },
+      {
+        "path": "lib/okio-jvm-3.6.0.jar",
+        "sha256": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+        "bytes": 359580
+      },
+      {
+        "path": "lib/plowshare-integration-home-assistant-0.1.0-SNAPSHOT.jar",
+        "sha256": "502669c5eb0d27bae10ecd6dc2bdc681bdb3a318c573afa9ec1525e31184873b",
+        "bytes": 270727
+      },
+      {
+        "path": "lib/plowshare-integrations-0.1.0-SNAPSHOT.jar",
+        "sha256": "9970fd9e4ce41b0c8c0a67dc6055b6d24ee87ea5973cd818d63a82728c5ace53",
+        "bytes": 162744
+      },
+      {
+        "path": "lib/plowshare-protocol-0.1.0-SNAPSHOT.jar",
+        "sha256": "8681b0406a9d7ea489e2a18bf2e2d8097c0e5ac24b573a631f9f6dce34a3c833",
+        "bytes": 812338
+      },
+      {
+        "path": "lib/plowshare-sdk-0.1.0-SNAPSHOT.jar",
+        "sha256": "dbd45b20039ae1d2a28d0f2b230c9eb66b187be1cdd9fb47bfcb5ee8145f9881",
+        "bytes": 398158
+      },
+      {
+        "path": "lib/polyglot-23.1.12.jar",
+        "sha256": "677ce37f6f8cf9c155344711dc85fcea9f25629ff8b761b71400d1243626a112",
+        "bytes": 939215
+      },
+      {
+        "path": "lib/regex-23.1.12.jar",
+        "sha256": "ac00e975681325123e6b5da5610a8aebdc1629c0bc869009d469f8b614f32953",
+        "bytes": 3701640
+      },
+      {
+        "path": "lib/truffle-api-23.1.12.jar",
+        "sha256": "ab0898a4f06b01eb738823fb750aef24ac0bcbcc5856302a9efc1561c68489d6",
+        "bytes": 16738164
+      },
+      {
+        "path": "lib/truffle-compiler-23.1.12.jar",
+        "sha256": "41a25a7357092e2b47e339f8311974e16a2cb40bde1ccb36ef71cf3a314e6c7e",
+        "bytes": 61865
+      },
+      {
+        "path": "lib/truffle-runtime-23.1.12.jar",
+        "sha256": "3d0e5c1d290747b351af5b589a9801d9796af29274f184291d1a3fab62fca48e",
+        "bytes": 1053408
+      },
+      {
+        "path": "lib/word-23.1.12.jar",
+        "sha256": "8c6221a04dc1c917a75e526ffcf5f4cdd80b812b45561dc9225538b0eb97bee6",
+        "bytes": 22242
+      }
+    ],
+    "fixture_origin_changes": [
+      "plowshare",
+      "homeAssistant.endpoint or legacy binding endpoint"
+    ],
+    "source_distribution_unchanged": true,
+    "directory_topology_checked": true,
+    "limits": "Local trap listeners prove no observed connections from offline commands. Static template policy and scripted protocol tests do not prove live grants, device effects, fleet availability or Windows installation."
+  },
+  "protected_source_unchanged": [
+    "sdk/",
+    "plowshare-server/",
+    "plowshare-protocol/",
+    "integrations/runtime/"
+  ],
+  "dependency_candidates": {
+    "DIAG-01": "diag-01-v1",
+    "DIAG-02": "diag-02-v1"
+  },
+  "milestones": {
+    "source_verification": true,
+    "independent_integrated_review": false,
+    "published": false,
+    "merged": false,
+    "deployed": false,
+    "live_validated": false
+  },
+  "limitations": [
+    "Native HA diagnostics discovery/download not live-tested.",
+    "No live HA/provider/model probe, server/HA restart or device mutation.",
+    "Provider-local health cannot report a dead provider; no end-to-end guarantee.",
+    "HA owns its native envelope and filename outside the integration data section."
+  ],
+  "resolved_validation_failures": [
+    "Old four-tool test assertion corrected; final200test suite passed.",
+    "Initial package inspection saw old guide; canonical link fix + installDist refresh + final8checks passed."
+  ]
+}

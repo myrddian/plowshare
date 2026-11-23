@@ -22,9 +22,11 @@ import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
@@ -164,6 +166,31 @@ public final class HomeAssistantToolJournal implements HomeAssistantProviderJour
   private Snapshot snapshot;
   private boolean closed;
   private boolean uncertain;
+
+  /**
+   * Conservative metadata-only evidence that this provider path already had an owner. This does not
+   * inspect or replay receipts. Any inaccessible or non-regular marker fails rather than
+   * authorizing bootstrap of a new capability identity store.
+   */
+  public static boolean hasRetainedState(Path directory) throws IOException {
+    Objects.requireNonNull(directory);
+    boolean retained = false;
+    for (String name : List.of("tools.json", "owner.lock")) {
+      try {
+        BasicFileAttributes attributes =
+            Files.readAttributes(
+                directory.resolve(name), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile())
+          throw new IOException("Provider state marker is not a regular file");
+        retained = true;
+      } catch (NoSuchFileException absent) {
+        // Only actual absence is proof that this particular marker has not been retained.
+      } catch (IOException unavailable) {
+        throw new IOException("Provider state markers could not be inspected");
+      }
+    }
+    return retained;
+  }
 
   /**
    * Opens a private local journal with a nonblocking exclusive lock. The owner fingerprint binds
