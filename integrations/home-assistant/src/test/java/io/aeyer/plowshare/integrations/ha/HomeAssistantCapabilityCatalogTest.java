@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.integrations.ha;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -23,6 +24,7 @@ import io.aeyer.plowshare.protocol.IntegrationPayload.NumberParameter;
 import io.aeyer.plowshare.protocol.IntegrationPayload.TextParameter;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,6 +35,8 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class HomeAssistantCapabilityCatalogTest {
   @TempDir Path directory;
@@ -90,6 +94,9 @@ class HomeAssistantCapabilityCatalogTest {
     ArrayNode entities = Json.MAPPER.createArrayNode();
     String epoch = "epoch-a";
     Set<String> exposed = Set.of("climate.office", "sensor.motion_temperature");
+    String deviceName = "Climate device";
+    String deviceNameByUser;
+    String areaName = "Office";
     int collections;
 
     Fixture(
@@ -139,12 +146,13 @@ class HomeAssistantCapabilityCatalogTest {
                           .add(
                               Json.object()
                                   .put("id", "device-fixture")
-                                  .put("name", "Climate device"));
+                                  .put("name", deviceName)
+                                  .put("name_by_user", deviceNameByUser));
                   var areas =
                       Json.MAPPER
                           .createArrayNode()
                           .add(
-                              Json.object().put("area_id", "office-fixture").put("name", "Office"));
+                              Json.object().put("area_id", "office-fixture").put("name", areaName));
                   var config = Json.object();
                   config.putObject("unit_system").put("temperature", "°C");
                   return HomeAssistantCapabilityWire.snapshot(
@@ -654,6 +662,147 @@ class HomeAssistantCapabilityCatalogTest {
       assertTrue(
           invalid.observations().getFirst().readings().stream()
               .allMatch(value -> value.value().isEmpty()));
+    }
+  }
+
+  @Test
+  void displayPaddingNormalizesLookupMetadataWithoutChangingIdentityOrInteriorSpaces()
+      throws Exception {
+    try (var fixture = fixture()) {
+      var initial =
+          fixture.catalog.resolve(
+              new Query(
+                  "",
+                  Optional.of("climate"),
+                  Optional.empty(),
+                  Optional.of("temperature"),
+                  Optional.of(FieldRole.CURRENT),
+                  0,
+                  20,
+                  Optional.empty()),
+              budget());
+      String resourceId = initial.candidates().getFirst().resourceId();
+      ((ObjectNode) fixture.states.get(0).path("attributes")).put("friendly_name", "  Office  ");
+      ((ObjectNode) fixture.entities.get(0))
+          .putArray("aliases")
+          .add(" Study ")
+          .add("Study")
+          .add("  ")
+          .addNull()
+          .add("  The  Study  ");
+      fixture.deviceNameByUser = "  House  Thermostat  ";
+      fixture.areaName = "  Office  ";
+      var resolved =
+          fixture.catalog.resolve(query("study", "temperature", FieldRole.CURRENT), budget());
+      assertEquals(ResolutionStatus.RESOLVED, resolved.status());
+      var resource = resolved.candidates().getFirst();
+      assertEquals(resourceId, resource.resourceId());
+      assertEquals("climate.office", resource.entityId());
+      assertEquals("Office", resource.name());
+      assertEquals("House  Thermostat", resource.device().orElseThrow());
+      assertEquals("Office", resource.area().orElseThrow());
+      assertEquals(List.of("Study", "The  Study", "office"), resource.aliases());
+      var read =
+          fixture.catalog.read(
+              new FieldReadRequest(
+                  resolved.revision(),
+                  List.of(
+                      new FieldSelection(resourceId, List.of("attribute.current_temperature")))),
+              budget());
+      assertEquals(
+          new NumberParameter(new BigDecimal("19.4")),
+          read.readings().getFirst().value().orElseThrow());
+      assertEquals("climate.office", read.readings().getFirst().entityId());
+    }
+  }
+
+  @Test
+  void blankHumanLabelsUseNextFallbackAndBlankAliasesAreSkipped() throws Exception {
+    try (var fixture = fixture()) {
+      ((ObjectNode) fixture.states.get(0).path("attributes")).put("friendly_name", "   ");
+      ((ObjectNode) fixture.entities.get(0))
+          .put("name", " ")
+          .put("original_name", "  Registry Office  ");
+      ((ObjectNode) fixture.entities.get(0)).putArray("aliases").add(" ").add("  ").addNull();
+      fixture.deviceNameByUser = " ";
+      fixture.deviceName = "  Device default  ";
+      fixture.areaName = " ";
+      var resolved =
+          fixture.catalog.resolve(
+              new Query(
+                  "",
+                  Optional.of("climate"),
+                  Optional.empty(),
+                  Optional.of("temperature"),
+                  Optional.of(FieldRole.CURRENT),
+                  0,
+                  20,
+                  Optional.empty()),
+              budget());
+      var resource = resolved.candidates().getFirst();
+      assertEquals("Registry Office", resource.name());
+      assertEquals("Device default", resource.device().orElseThrow());
+      assertTrue(resource.area().isEmpty());
+      assertEquals(List.of("office"), resource.aliases());
+      ((ObjectNode) fixture.entities.get(0)).put("original_name", " ");
+      var fallback =
+          fixture.catalog.resolve(query("office", "temperature", FieldRole.CURRENT), budget());
+      var current =
+          fallback.candidates().stream()
+              .filter(value -> value.entityId().equals("climate.office"))
+              .findFirst()
+              .orElseThrow();
+      assertEquals("office", current.name());
+      assertEquals(resource.resourceId(), current.resourceId());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "friendlyControl",
+        "aliasControl",
+        "deviceSeparator",
+        "areaOverlong",
+        "blankOverlong",
+        "registryIdentity",
+        "entityIdentity",
+        "unitIdentity",
+        "capabilityIdentity"
+      })
+  void displayNormalizationCannotCoerceMalformedIdentitiesOrHideInvalidRawLabels(String malformed)
+      throws Exception {
+    try (var fixture = fixture()) {
+      fixture.catalog.resolve(query("office", "temperature", FieldRole.CURRENT), budget());
+      byte[] retained = Files.readAllBytes(directory.resolve("identity/identities.json"));
+      switch (malformed) {
+        case "friendlyControl" ->
+            ((ObjectNode) fixture.states.get(0).path("attributes"))
+                .put("friendly_name", "Office\n");
+        case "aliasControl" ->
+            ((ObjectNode) fixture.entities.get(0)).putArray("aliases").add("Study\t");
+        case "deviceSeparator" -> fixture.deviceNameByUser = "Device\u2028";
+        case "areaOverlong" -> fixture.areaName = " ".repeat(256) + "Office";
+        case "blankOverlong" ->
+            ((ObjectNode) fixture.states.get(0).path("attributes"))
+                .put("friendly_name", " ".repeat(257));
+        case "registryIdentity" ->
+            ((ObjectNode) fixture.entities.get(0)).put("id", "registry-office ");
+        case "entityIdentity" ->
+            ((ObjectNode) fixture.entities.get(0)).put("entity_id", "climate.office ");
+        case "unitIdentity" ->
+            ((ObjectNode) fixture.states.get(0).path("attributes")).put("temperature_unit", " °C ");
+        case "capabilityIdentity" ->
+            ((ObjectNode) fixture.states.get(1).path("attributes"))
+                .put("device_class", " temperature ");
+        default -> throw new AssertionError();
+      }
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              fixture.catalog.resolve(query("office", "temperature", FieldRole.CURRENT), budget()));
+      assertArrayEquals(
+          retained, Files.readAllBytes(directory.resolve("identity/identities.json")));
     }
   }
 }

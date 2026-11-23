@@ -224,15 +224,15 @@ final class HomeAssistantCapabilityWire {
       JsonNode attributes = state == null ? null : state.get("attributes");
       String alias =
           selector.startsWith("fixed:") ? selector.substring("fixed:".length()) : locator;
-      String name = firstText(attributes, "friendly_name");
-      if (name == null) name = firstText(registry, "name", "original_name");
+      String name = firstDisplayText(attributes, "friendly_name");
+      if (name == null) name = firstDisplayText(registry, "name", "original_name");
       if (name == null) name = alias;
       List<String> aliases = aliases(alias, registry);
       JsonNode deviceRow = devices.get(firstText(registry, "device_id"));
-      String deviceName = firstText(deviceRow, "name_by_user", "name");
+      String deviceName = firstDisplayText(deviceRow, "name_by_user", "name");
       String areaId = firstText(registry, "area_id");
       if (areaId == null) areaId = firstText(deviceRow, "area_id");
-      String areaName = firstText(areas.get(areaId), "name");
+      String areaName = firstDisplayText(areas.get(areaId), "name");
       Availability availability = availability(state);
       Set<String> attributesAllowed = new LinkedHashSet<>();
       if (selector.startsWith("fixed:"))
@@ -643,8 +643,8 @@ final class HomeAssistantCapabilityWire {
       for (JsonNode value : values) {
         if (value.isNull()) continue;
         if (!value.isTextual()) throw new IllegalArgumentException("Invalid capability alias");
-        HomeAssistantCapabilities.text(value.textValue(), 256);
-        aliases.add(value.textValue());
+        String alias = displayText(value.textValue());
+        if (alias != null) aliases.add(alias);
       }
     }
     if (aliases.size() > 32) throw new IllegalArgumentException("Capability alias bound exceeded");
@@ -678,6 +678,40 @@ final class HomeAssistantCapabilityWire {
       if (!text.isTextual()) throw new IllegalArgumentException("Invalid native capability text");
       HomeAssistantCapabilities.text(text.textValue(), 256);
       return text.textValue();
+    }
+    return null;
+  }
+
+  /**
+   * Human labels are lookup metadata, never identities. Normalize only their boundary whitespace;
+   * validate raw bounds/controls first so stripping cannot hide malformed or oversized input.
+   * Identifiers, registry keys, units and semantic capability identifiers use strict firstText.
+   */
+  private static String displayText(String value) {
+    if (value.length() > 256
+        || value
+            .chars()
+            .anyMatch(
+                character ->
+                    Character.isISOControl(character)
+                        || character == 0x2028
+                        || character == 0x2029))
+      throw new IllegalArgumentException("Invalid native capability display text");
+    String normalized = value.strip();
+    if (normalized.isEmpty()) return null;
+    HomeAssistantCapabilities.text(normalized, 256);
+    return normalized;
+  }
+
+  private static String firstDisplayText(JsonNode value, String... keys) {
+    if (value == null || value.isNull()) return null;
+    for (String key : keys) {
+      JsonNode text = value.get(key);
+      if (text == null || text.isNull()) continue;
+      if (!text.isTextual())
+        throw new IllegalArgumentException("Invalid native capability display text");
+      String normalized = displayText(text.textValue());
+      if (normalized != null) return normalized;
     }
     return null;
   }
