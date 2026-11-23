@@ -34,6 +34,7 @@ from plowshare_privacy.contracts import (
     parse_json,
     utc_now,
 )
+from plowshare_privacy.journal import Receipt
 from plowshare_privacy.web import application
 from plowshare_privacy.worker import Worker
 
@@ -62,7 +63,13 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Connect your dashboard", await response.text())
         self.assertNotIn(WEB_TOKEN, await response.text())
         self.assertIn("script-src 'self'", response.headers["Content-Security-Policy"])
-        for route in ("/api/status", "/api/scans", "/api/reports", "/api/tools"):
+        for route in (
+            "/api/status",
+            "/api/scans",
+            "/api/collection-days",
+            "/api/reports",
+            "/api/tools",
+        ):
             response = await self.client.get(route)
             self.assertEqual(response.status, 401)
         response = await self.client.post(
@@ -70,6 +77,28 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status, 401)
         self.assertEqual(self.port.published, [])
+
+    async def test_collection_days_include_complete_days_in_the_household_zone(
+        self,
+    ) -> None:
+        self.worker.config = replace(self.config, time_zone="Australia/Melbourne")
+        for index in range(55):
+            scan = str(uuid4())
+            self.receipts.save(
+                Receipt(scan, scan, "schedule.due", "2026-11-24T00:00:00Z")
+            )
+        earlier = str(uuid4())
+        self.receipts.save(
+            Receipt(earlier, earlier, "schedule.due", "2026-11-23T12:59:00Z")
+        )
+        response = await self.client.get("/api/collection-days", headers=self.headers)
+        self.assertEqual(response.status, 200)
+        groups = await response.json()
+        self.assertEqual(
+            [group["day"] for group in groups], ["2026-11-24", "2026-11-23"]
+        )
+        self.assertEqual(len(groups[0]["scans"]), 55)
+        self.assertEqual(groups[1]["scans"][0]["scan_id"], earlier)
 
     async def test_named_tools_request_and_read_same_relay_collection(self) -> None:
         response = await self.client.get("/api/tools", headers=self.headers)

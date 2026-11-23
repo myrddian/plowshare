@@ -424,6 +424,7 @@ class DeviceAssessments:
         zone: Callable[[], str] = lambda: "UTC",
         flagged: Callable[[str, str, str], None] = lambda device, report, at: None,
         deep_scan: Callable[[str], DeepScanResult | None] = lambda _: None,
+        retain_scan: Callable[[str], Awaitable[str]] | None = None,
     ):
         # The household zone (configuration timeZone), read when used: the
         # dashboard can change it while the collector runs. The daily ceiling
@@ -438,6 +439,7 @@ class DeviceAssessments:
         # ``profile`` reads the operator's saved profiles when an assessment
         # starts; None means this collector keeps no profiles.
         self.profile = profile
+        self.retain_scan = retain_scan
         self.journal, self.port, self.dossiers = journal, port, dossiers
         self.inventory, self.clock, self.new_id = inventory, clock, new_id
         # Retained supplemental facts by device ID (Worker.device_facts).
@@ -698,6 +700,8 @@ class DeviceAssessments:
         # profile saved a moment ago is the one the report cites. A failed read
         # stops here: nothing is retained or started without it.
         match = await self.profile(card) if self.profile is not None else None
+        if self.retain_scan is not None and card.revision is None and card.history:
+            card = replace(card, revision=await self.retain_scan(card.history[-1]))
         dossier = build_dossier(
             card,
             match.profile if match is not None else None,

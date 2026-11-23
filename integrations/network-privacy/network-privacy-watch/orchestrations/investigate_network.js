@@ -69,6 +69,11 @@ function initial(input) {
   if (completion.version !== 1 || !['tcp','fixture'].includes(completion.mode)) fail('Unsupported completion version or mode');
   uuid(completion.scan_id, 'scan_id');
   uuid(completion.revision, 'revision');
+  if (completion.comparison_revision !== undefined) {
+    uuid(completion.comparison_revision, 'comparison_revision');
+    uuid(completion.comparison_scan_id, 'comparison_scan_id');
+    if (completion.comparison_scan_id === completion.scan_id) fail('Evidence cannot be its own comparison');
+  }
   text(completion.collector, 'collector', 256);
   for (const field of ['changes','issues']) {
     if (!Array.isArray(completion[field]) || completion[field].length > 1024
@@ -184,15 +189,23 @@ function consume(state, input, todo) {
     if (window.end === window.total) {
       const evidence = json(reading.text, 'collector evidence');
       if (state.sources.length === 0 && evidence.scan_id !== state.completion.scan_id) fail('Evidence scan identity differs from completion');
+      if (state.sources.length === 1 && state.completion.comparison_scan_id !== undefined
+          && evidence.scan_id !== state.completion.comparison_scan_id) fail('Comparison scan identity differs from completion');
       if (evidence.mode !== state.completion.mode || evidence.collector !== state.completion.collector) fail('Evidence collector or mode differs from completion');
       state.sources.push({revision: reading.revision, text: projectEvidence(evidence, reading.text), source_characters: reading.text.length});
       state.reading = null;
-      if (state.sources.length === 1 && evidence.previous_revision != null) {
-        const previous = uuid(evidence.previous_revision, 'previous revision');
-        if (previous === reading.revision) fail('Evidence cannot be its own baseline');
-        state.reading = {revision: previous, text: '', total: null};
-        state.ready = false;
-        state.waits = 0;
+      if (state.sources.length === 1) {
+        const comparison = state.completion.comparison_revision;
+        if (comparison !== undefined && evidence.previous_revision != null
+            && comparison !== evidence.previous_revision) fail('Conflicting comparison evidence');
+        const previous = comparison ?? evidence.previous_revision;
+        if (previous != null) {
+          uuid(previous, 'previous revision');
+          if (previous === reading.revision) fail('Evidence cannot be its own baseline');
+          state.reading = {revision: previous, text: '', total: null};
+          state.ready = false;
+          state.waits = 0;
+        }
       }
     }
   } else if (pending === 'analyst') {

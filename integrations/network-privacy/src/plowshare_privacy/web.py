@@ -22,6 +22,7 @@ from .advisories import AdvisoryLookup, AdvisoryUnavailable, public_model
 from .ask import AskConflict, AskService, AskSettings, question_text
 from .console import OperatorConsole
 from .contracts import (
+    household_day,
     household_zone,
     integer,
     items,
@@ -1260,9 +1261,13 @@ def application(
                 # automatic lookups the collector retained for a device.
                 "advisories_configured": advisories is not None,
                 "max_ports": MAX_PORTS,
-                # Every date the dashboard shows is in this one zone.
+                # Reporting periods retain their own stable calendar zone.
                 "time_zone": worker.config.zone,
                 "time_zone_configured": worker.config.time_zone is not None,
+                "rollup_detail": worker.rollups.detail if worker.rollups else None,
+                "rollup_zone": worker.rollups.zone
+                if worker.rollups
+                else worker.config.zone,
                 "profile_research_available": profile_research is not None,
                 "profile_research_enabled": profile_research is not None
                 and profile_research.ledger.enabled,
@@ -1329,16 +1334,56 @@ def application(
             ][:50]
         )
 
+    async def collection_days(request: web.Request) -> web.Response:
+        grouped: dict[str, list[dict[str, object]]] = {}
+        receipts = worker.receipts.all()
+        zone = worker.rollups.zone if worker.rollups else worker.config.zone
+        for item in reversed(receipts):
+            stamp = item.evidence.finished_at if item.evidence else item.occurred_at
+            day = household_day(stamp, zone).isoformat()
+            grouped.setdefault(day, []).append(
+                {
+                    "scan_id": item.scan_id,
+                    "when": stamp,
+                    "phase": item.phase,
+                    "local_completion": item.local_completion,
+                    "mode": item.evidence.mode
+                    if item.evidence
+                    else worker.config.collection.mode,
+                    "change_count": sum(
+                        not value.startswith("Baseline")
+                        for value in item.evidence.changes
+                    )
+                    if item.evidence
+                    else 0,
+                    "issue_count": len(item.evidence.issues) if item.evidence else 0,
+                }
+            )
+        return web.json_response(
+            [
+                {"day": day, "scans": grouped[day]}
+                for day in sorted(grouped, reverse=True)
+            ]
+        )
+
     async def evidence(request: web.Request) -> web.Response:
         scan_id = uuid(request.match_info["scan_id"])
-        result = next(
-            (item for item in worker.receipts.all() if item.scan_id == scan_id), None
-        )
+        receipts = worker.receipts.all()
+        result = next((item for item in receipts if item.scan_id == scan_id), None)
         if result is None or result.evidence is None:
             raise web.HTTPNotFound(text="Evidence is not available")
         return web.json_response(
             {
                 "revision": result.revision,
+                "phase": result.phase,
+                "local_completion": result.local_completion,
+                "investigation": asdict(result.investigation)
+                if result.investigation
+                else None,
+                "comparison_available": result.comparison_scan_id is None
+                or result.comparison_revision is not None
+                or result.evidence.previous_revision is not None
+                or any(item.scan_id == result.comparison_scan_id for item in receipts),
                 "evidence": parse_json(result.evidence.encode()),
             }
         )
@@ -1431,6 +1476,7 @@ def application(
     app.router.add_get("/api/tools", tool_catalog)
     app.router.add_post("/api/tools/{name}", call_tool)
     app.router.add_get("/api/scans", scans)
+    app.router.add_get("/api/collection-days", collection_days)
     app.router.add_get("/api/scans/{scan_id}", evidence)
     app.router.add_post("/api/scans", collect)
     app.router.add_get("/api/issue-intents", issue_intents)

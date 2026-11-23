@@ -593,18 +593,15 @@ comparison gaps and related project reports. **Refresh** obtains current status;
 **Request a scan** publishes a new request through the SDK and Relay. It does not
 call a scanner directly or bypass grants. A published scan is distinct from a
 completed agent investigation. Draft/final report status comes from the project
-information store. The dashboard shows the latest 50 scan receipts and the first
-100 accessible project reports that include a retained scan input.
+information store. The dashboard groups the retained collection receipts by day
+and lists up to 100 accessible project reports that include a retained scan input.
 
 Set the household time zone under Settings › Household time zone, or with an
 IANA name in the collector configuration, for example
-`"timeZone": "Australia/Sydney"`. A dashboard change applies at once. The dashboard writes every date in
-that zone and names it; assessment reports write theirs in it (the collector
-supplies the local times, since Application scripts have no time zone data); and
-the daily research and assessment limits reset at its midnight. Without
-`timeZone` all three use UTC, and System health › Deployment says it is unset.
-Changing it affects new assessments only; reports already written keep the zone
-their run recorded.
+`"timeZone": "Australia/Sydney"`. A dashboard change applies immediately to
+general dashboard dates, new assessment report dates, and the daily research
+and assessment limits. These use UTC when the setting is unset. Collection
+days and rollups use the household time zone saved when reporting started.
 
 ### Deep port scans
 
@@ -858,9 +855,10 @@ durably **before acknowledging their batch**, then performs scans outside the
 collection. Independent groups have independent cursors; do not deploy different
 collector configurations competing in the same group.
 
-Stable scan, upload and completion identities survive redelivery. Collected
-evidence is retained before the completion event, whose parent preserves the
-original scheduled/manual event. A process interrupted before retaining a scan
+Stable scan, upload and completion identities survive redelivery. Evidence is
+durable locally before the completion event, whose parent preserves the
+original scheduled/manual event. The collector also admits exact source
+revisions before publishing an investigation-ready completion. A process interrupted before retaining a scan
 may repeat that read-only collection. An interrupted/uncertain upload or publication
 stays pending and is never automatically replayed. Retained source names and exact
 text, or retained Relay event identities and text, can positively reconcile it:
@@ -911,12 +909,13 @@ per scan under `state/evidence/`. Evidence is written once, in its exact retaine
 encoding, before the index names it by SHA-256; a phase change then rewrites only
 the index. An index that names missing or altered evidence refuses to start.
 
-A settled scan keeps its local evidence for seven days. It leaves the journal
-only when it is `done` and has a retained revision, so Plowshare's project
-information store still holds its evidence. The newest 50 settled scans always
-stay, whatever their age, and a schedule fast enough to exceed 900 scans in
-seven days sheds its oldest settled scans early. A scan with an unknown or
-unfinished outcome never leaves; the 1,000-scan and 1,000-request fences still
+A settled scan keeps its local evidence for seven days. Routine snapshots age
+out after their facts have been counted in the rollup journal. Plowshare keeps
+the permanent revisions needed by investigations and device analysis. The newest
+50 settled scans always stay, whatever their age, along with a local predecessor
+still needed for an exact comparison. A schedule fast enough to exceed 900 scans
+in seven days sheds its oldest settled scans early. A scan with an unknown or
+unfinished outcome never leaves. The 1,000-scan and 1,000-request fences still
 refuse new work if such scans accumulate.
 
 When a scan leaves, one durable index write removes it together with the
@@ -929,9 +928,32 @@ published dashboard request that caused it, and records two things:
   summary, so a device keeps its first and last response and stays on the
   dashboard after the scans that established them are gone.
 
-Scan lists, findings, reports, evidence downloads and agent tools cover only
-the retained scans. These windows are fixed in `limits.py`, not collector
-configuration.
+The dashboard groups the retained snapshots by household day with individual
+evidence available inside each group. Agent scan lists and recent findings keep
+their own existing view of the local collection window.
+
+### Daily reports and monthly rollups
+
+The collector tallies completed snapshots in the private
+`state/collection-rollups.json` ledger before the raw snapshots can age out.
+Days close at midnight in the household time zone configured when reporting
+starts. Reports and expandable collection days keep this zone so later
+dashboard time-zone changes cannot rename or overlap published periods. Set
+`timeZone` before first starting the updated collector if reporting should use
+a zone other than UTC. The first day includes today's already retained snapshots.
+Reports lead with changes
+and show repeated coverage gaps with their count and time range. Empty periods
+have no document. Publication has its own recovery state, so a lost reply does
+not resend the document or restart a scan.
+
+At the start of a new month the collector publishes one Markdown rollup for the
+closed month. After a scoped read verifies the full monthly body, it excludes
+that month's dailies from ordinary Plowshare discovery. Those revisions remain
+readable to authorized direct readers using the revision IDs in the rollup.
+This only applies to documents created by
+the rollup publisher. Raw evidence linked to an investigation stays available in
+Plowshare. Install the updated Application workflow before starting the updated
+collector so new investigations can read a comparison pinned after collection.
 
 A journal from before this layout held all evidence inline in `receipts.json`.
 It is converted the first time the collector opens it, and scans older than the

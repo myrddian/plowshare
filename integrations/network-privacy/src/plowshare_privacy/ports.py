@@ -8,6 +8,7 @@ from typing import Protocol
 from plowshare import Client
 from plowshare.contracts import (
     InformationAdmissionDto,
+    InformationExcludeRequest,
     InformationFilterDto,
     InformationListRequest,
     InformationReadRequest,
@@ -162,16 +163,45 @@ class SdkPrivacyPort:
     async def upload(
         self, evidence: Evidence, request_id: str
     ) -> InformationAdmissionDto:
+        return await self.upload_document(
+            evidence_name(evidence), evidence.encode(), request_id
+        )
+
+    async def upload_document(
+        self, name: str, body: str, request_id: str
+    ) -> InformationAdmissionDto:
         return (
             await self.client.request(
                 InformationUploadRequest(
                     scope=self.scope,
-                    name=evidence_name(evidence),
-                    text=evidence.encode(),
+                    name=name,
+                    text=body,
                     request_id=request_id,
                 )
             )
         ).require_payload()
+
+    async def source_status(self, revision: str) -> InformationRevisionDto:
+        result = (
+            await self.client.request(
+                InformationStatusRequest(scope=self.scope, revision=revision), timeout=2
+            )
+        ).require_payload()
+        if not isinstance(result, InformationRevisionDto) or result.id != revision:
+            raise ValueError("Source status returned a different revision")
+        return result
+
+    async def exclude_source(self, revision: str, request_id: str) -> None:
+        result = (
+            await self.client.request(
+                InformationExcludeRequest(
+                    scope=self.scope, revision=revision, request_id=request_id
+                ),
+                timeout=2,
+            )
+        ).require_payload()
+        if result.availability != "excluded":
+            raise ValueError("Source exclusion was not confirmed")
 
     async def publish(self, request: RelayPublishRequest) -> RelayPublishResultDto:
         result = (await self.client.request(request)).require_payload()

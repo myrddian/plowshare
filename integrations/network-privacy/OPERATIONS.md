@@ -472,7 +472,8 @@ Future automatic investigation decisions omit acknowledged patterns when no
 other new finding needs attention. Previously admitted work is unaffected.
 The dashboard keeps the latest occurrence of each pattern from the last 50 scans.
 
-Select a collection to read its evidence, admission decision, any explicit start
+Expand a day under **Evidence**, then select a collection to read its evidence,
+admission decision, any explicit start
 receipt, and reports whose retained inputs actually cite that revision. Recent
 project runs are shown separately: the integration does not guess that a run
 belongs to a particular scan merely because their times are close.

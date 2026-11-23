@@ -4,6 +4,8 @@
 let bearer = '';
 let authenticated = false;
 let selected = null;
+const expandedCollectionDays = new Set();
+let collectionSignature = null;
 let selectedReport = null;
 let refreshPending = false;
 let settingsLoaded = false;
@@ -208,7 +210,7 @@ async function saveZone(zone) {
     if (byId('zone-input').dataset) delete byId('zone-input').dataset.edited;
     setHouseholdZone(result.time_zone);
     deviceSignature = '';
-    notice(result.time_zone_configured ? `Time zone set to ${result.time_zone}. Dates now show in it.` : 'Time zone removed. The collector uses UTC.');
+    notice(`Time zone set to ${result.time_zone}.`);
     await refresh();
   } catch (error) {notice(error.message, true);}
   finally {zoneBusy = false; setBusy(button, false);}
@@ -217,9 +219,12 @@ byId('zone-form').addEventListener('submit', event => {event.preventDefault(); s
 byId('zone-input').addEventListener('input', () => {if (byId('zone-input').dataset) byId('zone-input').dataset.edited = '1';});
 byId('zone-browser').addEventListener('click', () => {if (browserZone) {byId('zone-input').value = browserZone; saveZone(browserZone);}});
 byId('zone-clear').addEventListener('click', () => saveZone(null));
+function timestampFormatter(zone) {
+  return new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZone:zone, timeZoneName:'short'});
+}
 function setHouseholdZone(zone) {
   try {
-    whenFormat = new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', timeZone:zone, timeZoneName:'short'});
+    whenFormat = timestampFormatter(zone);
     dayFormat = new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', timeZone:zone});
     householdZone = zone;
   } catch (error) {
@@ -234,9 +239,12 @@ const calendarDayFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium'
 function formatCount(value) {return countFormat.format(value);}
 function plural(count, one, many) {return `${formatCount(count)} ${count === 1 ? one : many}`;}
 function formatWhen(stamp) {
+  return formatTimestamp(stamp, whenFormat);
+}
+function formatTimestamp(stamp, formatter) {
   if (!stamp) return '';
   const date = new Date(stamp);
-  return Number.isNaN(date.getTime()) ? String(stamp) : whenFormat.format(date);
+  return Number.isNaN(date.getTime()) ? String(stamp) : formatter.format(date);
 }
 function formatDay(stamp) {
   if (!stamp) return '';
@@ -311,6 +319,16 @@ function listItems(parent, title, values) {
 async function showEvidence(scanId) {
   const result = await api(`/api/scans/${encodeURIComponent(scanId)}`);
   selected = scanId;
+  const selectedEntry = byId('collections').querySelector('[aria-current="true"]');
+  selectedEntry?.classList.remove('selected');
+  selectedEntry?.setAttribute('aria-current', 'false');
+  const entry = byId('collections').querySelector(`[data-collection-focus="${CSS.escape(scanId)}"]`);
+  if (entry) {
+    entry.classList.add('selected');
+    entry.setAttribute('aria-current', 'true');
+    const group = entry.closest('details');
+    if (group) group.open = true;
+  }
   showView('evidence', true);
   byId('evidence-panel').classList.toggle('reading', true);
   const evidence = result.evidence;
@@ -344,20 +362,21 @@ async function showEvidence(scanId) {
   listItems(panel, 'Coverage and gaps', evidence.issues);
   const raw = element('details');
   raw.append(element('summary', 'Details · evidence revision and raw observations'),
-    element('p', result.revision ? `Evidence revision ${result.revision}` : 'Not yet retained in Plowshare.', 'hint'),
+    element('p', result.revision ? `Evidence revision ${result.revision}` : result.local_completion ? 'Snapshot kept on the collector.' : 'Awaiting evidence publication.', 'hint'),
     element('pre', JSON.stringify(evidence.snapshot, null, 2)));
   if (overview) {
-    const scan = (await api('/api/scans')).find(value => value.scan_id === scanId);
-    if (scan?.investigation) panel.append(element('p', `Investigation: ${scan.investigation.reason}`));
+    if (result.investigation) panel.append(element('p', `Investigation: ${result.investigation.reason}`));
     const manual = overview.investigations.find(value => value.scan_id === scanId && value.phase !== 'refused');
     if (manual) panel.append(element('p', `Explicit investigation: ${statusLabel(manual.phase)}${manual.run_id ? '' : ' · inspect its retained receipt'}`));
-    else if (scan?.phase === 'done' && scan.investigation?.requested === false) {
+    else if (result.phase === 'done' && result.investigation?.requested === false && result.comparison_available) {
       panel.append(confirmedAction('Investigate this evidence', undefined, 'Confirm investigation',
         'This starts one investigation of the retained evidence and may incur model costs beyond the automatic limit.',
         async () => {
           await api('/api/investigations', {method:'POST', body:JSON.stringify({scan_id:scanId, request_id:crypto.randomUUID()})});
           await refresh(); await showEvidence(scanId);
         }));
+    } else if (result.phase === 'done' && !result.comparison_available) {
+      panel.append(element('p', 'The comparison snapshot has aged out of local history.', 'hint'));
     }
     if (manual?.run_id) raw.append(element('p', `Investigation run ${manual.run_id}`, 'hint'));
   }
@@ -389,21 +408,57 @@ async function showReport(revision) {
   byId('report-panel').classList.toggle('reading', true);
   byId('report-content').scrollTop = 0;
 }
-function renderCollections(scans) {
+function renderCollections(days, zone = householdZone) {
+  const signature = JSON.stringify([householdZone, zone, days]);
+  if (signature === collectionSignature) return;
+  collectionSignature = signature;
   const container = byId('collections');
+  byId('collection-zone').textContent = zone === householdZone ? 'By day' : zone;
+  let collectionTimes = whenFormat;
+  try {
+    if (zone !== householdZone) collectionTimes = timestampFormatter(zone);
+  } catch (error) {
+    collectionTimes = timestampFormatter('UTC');
+  }
+  const focused = document.activeElement?.dataset?.collectionFocus;
   container.replaceChildren();
-  if (!scans.length) {container.append(element('p', 'No collections yet. Request a scan or wait for the configured schedule.', 'empty')); return;}
-  scans.forEach(scan => {
-    const button = element('button', undefined, `entry${selected === scan.scan_id ? ' selected' : ''}`);
-    button.type = 'button';
-    button.setAttribute('aria-current', String(selected === scan.scan_id));
-    const row = element('span', undefined, 'entry-line');
-    row.append(element('span', formatWhen(scan.occurred_at)), element('span', phases[scan.phase] || statusLabel(scan.phase), 'badge'));
-    button.append(row, element('small', `${plural(scan.change_count ?? scan.changes.length, 'comparison entry', 'comparison entries')} · ${plural(scan.issue_count ?? scan.issues.length, 'coverage note', 'coverage notes')}${scan.mode === 'fixture' ? ' · fixture' : ''}`));
-    button.disabled = scan.phase === 'queued';
-    button.addEventListener('click', () => {showEvidence(scan.scan_id).then(() => renderCollections(scans)).catch(error => notice(error.message, true));});
-    container.append(button);
+  if (!days.length) {container.append(element('p', 'No collections yet. Request a scan or wait for the configured schedule.', 'empty')); return;}
+  const visibleDays = new Set(days.map(group => group.day));
+  for (const day of expandedCollectionDays) {
+    if (!visibleDays.has(day)) expandedCollectionDays.delete(day);
+  }
+  days.forEach(({day, scans}) => {
+    const group = element('details', undefined, 'collection-day');
+    group.open = expandedCollectionDays.has(day);
+    const summary = element('summary', undefined, 'collection-day-summary');
+    summary.dataset.collectionFocus = day;
+    summary.append(element('strong', formatDay(day)), element('small', [
+      plural(scans.length, 'collection', 'collections'),
+      plural(scans.reduce((total, scan) => total + scan.change_count, 0), 'comparison entry', 'comparison entries'),
+      plural(scans.reduce((total, scan) => total + scan.issue_count, 0), 'coverage note', 'coverage notes'),
+    ].join(' · ')));
+    group.append(summary);
+    group.addEventListener('toggle', () => {
+      if (group.open) expandedCollectionDays.add(day);
+      else expandedCollectionDays.delete(day);
+    });
+    for (const scan of scans) {
+      const button = element('button', undefined, `entry${selected === scan.scan_id ? ' selected' : ''}`);
+      button.type = 'button';
+      button.dataset.collectionFocus = scan.scan_id;
+      button.setAttribute('aria-current', String(selected === scan.scan_id));
+      const row = element('span', undefined, 'entry-line');
+      const phase = scan.local_completion && scan.phase === 'done'
+        ? 'Collected' : phases[scan.phase] || statusLabel(scan.phase);
+      row.append(element('span', formatTimestamp(scan.when, collectionTimes)), element('span', phase, 'badge'));
+      button.append(row, element('small', `${plural(scan.change_count, 'comparison entry', 'comparison entries')} · ${plural(scan.issue_count, 'coverage note', 'coverage notes')}${scan.mode === 'fixture' ? ' · fixture' : ''}`));
+      button.disabled = scan.phase === 'queued';
+      button.addEventListener('click', () => showEvidence(scan.scan_id).catch(error => notice(error.message, true)));
+      group.append(button);
+    }
+    container.append(group);
   });
+  if (focused) container.querySelector(`[data-collection-focus="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
 }
 function renderReports(reports) {
   const container = byId('reports');
@@ -426,8 +481,8 @@ async function refresh() {
   refreshPending = true;
   setBusy(byId('refresh'), true);
   try {
-    const [status, scans, reportResult] = await Promise.all([api('/api/status'), api('/api/scans'), api('/api/reports').then(value => ({value}), error => ({error}))]);
-    if (!Array.isArray(scans) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
+    const [status, days, reportResult] = await Promise.all([api('/api/status'), api('/api/collection-days'), api('/api/reports').then(value => ({value}), error => ({error}))]);
+    if (!Array.isArray(days) || typeof status.state !== 'string' || !Array.isArray(status.requests)) throw new Error('Unexpected dashboard response.');
     latestStatus = status;
     byId('mode').textContent = status.collection_enabled === false ? 'Collection disabled' : status.mode === 'fixture' ? 'Synthetic fixture mode' : 'TCP collection mode';
     // Sample data must never pass for the household's own network.
@@ -469,11 +524,15 @@ async function refresh() {
     byId('collector').textContent = status.collector;
     byId('state').textContent = status.state === 'attention_required' ? 'Needs attention' : status.collection_enabled === false ? 'Disabled' : statusLabel(status.state);
     byId('detail').textContent = status.state !== 'attention_required' && status.collection_enabled === false ? 'Enable collection in Settings when you are ready.' : status.detail;
-    byId('change-count').textContent = scans.length ? formatCount(scans[0].change_count ?? scans[0].changes.filter(change => !change.startsWith('Baseline')).length) : '—';
+    const latest = days[0]?.scans[0];
+    byId('change-count').textContent = latest ? formatCount(latest.change_count) : '—';
     byId('report-count').textContent = reportResult.error ? 'Unavailable' : formatCount(reportResult.value.length);
     scanState.blocked = status.state === 'attention_required' || status.collection_enabled === false;
     applyScanState();
-    renderCollections(scans);
+    renderCollections(days, status.rollup_zone);
+    const rollupDetail = byId('collection-rollup-detail');
+    rollupDetail.textContent = status.rollup_detail || '';
+    rollupDetail.hidden = !status.rollup_detail;
     if (reportResult.error) byId('reports').replaceChildren(element('p', 'Retained agent reports are temporarily unavailable. Local evidence remains readable.', 'empty'));
     else if (Array.isArray(reportResult.value)) renderReports(reportResult.value);
     else throw new Error('Unexpected reports response.');
@@ -513,6 +572,8 @@ byId('disconnect').addEventListener('click', async () => {
   for (const id of ['profile-records','profile-intents','profile-history','profile-markdown','profile-addresses','profile-issue-links']) byId(id).replaceChildren();
   monitoringDraft = false;
   bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; liveCron = null; deviceSignature = null; findingSignature = null; notified = null;
+  collectionSignature = null;
+  expandedCollectionDays.clear();
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
   for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
   byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'attention';
@@ -2685,7 +2746,7 @@ function renderSystem(system, health) {
   fact(deployment, 'Collector', plan.collector, 'data');
   fact(deployment, 'Relay topics', `Requests on ${plan.request_topic}, results on ${plan.result_topic}`);
   fact(deployment, 'Relay group', plan.group, 'data');
-  fact(deployment, 'Time zone', plan.time_zone ? `${plan.time_zone}, for every date shown and the daily limits` : 'UTC: not set. Choose one under Settings › Household time zone', plan.time_zone ? 'data' : undefined);
+  fact(deployment, 'Household time zone', plan.time_zone || 'UTC · Configure under Settings › Household time zone', plan.time_zone ? 'data' : undefined);
   fact(deployment, 'Port checks', `${plural(plan.probe_timeout_seconds, 'second', 'seconds')} timeout, ${formatCount(plan.probe_concurrency)} at a time`);
   for (const item of plan.credentials) credentialFact(deployment, item.purpose, item);
   const problem = !health.connected || health.recovery.length > 0 || missingCredentials(system).length > 0;

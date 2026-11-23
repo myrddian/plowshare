@@ -601,7 +601,7 @@ def _coverage(
     deep_scan: DeepScanResult | None = None,
 ) -> tuple[str, ...]:
     lines: list[str] = []
-    if card.revision is None:
+    if card.revision is None and not card.history:
         lines.append(
             "No retained port scan covers this address; open services are unknown."
         )
@@ -804,7 +804,7 @@ def build_dossier(
         card.presence,
         DossierServices(
             card.revision,
-            card.last_seen if card.revision is not None else None,
+            card.last_seen if card.history or card.revision is not None else None,
             tuple(
                 sorted(
                     {probe.port for probe in card.services if probe.status == "open"}
