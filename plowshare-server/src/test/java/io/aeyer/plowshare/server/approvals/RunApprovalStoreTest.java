@@ -241,6 +241,7 @@ class RunApprovalStoreTest {
     var restarted = new JdbcSuspendedRunCalls(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
     var pending = restarted.pendingDirect(conversation, 1).getFirst();
     assertEquals(tool, pending.tool());
+    assertEquals(original, pending.answerOrdinal());
     assertEquals(unknown, pending.receipt());
     RunCallResumption.reconcileDirect(
         restarted,
@@ -263,6 +264,15 @@ class RunApprovalStoreTest {
         invocation,
         page.entries().getFirst().toolCalls().getFirst().effectReceipt().invocationId());
     assertEquals(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, page.entries().getLast().excerpt());
+    assertEquals(original, entries.thatProjectFor(conversation).getLast().retainedAnswerOrdinal());
+    entries.append(conversation, 3, LoggedEntry.utterance("Next turn", null));
+    assertEquals(
+        original,
+        entries.thatProjectedAt(conversation, 3).stream()
+            .filter(entry -> tool.id().equals(entry.toolCallId()))
+            .findFirst()
+            .orElseThrow()
+            .retainedAnswerOrdinal());
     var trace =
         new JdbcToolCallTraces(receiptJdbc, receiptBudget, RECEIPT_DEADLINE)
             .read(conversation, invocation)

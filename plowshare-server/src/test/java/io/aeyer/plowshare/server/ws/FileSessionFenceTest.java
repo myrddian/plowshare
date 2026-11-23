@@ -160,7 +160,7 @@ class FileSessionFenceTest {
     var replacement = connect(session, "owner", true);
     RunCallResumption.reconcileDirect(
         store,
-        new DirectFileCalls.Pending(invocation, tool, receipt, null),
+        new DirectFileCalls.Pending(invocation, 1, tool, receipt, null),
         result -> {
           assertEquals(receipt, result.effectReceipt());
           assertEquals(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, result.text());
@@ -526,13 +526,14 @@ class FileSessionFenceTest {
     assertEquals(peerApplied ? 1 : 0, effectsApplied.get());
   }
 
-  @Test
-  void a_matching_provider_confirmation_is_recorded_beside_the_original_file_result()
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void only_a_reply_identifying_the_requested_file_confirms_the_effect(boolean matching)
       throws Exception {
     String session = "confirming-mutation";
     var socket = connect(session, "owner");
     Path path = Path.of("/fixture/demo.txt");
-    var confirmed = FileResult.deleted(path.toString(), 12, 1);
+    var confirmed = FileResult.deleted(matching ? path.toString() : "/fixture/other.txt", 12, 1);
     var requestId = new AtomicReference<String>();
     doAnswer(
             invocation -> {
@@ -558,7 +559,11 @@ class FileSessionFenceTest {
     assertEquals(
         List.of(
             new FileMutationObservation(requestId.get(), FileMutationObservation.Kind.SENT),
-            new FileMutationObservation(requestId.get(), FileMutationObservation.Kind.CONFIRMED)),
+            new FileMutationObservation(
+                requestId.get(),
+                matching
+                    ? FileMutationObservation.Kind.CONFIRMED
+                    : FileMutationObservation.Kind.REPLY_UNVERIFIED)),
         observed);
   }
 

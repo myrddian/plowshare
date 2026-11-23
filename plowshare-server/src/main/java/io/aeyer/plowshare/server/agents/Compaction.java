@@ -1741,6 +1741,7 @@ public final class Compaction implements SkillSummaries {
 
     private final TurnTranscript turn;
     private final int continuing;
+    private final Map<Integer, ChatMessage> projectedAnswers = new HashMap<>();
     private List<EntryRecord> retained;
     private Optional<DelegationRetry> pendingRetry;
     private final Set<String> reconciledToolCalls = new HashSet<>();
@@ -1791,10 +1792,18 @@ public final class Compaction implements SkillSummaries {
                       row.ordinal() >= openingTurn
                           && row.ordinal() <= continuing
                           && row.ending() == Outcome.Ending.SUB_AGENT_FAILED);
+      projectedAnswers.clear();
       return Projection.of(
           whatWasSaidAndWhatTheRunLearned(
               retained, continuationOpeningTurn(), continuing, turn.definition.canRedeem()),
-          turn.definition.canList());
+          turn.definition.canList(),
+          Projection.Superseded.HIDES_A_ROW,
+          projectedAnswers);
+    }
+
+    @Override
+    public ChatMessage projectedAnswer(int ordinal) {
+      return projectedAnswers.get(ordinal);
     }
 
     private int continuationOpeningTurn() {

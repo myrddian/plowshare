@@ -92,7 +92,43 @@ public record EntryRecord(
     Instant ejectedAt,
     String export,
     ToolObservation observation,
-    FileReadWindow fileWindow) {
+    FileReadWindow fileWindow,
+    Integer retainedAnswerOrdinal) {
+
+  public EntryRecord(
+      String conversationId,
+      int ordinal,
+      EntryKind kind,
+      String content,
+      String toolCallId,
+      List<ToolCall> toolCalls,
+      Integer supersededBy,
+      UUID handle,
+      int turnOrdinal,
+      Instant recordedAt,
+      Long tookMillis,
+      Instant ejectedAt,
+      String export,
+      ToolObservation observation,
+      FileReadWindow fileWindow) {
+    this(
+        conversationId,
+        ordinal,
+        kind,
+        content,
+        toolCallId,
+        toolCalls,
+        supersededBy,
+        handle,
+        turnOrdinal,
+        recordedAt,
+        tookMillis,
+        ejectedAt,
+        export,
+        observation,
+        fileWindow,
+        null);
+  }
 
   public EntryRecord(
       String conversationId,

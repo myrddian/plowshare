@@ -44,6 +44,9 @@ public final class VerifiedFileMutations implements FileMutations {
                 output.accept(observation);
               } else if (observation.kind() == FileMutationObservation.Kind.CONFIRMED) {
                 replied = Objects.equals(sent, observation.requestId());
+              } else if (observation.kind() == FileMutationObservation.Kind.REPLY_UNVERIFIED
+                  && Objects.equals(sent, observation.requestId())) {
+                output.accept(observation);
               }
             });
   }
@@ -158,11 +161,7 @@ public final class VerifiedFileMutations implements FileMutations {
   }
 
   private static boolean matches(FileResult facts, String op, Path path, Path to) {
-    return facts != null
-        && Objects.equals(facts.version(), FileResult.VERSION)
-        && op.equals(facts.op())
-        && path.toString().equals(facts.path())
-        && Objects.equals(to == null ? null : to.toString(), facts.to());
+    return Changed.identifies(facts, op, path.toString(), to == null ? null : to.toString());
   }
 
   private Effect contentEffect(Snapshot before, Path path, String expected) {

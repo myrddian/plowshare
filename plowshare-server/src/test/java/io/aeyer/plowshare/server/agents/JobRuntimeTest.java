@@ -7639,11 +7639,20 @@ class JobRuntimeTest {
         new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, "sent-before-stop");
     var calls = mock(DirectFileCalls.class);
     when(calls.pendingDirect(conversation, 4))
-        .thenReturn(List.of(new DirectFileCalls.Pending("file_held", edit, receipt, null)));
+        .thenReturn(List.of(new DirectFileCalls.Pending("file_held", 2, edit, receipt, null)));
     var storage = mock(Transcript.class);
     when(storage.conversationId()).thenReturn(conversation);
     when(storage.continuingTurn()).thenReturn(4);
-    when(storage.before()).thenReturn(List.of(ChatMessage.assistant("", List.of(edit))));
+    var original = ChatMessage.assistant("", List.of(edit));
+    var later = ChatMessage.assistant("", List.of(edit));
+    when(storage.before())
+        .thenReturn(
+            List.of(
+                original,
+                ChatMessage.tool(edit.id(), Projection.NEVER_COMPLETED),
+                later,
+                ChatMessage.tool(edit.id(), "Later result")));
+    when(storage.projectedAnswer(2)).thenReturn(original);
     var tool = mock(ReviewedFileTool.class);
     when(tool.schema()).thenReturn(Probe.returning(edit.name(), "").schema());
     var transport = new Scripted().then(() -> answer("Continued."));
@@ -7663,7 +7672,11 @@ class JobRuntimeTest {
             transcript);
 
     assertEquals(Ending.ANSWERED, result.ending(), result.text() + result.detail());
-    assertTrue(toolResults(transport, 0).contains(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT));
+    assertEquals(
+        List.of(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, "Later result"),
+        withRole(transport.conversation(0), ChatMessage.Role.TOOL).stream()
+            .map(ChatMessage::content)
+            .toList());
     verify(storage)
         .recordRetainedResult(
             argThat(entry -> edit.id().equals(entry.toolCallId())), eq("file_held"));

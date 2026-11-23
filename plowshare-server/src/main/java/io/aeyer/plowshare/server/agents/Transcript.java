@@ -195,6 +195,11 @@ public interface Transcript {
    */
   List<ChatMessage> before();
 
+  /** Original projected assistant object for exact stopped-turn recovery. */
+  default ChatMessage projectedAnswer(int ordinal) {
+    return null;
+  }
+
   /**
    * One thing that happened in this run, for the conversation's log.
    *

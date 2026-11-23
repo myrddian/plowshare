@@ -113,6 +113,14 @@ public final class EntryStore implements ConversationSearchRepository {
           + " superseded_by, handle, turn_ordinal, recorded_at, took_ms, ejected_at,"
           + " export, tool_observation, file_window";
 
+  // Only direct file recovery needs to rehome results recorded in a later turn. Approved tools
+  // retain their existing disclosure and projection paths, including web-release audit handling.
+  private static final String DIRECT_ANSWER_COLUMN =
+      ", (SELECT c.answer_ordinal FROM suspended_run_calls c"
+          + " WHERE c.conversation = entries.conversation_id"
+          + " AND c.invocation_id = entries.retained_invocation AND c.approval IS NULL)"
+          + " AS retained_answer";
+
   /**
    * The log's advisory-lock space: the two-key form, so no other advisory lock this database takes
    * can collide with an entry's — {@code RecordStore.LOCK_SPACE} is 59, the migration that made its
@@ -486,6 +494,7 @@ public final class EntryStore implements ConversationSearchRepository {
   private static final String THAT_PROJECTED_AT =
       "SELECT "
           + COLUMNS
+          + DIRECT_ANSWER_COLUMN
           + " FROM entries WHERE conversation_id = ?"
           + " AND role IS NOT NULL"
           + " AND ordinal <= ?"
@@ -2536,12 +2545,13 @@ public final class EntryStore implements ConversationSearchRepository {
             jdbc.query(
                 "SELECT "
                     + COLUMNS
+                    + DIRECT_ANSWER_COLUMN
                     + " FROM entries WHERE conversation_id = ?"
                     + " AND ((TRUE "
                     + THAT_PROJECT
                     + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
                     + IN_CONVERSATION_ORDER,
-                ROW_MAPPER,
+                PROJECTION_MAPPER,
                 conversation,
                 WebReleaseAudit.PREFIX + "%"));
   }
@@ -2665,7 +2675,8 @@ public final class EntryStore implements ConversationSearchRepository {
                     + " turns table and the log disagree about which turns"
                     + " this conversation had.");
           }
-          return jdbc.query(THAT_PROJECTED_AT, ROW_MAPPER, conversation, assembled, assembled);
+          return jdbc.query(
+              THAT_PROJECTED_AT, PROJECTION_MAPPER, conversation, assembled, assembled);
         });
   }
 
@@ -4090,31 +4101,37 @@ public final class EntryStore implements ConversationSearchRepository {
               rs.getString("fallback_reason"),
               rs.getObject("first_token_ms", Long.class));
 
-  private static final RowMapper<EntryRecord> ROW_MAPPER =
-      (rs, rowNum) ->
-          new EntryRecord(
-              rs.getString("conversation_id"),
-              rs.getInt("ordinal"),
-              EntryKind.of(rs.getString("kind")),
-              rs.getString("content"),
-              rs.getString("tool_call_id"),
-              read(rs.getString("tool_calls")),
-              rs.getObject("superseded_by", Integer.class),
-              rs.getObject("handle", UUID.class),
-              rs.getInt("turn_ordinal"),
-              instant(rs, "recorded_at"),
-              // getObject and not getLong, on superseded_by's reasoning and with a
-              // quieter failure than its one: getLong reads a SQL NULL as 0, and 0
-              // is a legitimate duration here -- an operation that finished inside
-              // a millisecond -- so an unmeasured entry would come back claiming to
-              // have been measured at nothing, which is exactly the confusion
-              // between an absence and a measurement this column was added to
-              // avoid.
-              rs.getObject("took_ms", Long.class),
-              instant(rs, "ejected_at"),
-              rs.getString("export"),
-              ToolObservationCodec.read(rs.getString("tool_observation")),
-              FileReadWindowCodec.read(rs.getString("file_window")));
+  private static final RowMapper<EntryRecord> ROW_MAPPER = (rs, rowNum) -> entryRecord(rs, null);
+
+  private static final RowMapper<EntryRecord> PROJECTION_MAPPER =
+      (rs, rowNum) -> entryRecord(rs, rs.getObject("retained_answer", Integer.class));
+
+  private static EntryRecord entryRecord(ResultSet rs, Integer retainedAnswer) throws SQLException {
+    return new EntryRecord(
+        rs.getString("conversation_id"),
+        rs.getInt("ordinal"),
+        EntryKind.of(rs.getString("kind")),
+        rs.getString("content"),
+        rs.getString("tool_call_id"),
+        read(rs.getString("tool_calls")),
+        rs.getObject("superseded_by", Integer.class),
+        rs.getObject("handle", UUID.class),
+        rs.getInt("turn_ordinal"),
+        instant(rs, "recorded_at"),
+        // getObject and not getLong, on superseded_by's reasoning and with a
+        // quieter failure than its one: getLong reads a SQL NULL as 0, and 0
+        // is a legitimate duration here -- an operation that finished inside
+        // a millisecond -- so an unmeasured entry would come back claiming to
+        // have been measured at nothing, which is exactly the confusion
+        // between an absence and a measurement this column was added to
+        // avoid.
+        rs.getObject("took_ms", Long.class),
+        instant(rs, "ejected_at"),
+        rs.getString("export"),
+        ToolObservationCodec.read(rs.getString("tool_observation")),
+        FileReadWindowCodec.read(rs.getString("file_window")),
+        retainedAnswer);
+  }
 
   /*
    * OffsetDateTime on both sides and never java.sql.Timestamp, for the reason

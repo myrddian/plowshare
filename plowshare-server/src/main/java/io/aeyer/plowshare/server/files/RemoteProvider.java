@@ -481,7 +481,11 @@ public final class RemoteProvider implements FileProvider {
       Changed result = Changed.of(reply.result());
       if (observer != null)
         observer.accept(
-            new FileMutationObservation(request.id(), FileMutationObservation.Kind.CONFIRMED));
+            new FileMutationObservation(
+                request.id(),
+                Changed.identifies(reply.result(), request.op(), request.path(), request.to())
+                    ? FileMutationObservation.Kind.CONFIRMED
+                    : FileMutationObservation.Kind.REPLY_UNVERIFIED));
       return result;
     }
     heardFromAnOldClient(request.op());

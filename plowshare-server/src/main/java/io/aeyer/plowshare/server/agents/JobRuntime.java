@@ -3544,8 +3544,11 @@ public final class JobRuntime {
                                 ? ToolLines.ERROR
                                 : retainedOutcome(pending.tool().name(), result)),
                     pending.invocation());
-                replaceRetainedResult(
-                    history, pending.tool(), ChatMessage.tool(pending.tool().id(), result.text()));
+                replaceDirectResult(
+                    history,
+                    transcript.projectedAnswer(pending.answerOrdinal()),
+                    pending.tool(),
+                    ChatMessage.tool(pending.tool().id(), result.text()));
               });
         }
       } catch (RuntimeException failed) {
@@ -5639,21 +5642,38 @@ public final class JobRuntime {
       if (history.get(i).toolCalls().stream()
           .noneMatch(call -> call.id().equals(tool.id()) && call.name().equals(tool.name())))
         continue;
-      int slot = i + 1;
-      while (slot < history.size() && history.get(slot).role() == ChatMessage.Role.TOOL) {
-        if (tool.id().equals(history.get(slot).toolCallId())) {
-          history.set(slot, result);
-          return;
-        }
-        slot++;
-      }
-      history.add(slot, result);
+      replaceInBatch(history, i + 1, tool, result);
       return;
     }
     // Some agents deliberately omit previous tool working from their projection. Reinstate the
     // original request/result pair in that case, without submitting another inference.
     history.add(ChatMessage.assistant("", List.of(tool)));
     history.add(result);
+  }
+
+  private static void replaceDirectResult(
+      List<ChatMessage> history, ChatMessage declaration, ToolCall tool, ChatMessage result) {
+    for (int i = 0; i < history.size(); i++) {
+      // Identity matters even if another turn used exactly the same payload and wire ID.
+      if (history.get(i) == declaration) {
+        replaceInBatch(history, i + 1, tool, result);
+        return;
+      }
+    }
+    history.add(ChatMessage.assistant("", List.of(tool)));
+    history.add(result);
+  }
+
+  private static void replaceInBatch(
+      List<ChatMessage> history, int slot, ToolCall tool, ChatMessage result) {
+    while (slot < history.size() && history.get(slot).role() == ChatMessage.Role.TOOL) {
+      if (tool.id().equals(history.get(slot).toolCallId())) {
+        history.set(slot, result);
+        return;
+      }
+      slot++;
+    }
+    history.add(slot, result);
   }
 
   // --- what the agent may reach ------------------------------------------------

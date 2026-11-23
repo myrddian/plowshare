@@ -37,11 +37,7 @@ public final class FileContents {
   private int held;
   private final LinkedHashMap<String, Cached> cache = new LinkedHashMap<>(16, .75f, true);
 
-  private record Cached(List<String> lines, String image, String format, int weight, byte[] raw) {
-    private Cached(List<String> lines, String image, String format, int weight) {
-      this(lines, image, format, weight, null);
-    }
-  }
+  private record Cached(List<String> lines, String image, String format, int weight) {}
 
   public FileContents(int allowance) {
     if (allowance < 0) throw new IllegalArgumentException("negative text cache allowance");
@@ -57,7 +53,7 @@ public final class FileContents {
     return decode(path, op, transfer(path, meta, FileSource.MAX_BYTES, ask), home, images, true);
   }
 
-  /** Read fresh fenced metadata and reuse a verified source when the content hash still matches. */
+  /** Transfer and verify bytes from the currently authorized source for every exact read. */
   public FileRead remoteWindow(
       String path,
       Window window,
@@ -66,10 +62,8 @@ public final class FileContents {
       Function<FileRequest, FileReply> ask) {
     FileSource meta = ask.apply(FileRequest.source(id(), path, null, null)).source();
     if (meta == null || meta.data() != null) throw broken("missing source metadata");
-    String key = "exact:" + meta.sha256();
-    Cached prior = get(key);
-    if (prior != null && prior.raw().length == meta.size())
-      return FileRead.utf8(path, prior.raw(), window, true);
+    // SOURCE metadata comes from the client. Its hash verifies the transfer below and cannot
+    // authorize disclosure of bytes from another binding.
     byte[] bytes = transfer(path, meta, FileSource.MAX_BYTES, ask);
     if (isPdf(bytes) || ImageFormat.of(bytes) != null) {
       try {
@@ -82,9 +76,7 @@ public final class FileContents {
             true);
       }
     }
-    FileRead.Exact exact = FileRead.utf8(path, bytes, window, true);
-    put(key, new Cached(null, null, null, Math.max(1, bytes.length), bytes));
-    return exact;
+    return FileRead.utf8(path, bytes, window, true);
   }
 
   /** Transfer raw, hash-verified bytes through the existing SOURCE channel. */

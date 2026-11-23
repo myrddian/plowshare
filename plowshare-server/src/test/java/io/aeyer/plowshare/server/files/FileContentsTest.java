@@ -70,10 +70,7 @@ class FileContentsTest {
     assertEquals(
         "last",
         assertInstanceOf(FileRead.Exact.class, remote.readWindow(path, Window.of(2, 1))).text());
-    assertEquals(
-        3,
-        source.asked.size(),
-        "the continuation revalidates authorization and reuses the verified bytes");
+    assertEquals(4, source.asked.size(), "the continuation verifies a fresh fenced transfer");
     SessionChannel legacy =
         (session, request) -> {
           assertEquals(FileRequest.READ, request.op());
@@ -83,6 +80,26 @@ class FileContentsTest {
     assertEquals(
         new FileRead.View(new Span(List.of("legacy"), 1, 2, false, Span.END)),
         new RemoteProvider(legacy, "legacy", grants).readWindow(path, Window.of(1, 1)));
+  }
+
+  @Test
+  void a_source_cannot_substitute_its_hash_claim_for_a_verified_transfer() {
+    var contents = new FileContents(1024);
+    var original = new Source("first".getBytes(StandardCharsets.UTF_8));
+    var other = new Source("other".getBytes(StandardCharsets.UTF_8));
+    var window = Window.of(0, 1);
+    contents.remoteWindow("first.txt", window, Home.of("one"), ImageStore.NONE, original);
+    assertThrows(
+        WorkspaceUnavailableException.class,
+        () ->
+            contents.remoteWindow(
+                "other.txt",
+                window,
+                Home.of("two"),
+                ImageStore.NONE,
+                request ->
+                    request.offset() == null ? original.apply(request) : other.apply(request)));
+    assertEquals(1, other.asked.size());
   }
 
   @Test

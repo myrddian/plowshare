@@ -130,7 +130,7 @@ public final class JdbcSuspendedRunCalls
         () ->
             jdbc.query(
                 """
-        SELECT c.invocation_id, c.call_id, c.tool_name, c.result, c.effect_observation,
+        SELECT c.invocation_id, c.answer_ordinal, c.call_id, c.tool_name, c.result, c.effect_observation,
                c.effect_request_id, t ->> 'arguments' AS arguments
         FROM suspended_run_calls c
         JOIN entries e ON (e.conversation_id, e.ordinal) = (c.conversation, c.answer_ordinal)
@@ -145,6 +145,7 @@ public final class JdbcSuspendedRunCalls
                 (row, n) ->
                     new DirectFileCalls.Pending(
                         row.getString("invocation_id"),
+                        row.getInt("answer_ordinal"),
                         new ToolCall(
                             row.getString("call_id"),
                             row.getString("tool_name"),

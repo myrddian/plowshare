@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.files;
 
 import io.aeyer.plowshare.protocol.FileResult;
+import java.util.Objects;
 
 /**
  * What a change to a file did, as the provider that made it reported it.
@@ -28,5 +29,14 @@ public record Changed(FileResult facts, String oldSentence) {
   /** Whether the answer is every line of the file, uncut — a read in all but name. */
   public boolean showedWholeFile() {
     return facts != null && facts.excerpt() != null && facts.excerpt().whole();
+  }
+
+  /** Whether the typed facts describe the version, operation, and paths of this request. */
+  static boolean identifies(FileResult facts, String op, String path, String to) {
+    return facts != null
+        && Objects.equals(facts.version(), FileResult.VERSION)
+        && op.equals(facts.op())
+        && path.equals(facts.path())
+        && Objects.equals(to, facts.to());
   }
 }

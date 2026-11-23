@@ -53,6 +53,11 @@ public record AttributedTranscript(
   }
 
   @Override
+  public ChatMessage projectedAnswer(int ordinal) {
+    return delegate.projectedAnswer(ordinal);
+  }
+
+  @Override
   public void record(LoggedEntry entry) {
     delegate.record(entry);
   }
