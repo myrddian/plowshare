@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.archive.EntryPage;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class EntryViewTest {
@@ -34,7 +35,7 @@ class EntryViewTest {
             100,
             0,
             null);
-    var view = EntryView.of(row);
+    var view = EntryView.of(row, Map.of(), null);
     assertEquals(100, view.promptTokens());
     assertEquals(0, view.completionTokens());
     assertNull(view.reasoningTokens());

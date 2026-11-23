@@ -111,7 +111,7 @@ public final class EntryStore implements ConversationSearchRepository {
   private static final String COLUMNS =
       "conversation_id, ordinal, kind, role, content, tool_call_id, tool_calls,"
           + " superseded_by, handle, turn_ordinal, recorded_at, took_ms, ejected_at,"
-          + " export, tool_observation";
+          + " export, tool_observation, file_window";
 
   /**
    * The log's advisory-lock space: the two-key form, so no other advisory lock this database takes
@@ -148,9 +148,9 @@ public final class EntryStore implements ConversationSearchRepository {
                                  invocation, produced_by, dispatch, model_specifier, model_pool,
                                  wire_model, completion, finish_reason, prompt_tokens,
                                  completion_tokens, reasoning_tokens, sent_at, fallback_reason,
-                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation, input_provenance)
+                                 first_token_ms, speaker, speaker_name, outcome, salients, job_id, tool_observation, input_provenance, retained_invocation, file_window)
             SELECT ?, COALESCE(MAX(ordinal), 0) + 1, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB), CAST(? AS JSONB)
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, CAST(? AS JSONB), CAST(? AS JSONB), ?, CAST(? AS JSONB)
               FROM entries
              WHERE conversation_id = ?
             RETURNING %s"""
@@ -829,7 +829,7 @@ public final class EntryStore implements ConversationSearchRepository {
                            WITH ORDINALITY AS each(call, asked)) AS tool_calls,
                    handle, recorded_at, took_ms,
                    dispatch, wire_model, completion, speaker, speaker_name, outcome, job_id,
-                   prompt_tokens, completion_tokens, reasoning_tokens
+                   prompt_tokens, completion_tokens, reasoning_tokens, file_window
               FROM entries
              WHERE conversation_id = ?%s""";
 
@@ -2034,6 +2034,22 @@ public final class EntryStore implements ConversationSearchRepository {
 
   /** Records the immutable owning job; null means an unbound or legacy entry, never a guess. */
   public EntryRecord append(String conversationId, int turnOrdinal, LoggedEntry entry, String job) {
+    return append(conversationId, turnOrdinal, entry, job, null);
+  }
+
+  public void appendRetainedResult(
+      String conversationId, int turnOrdinal, LoggedEntry entry, String job, String invocation) {
+    if (entry.kind() != EntryKind.TOOL_RESULT || invocation == null || invocation.isBlank())
+      throw new IllegalArgumentException("A retained invocation requires a tool result");
+    append(conversationId, turnOrdinal, entry, job, invocation);
+  }
+
+  private EntryRecord append(
+      String conversationId,
+      int turnOrdinal,
+      LoggedEntry entry,
+      String job,
+      String retainedInvocation) {
     if (job != null) ArchiveValues.identity(job, "job id");
     String conversation = ConversationStore.named(conversationId);
     String kind = entry.kind().wireName();
@@ -2069,6 +2085,21 @@ public final class EntryStore implements ConversationSearchRepository {
                           .isActualTransactionActive())
                     throw new IllegalStateException("Typed entry append requires a transaction");
                   jdbc.query(LOCK, (ResultSet rs) -> null, conversation);
+                  // The conversation lock serializes retries with the original append. Keep the
+                  // first row and its result bytes even if recovery reserved another turn.
+                  if (retainedInvocation != null) {
+                    var recorded =
+                        jdbc.query(
+                            "SELECT "
+                                + COLUMNS
+                                + " FROM entries WHERE retained_invocation = ?"
+                                + " AND conversation_id = ? AND tool_call_id = ?",
+                            ROW_MAPPER,
+                            retainedInvocation,
+                            conversation,
+                            entry.toolCallId());
+                    if (!recorded.isEmpty()) return recorded.getFirst();
+                  }
                   EntryRecord written =
                       jdbc.queryForObject(
                           INSERT,
@@ -2104,6 +2135,8 @@ public final class EntryStore implements ConversationSearchRepository {
                           job,
                           ToolObservationCodec.write(entry.observation()),
                           InputProvenanceCodec.write(entry.inputProvenance()),
+                          retainedInvocation,
+                          FileReadWindowCodec.write(entry.fileWindow()),
                           conversation);
                   if (entry.observation() != null) {
                     artifacts.retain(written, job);
@@ -4080,7 +4113,8 @@ public final class EntryStore implements ConversationSearchRepository {
               rs.getObject("took_ms", Long.class),
               instant(rs, "ejected_at"),
               rs.getString("export"),
-              ToolObservationCodec.read(rs.getString("tool_observation")));
+              ToolObservationCodec.read(rs.getString("tool_observation")),
+              FileReadWindowCodec.read(rs.getString("file_window")));
 
   /*
    * OffsetDateTime on both sides and never java.sql.Timestamp, for the reason
@@ -4157,7 +4191,8 @@ public final class EntryStore implements ConversationSearchRepository {
               rs.getString("job_id"),
               rs.getObject("prompt_tokens", Integer.class),
               rs.getObject("completion_tokens", Integer.class),
-              rs.getObject("reasoning_tokens", Integer.class));
+              rs.getObject("reasoning_tokens", Integer.class),
+              FileReadWindowCodec.read(rs.getString("file_window")));
 
   private static final RowMapper<StoredResults.Result> LISTING_MAPPER =
       (rs, rowNum) ->

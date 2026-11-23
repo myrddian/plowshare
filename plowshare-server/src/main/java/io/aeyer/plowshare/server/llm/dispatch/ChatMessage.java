@@ -93,7 +93,17 @@ public record ChatMessage(
     List<Content> parts,
     List<ToolCall> toolCalls,
     String toolCallId,
-    @JsonIgnore WebEvidenceRelease webRelease) {
+    @JsonIgnore WebEvidenceRelease webRelease,
+    @JsonIgnore boolean losslessToolText) {
+
+  public ChatMessage(
+      Role role,
+      List<Content> parts,
+      List<ToolCall> toolCalls,
+      String toolCallId,
+      WebEvidenceRelease webRelease) {
+    this(role, parts, toolCalls, toolCallId, webRelease, false);
+  }
 
   public ChatMessage(Role role, List<Content> parts, List<ToolCall> toolCalls, String toolCallId) {
     this(role, parts, toolCalls, toolCallId, null);
@@ -129,6 +139,13 @@ public record ChatMessage(
     // queue while the caller still holds the list it passed.
     parts = parts == null ? List.of() : List.copyOf(parts);
     toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+    if (losslessToolText
+        && (role != Role.TOOL
+            || parts.size() != 1
+            || !(parts.getFirst() instanceof Content.Text)
+            || webRelease != null))
+      throw new IllegalArgumentException(
+          "A lossless result requires one text payload and a tool call");
     // An EMPTY text part is dropped and a BLANK one is not, and the
     // difference is a measurement rather than tidiness: RequestTest pins
     // that an assistant turn of "  " keeps its two spaces, because what a
@@ -136,10 +153,11 @@ public record ChatMessage(
     // absence of words, which is how a turn that is entirely tool calls is
     // spelled, and a Text("") in the list would make that turn's parts and
     // its content() disagree about whether it said anything.
-    parts =
-        parts.stream()
-            .filter(part -> !(part instanceof Content.Text text && text.text().isEmpty()))
-            .toList();
+    if (!losslessToolText)
+      parts =
+          parts.stream()
+              .filter(part -> !(part instanceof Content.Text text && text.text().isEmpty()))
+              .toList();
     String said = textOf(parts);
     boolean picture =
         parts.stream()
@@ -196,7 +214,7 @@ public record ChatMessage(
               "a tool message needs the tool_call_id of the call it answers;"
                   + " without it the model cannot tell which call this is");
         }
-        if (said.isBlank()) {
+        if (said.isBlank() && !losslessToolText) {
           throw new IllegalArgumentException(
               "a tool message needs a result; a blank one reads to a model as a"
                   + " tool that does not work");
@@ -332,6 +350,11 @@ public record ChatMessage(
   /** One tool's result, against the id of the call it answers. */
   public static ChatMessage tool(String toolCallId, String content) {
     return new ChatMessage(Role.TOOL, content, List.of(), toolCallId);
+  }
+
+  public static ChatMessage losslessTool(String toolCallId, String content) {
+    return new ChatMessage(
+        Role.TOOL, List.of(new Content.Text(content)), List.of(), toolCallId, null, true);
   }
 
   /**

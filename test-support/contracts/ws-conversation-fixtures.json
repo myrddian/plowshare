@@ -1,4 +1,17 @@
 {
+  "conversation.tool.trace": {
+    "code": "OK",
+    "payload": {
+      "trace": {
+        "invocationId": "apr_file",
+        "firstObservedAt": "2026-11-18T00:00:00Z",
+        "sentAt": "2026-11-18T00:00:00Z",
+        "replyObservedAt": null,
+        "replyTimedOutAt": "2026-11-18T00:00:30Z",
+        "requestId": "request-original"
+      }
+    }
+  },
   "conversation.open": {
     "code": "OK",
     "payload": {

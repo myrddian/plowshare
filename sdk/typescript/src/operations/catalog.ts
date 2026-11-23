@@ -68,6 +68,7 @@ export interface ExtendedPayloads
       readonly drawn?: boolean;
     };
   'conversation.context': Conversation & { readonly agent?: string };
+  'conversation.tool.trace': Conversation & { readonly invocationId: string };
   'conversation.projection': Conversation & {
     readonly agent?: string;
     readonly turn?: number;
@@ -497,6 +498,7 @@ export const CLI_OPERATIONS = {
   'conversation compactions': 'conversation.compactions',
   'conversation chat': 'conversation.chat',
   'conversation trajectory': 'conversation.trajectory',
+  'conversation tool trace': 'conversation.tool.trace',
   'conversation context': 'conversation.context',
   'conversation projection': 'conversation.projection',
   'conversation resume': 'conversation.resume',

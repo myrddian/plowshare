@@ -11,6 +11,7 @@ import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import io.aeyer.plowshare.server.files.Grant;
 import io.aeyer.plowshare.server.files.Mode;
 import io.aeyer.plowshare.server.files.ProviderRouter;
@@ -143,11 +144,21 @@ class FileWiringTest {
 
     /** Every tool result in the last conversation this transport was sent. */
     String toolResults() {
-      List<ChatMessage> last = conversations.get(conversations.size() - 1);
-      return last.stream()
+      return latestMessages().stream()
           .filter(message -> message.role() == ChatMessage.Role.TOOL)
           .map(ChatMessage::content)
           .reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b);
+    }
+
+    long navigationHints() {
+      return latestMessages().stream()
+          .filter(message -> message.role() == ChatMessage.Role.USER)
+          .filter(message -> message.content().startsWith("Harness hint:"))
+          .count();
+    }
+
+    private List<ChatMessage> latestMessages() {
+      return conversations.get(conversations.size() - 1);
     }
   }
 
@@ -546,9 +557,9 @@ class FileWiringTest {
       runtime.run(
           agent(definitions, "reader", runtime), "inspect", Home.global(), generous(), null);
       String results = scripted.toolResults();
-      assertEquals(
-          scenario.equals("code") ? 1 : 0, results.split("Harness hint:", -1).length - 1, results);
-      assertTrue(results.contains(scenario.equals("prose") ? "Some notes" : "class A {}"), results);
+      assertEquals(scenario.equals("code") ? 1 : 0, scripted.navigationHints());
+      String content = scenario.equals("prose") ? "Some notes" : "class A {}";
+      assertEquals(content + "\n" + content, results);
       org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
           .glob(org.mockito.ArgumentMatchers.anyString());
       org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
@@ -624,17 +635,21 @@ class FileWiringTest {
           org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
               .read(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
           org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
+              .readWindow(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+          org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
               .glob(org.mockito.ArgumentMatchers.anyString());
           org.mockito.Mockito.verify(provider, org.mockito.Mockito.never())
               .fingerprint(org.mockito.ArgumentMatchers.any());
-        } else {
-          assertTrue(
-              posted
-                  .get()
-                  .contains(name.equals(CodeMapTool.NAME) ? "read_declaration" : "Harness hint:"),
-              posted.get());
+        } else if (name.equals(CodeMapTool.NAME)) {
+          assertTrue(posted.get().contains("read_declaration"), posted.get());
           assertEquals(decision.equals("redact") ? "navigation withheld" : posted.get(), results);
+        } else {
+          assertEquals("class A {}", posted.get());
+          assertEquals(decision.equals("redact") ? FileReadWindow.WITHHELD : posted.get(), results);
         }
+        assertEquals(
+            name.equals(FileTools.READ_NAME) && decision.equals("allow") ? 1 : 0,
+            scripted.navigationHints());
       }
     }
   }

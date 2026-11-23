@@ -585,7 +585,7 @@ class RunGateWiringTest {
               return null;
             })
         .when(suspendedCalls)
-        .retain(any(), any(), any(), any(), any(), any());
+        .retainAt(any(), any(), any(), any(), any(), any(), any());
     when(suspendedCalls.find(any()))
         .thenAnswer(
             invocation -> {

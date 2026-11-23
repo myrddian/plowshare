@@ -231,6 +231,17 @@ public interface Transcript {
     throw new IllegalStateException("This transcript cannot confirm durable execution records");
   }
 
+  /** Record a retained call's declaration and return its server-assigned entry ordinal. */
+  default Integer recordRetainedCallBatch(LoggedEntry answer) {
+    recordDurably(answer);
+    return null;
+  }
+
+  /** Append the result once for this server-owned invocation, including during recovery. */
+  default void recordRetainedResult(LoggedEntry entry, String invocation) {
+    recordDurably(entry);
+  }
+
   /**
    * The conversation this run is writing into, or {@code null} for a run in none.
    *

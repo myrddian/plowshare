@@ -33,6 +33,24 @@ convenience methods for runs, jobs, conversations and outgoing work. Build a loc
 npm archive with `pnpm pack`; existing subpath exports remain available. See
 [the shared SDK contract](../../docs/sdks.md) for packaging and verification.
 
+In `conversation.trajectory`, a recorded tool call can carry an `effectReceipt`
+with its dispatch and effect states. The tool result is still the separate
+entry with the original text. Use the receipt's `invocationId` to read optional
+debug metadata when the caller opens that tool call.
+
+```ts
+const { trace } = requirePayload(await client.request('conversation.tool.trace', {
+  conversation,
+  invocationId: receipt.invocationId,
+}))
+```
+
+The operation returns `trace: null` when no trace is available under the named
+conversation. Trajectory pagination does not fetch trace records.
+
+A lossless `file_read` result carries optional `fileWindow` metadata beside
+its result text. Use `nextOffset` on the same path to continue. An empty tool
+result and an ejected result have distinct payloads.
 
 The shared core owns the neutral WebSocket connection, request envelopes,
 authentication/bootstrap interfaces, file-channel wire types and job identity

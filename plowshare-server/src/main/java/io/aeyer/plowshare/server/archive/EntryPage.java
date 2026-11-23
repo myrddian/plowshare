@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.archive;
 
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -173,7 +174,55 @@ public record EntryPage(List<Row> listed, int total, int through, Boolean more) 
       String job,
       Integer promptTokens,
       Integer completionTokens,
-      Integer reasoningTokens) {
+      Integer reasoningTokens,
+      FileReadWindow fileWindow) {
+
+    public Row(
+        int ordinal,
+        int turnOrdinal,
+        EntryKind kind,
+        String excerpt,
+        int length,
+        Instant ejectedAt,
+        Integer supersededBy,
+        String toolCallId,
+        List<Asked> toolCalls,
+        UUID handle,
+        Instant recordedAt,
+        Long tookMillis,
+        String dispatch,
+        String wireModel,
+        String completion,
+        Speaker speaker,
+        String outcome,
+        String job,
+        Integer promptTokens,
+        Integer completionTokens,
+        Integer reasoningTokens) {
+      this(
+          ordinal,
+          turnOrdinal,
+          kind,
+          excerpt,
+          length,
+          ejectedAt,
+          supersededBy,
+          toolCallId,
+          toolCalls,
+          handle,
+          recordedAt,
+          tookMillis,
+          dispatch,
+          wireModel,
+          completion,
+          speaker,
+          outcome,
+          job,
+          promptTokens,
+          completionTokens,
+          reasoningTokens,
+          null);
+    }
 
     /** Older callers do not supply usage; absence never means zero tokens. */
     public Row(

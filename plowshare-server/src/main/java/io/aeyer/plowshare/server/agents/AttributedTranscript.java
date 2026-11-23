@@ -68,6 +68,16 @@ public record AttributedTranscript(
   }
 
   @Override
+  public Integer recordRetainedCallBatch(LoggedEntry answer) {
+    return delegate.recordRetainedCallBatch(answer);
+  }
+
+  @Override
+  public void recordRetainedResult(LoggedEntry entry, String invocation) {
+    delegate.recordRetainedResult(entry, invocation);
+  }
+
+  @Override
   public String conversationId() {
     return delegate.conversationId();
   }

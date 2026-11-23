@@ -2081,6 +2081,24 @@ export class DesktopClient {
       case 'conversation-retry':
         await this.retryConversation(text(request.job, 'job', 512));
         break;
+      case 'tool-trace': {
+        const answer = await this.ask('conversation.tool.trace', {
+          conversation: request.conversation,
+          invocationId: request.invocationId,
+        });
+        if (answer.code !== 'OK')
+          throw new Error(answer.said ?? 'Tool trace unavailable');
+        const toolTrace = decodeReply(
+          'conversation.tool.trace',
+          answer.payload,
+        );
+        if (
+          toolTrace.trace &&
+          toolTrace.trace.invocationId !== request.invocationId
+        )
+          throw new Error('Tool trace does not match the selected call');
+        return { toolTrace };
+      }
       case 'delegate-retry': {
         const conversation = text(request.conversation, 'conversation', 512);
         const step = stepsOf(

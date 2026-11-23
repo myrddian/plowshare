@@ -161,6 +161,7 @@ public class ProjectAuthorization {
           "conversation.compactions",
           "conversation.chat",
           "conversation.trajectory",
+          "conversation.tool.trace",
           "conversation.context",
           "conversation.projection",
           "conversation.context.count",

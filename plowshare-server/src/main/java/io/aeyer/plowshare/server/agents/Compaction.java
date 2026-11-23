@@ -1926,6 +1926,17 @@ public final class Compaction implements SkillSummaries {
     }
 
     @Override
+    public Integer recordRetainedCallBatch(LoggedEntry answer) {
+      return turn.recordRetainedCallBatch(answer);
+    }
+
+    @Override
+    public void recordRetainedResult(LoggedEntry entry, String invocation) {
+      turn.recordRetainedResult(entry, invocation);
+      reconciledToolCalls.add(entry.toolCallId());
+    }
+
+    @Override
     public void promptMeasured(int promptTokens) {
       turn.promptMeasured(promptTokens);
     }
@@ -2902,6 +2913,18 @@ public final class Compaction implements SkillSummaries {
     public void recordDurably(LoggedEntry entry) {
       retainedAuthority.run();
       entries.append(conversationId, turnOrdinal(), entry, job);
+    }
+
+    @Override
+    public Integer recordRetainedCallBatch(LoggedEntry answer) {
+      retainedAuthority.run();
+      return entries.append(conversationId, turnOrdinal(), answer, job).ordinal();
+    }
+
+    @Override
+    public void recordRetainedResult(LoggedEntry entry, String invocation) {
+      retainedAuthority.run();
+      entries.appendRetainedResult(conversationId, turnOrdinal(), entry, job, invocation);
     }
 
     /**

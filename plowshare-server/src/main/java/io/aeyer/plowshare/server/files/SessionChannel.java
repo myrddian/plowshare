@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.files;
 
 import io.aeyer.plowshare.protocol.FileReply;
 import io.aeyer.plowshare.protocol.FileRequest;
+import java.util.function.Consumer;
 
 /**
  * A way to ask one client session for something and wait for the answer.
@@ -104,6 +105,11 @@ public interface SessionChannel {
    *     even though both end the run
    */
   FileReply ask(String session, FileRequest request);
+
+  /** A single mutation. Report local transport handoff before waiting for its reply. */
+  default FileReply askMutation(String session, FileRequest request, Consumer<String> sent) {
+    return ask(session, request);
+  }
 
   /**
    * {@link #ask(String, FileRequest)}, waiting as long as {@code deadline} rather than the

@@ -301,6 +301,12 @@ public final class LocalProvider implements FileProvider {
   }
 
   @Override
+  public Optional<FileSource> mutationFingerprint(Path path) {
+    return sourceBytes(path, FileSource.MAX_BYTES, true)
+        .map(bytes -> new FileSource(bytes.length, FileContents.sha256(bytes), null, null));
+  }
+
+  @Override
   public byte[] snapshot(Path path, FileSource metadata, int maxBytes) {
     byte[] bytes = codeBytes(path, maxBytes);
     if (bytes.length != metadata.size() || !FileContents.sha256(bytes).equals(metadata.sha256()))
@@ -406,6 +412,25 @@ public final class LocalProvider implements FileProvider {
     // order to plan — and an empty file is the ordinary END, the same
     // answer a read of it gives.
     return new Span(List.of(), 0, total, total > 0, total > 0 ? Span.LINES : Span.END);
+  }
+
+  @Override
+  public FileRead readWindow(Path path, Window window) {
+    Path target = permitted(reachable(leash()), path, "read");
+    byte[] bytes = readBytes(target, path, FileRequest.READ);
+    List<String> view = converted(target, path, bytes, FileRequest.READ);
+    if (view == null) return FileRead.utf8(path.toString(), bytes, window, false);
+    try {
+      return new FileRead.View(window.cut(view));
+    } catch (Window.LineTooWide wide) {
+      throw refused(
+          FileResult.lineTooWide(
+              FileRequest.READ,
+              path.toString(),
+              wide.offset(),
+              wide.bytes(),
+              Window.MAX_WINDOW_BYTES));
+    }
   }
 
   /**
@@ -515,6 +540,29 @@ public final class LocalProvider implements FileProvider {
    *     walk. That constant owns the argument
    */
   private List<String> decode(Path target, Path path, boolean naming, String op) {
+    byte[] bytes = readBytes(target, path, op);
+    if (naming) {
+      List<String> converted = converted(target, path, bytes, op);
+      if (converted != null) return converted;
+    }
+    try {
+      return StandardCharsets.UTF_8
+          .newDecoder()
+          .decode(ByteBuffer.wrap(bytes))
+          .toString()
+          .lines()
+          .toList();
+    } catch (CharacterCodingException notText) {
+      throw refused(FileResult.notText(op, path.toString(), FileResult.NOT_UTF8));
+    }
+  }
+
+  private List<String> converted(Path target, Path path, byte[] bytes, String op) {
+    List<String> converted = FileContents.SHARED.pdf(path.toString(), op, bytes, false);
+    return converted == null ? named(target, path, bytes, op) : converted;
+  }
+
+  private byte[] readBytes(Path target, Path path, String op) {
     try {
       // An attribute read and not a failed open. Measured on this host:
       // Files.newInputStream(directory, NOFOLLOW_LINKS) SUCCEEDS, and the
@@ -591,26 +639,11 @@ public final class LocalProvider implements FileProvider {
       }
       byte[] bytes;
       try (InputStream open = Files.newInputStream(target, LinkOption.NOFOLLOW_LINKS)) {
-        bytes = open.readAllBytes();
+        bytes = open.readNBytes((int) MAX_FILE_BYTES + 1);
       }
-      if (naming) {
-        List<String> converted = FileContents.SHARED.pdf(path.toString(), op, bytes, false);
-        if (converted != null) return converted;
-        List<String> picture = named(target, path, bytes, op);
-        if (picture != null) {
-          return picture;
-        }
-      }
-      // A decoder that REPORTs, which is the default and is what
-      // Files.readString does. `new String(bytes, UTF_8)` substitutes
-      // U+FFFD instead — measured — so a provider written that way hands a
-      // model a page of replacement characters and calls it the file.
-      return StandardCharsets.UTF_8
-          .newDecoder()
-          .decode(ByteBuffer.wrap(bytes))
-          .toString()
-          .lines()
-          .toList();
+      if (bytes.length > MAX_FILE_BYTES)
+        throw refused(FileResult.tooLarge(op, path.toString(), bytes.length, MAX_FILE_BYTES));
+      return bytes;
     } catch (NoSuchFileException absent) {
       throw refused(FileResult.noFile(op, path.toString()));
     } catch (AccessDeniedException forbidden) {
@@ -624,8 +657,6 @@ public final class LocalProvider implements FileProvider {
       // resting the whole clause on a claim about which errno is common.
       throw refused(
           FileResult.failed(op, FileResult.DENIED, path.toString(), null, forbidden.getMessage()));
-    } catch (CharacterCodingException notText) {
-      throw refused(FileResult.notText(op, path.toString(), FileResult.NOT_UTF8));
     } catch (IOException failed) {
       // THE RESIDUE, admitted rather than hidden. ENOSPC and EIO land here
       // and are not the caller's mistake at all, yet they are refused with

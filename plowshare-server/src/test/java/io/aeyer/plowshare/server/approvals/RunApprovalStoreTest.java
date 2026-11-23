@@ -2,14 +2,21 @@ package io.aeyer.plowshare.server.approvals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.search.Verb;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.LoggedEntry;
+import io.aeyer.plowshare.server.api.EntryPageView;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.files.FileReadWindow;
+import io.aeyer.plowshare.server.pool.ScopedSqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -41,6 +49,9 @@ class RunApprovalStoreTest {
   private static final List<String> TEST = List.of("./gradlew", "test", "--tests", "Foo");
 
   private static JdbcTemplate jdbc;
+  private static JdbcTemplate receiptJdbc;
+  private static ScopedSqlWorkBudget receiptBudget;
+  private static final Duration RECEIPT_DEADLINE = Duration.ofSeconds(2);
 
   @TempDir Path tmp;
 
@@ -54,6 +65,211 @@ class RunApprovalStoreTest {
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
     Flyway.configure().dataSource(source).load().migrate();
     jdbc = new JdbcTemplate(source);
+    receiptBudget =
+        new ScopedSqlWorkBudget(
+            new SqlWorkBudgetProperties(RECEIPT_DEADLINE, Duration.ofMillis(500), 128, 8, 64, 4),
+            null);
+    receiptJdbc = new JdbcTemplate(receiptBudget.decorate(source));
+  }
+
+  @AfterAll
+  static void closeReceiptBudget() {
+    if (receiptBudget != null) receiptBudget.close();
+  }
+
+  private static SuspendedRunCalls retainedCalls() {
+    return new JdbcSuspendedRunCalls(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
+  }
+
+  @Test
+  void an_approved_empty_file_result_retains_its_window_across_recovery() {
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    var entries = new EntryStore(jdbc);
+    var tool = new ToolCall("read-file", "file_read", "{\"path\":\"/fixture/empty.txt\"}");
+    int original = entries.append(conversation, 1, LoggedEntry.answer("", List.of(tool))).ordinal();
+    var approval = asked(conversation, "local", TEST);
+    String id = approval.id();
+    var calls = retainedCalls();
+    calls.retainAt(id, conversation, "session", "local", "owner", tool, original);
+    assertTrue(store.allow(id, RunApproval.ONCE, null, "reviewer"));
+    calls.release(id);
+    assertTrue(calls.claim(id));
+    var window = new FileReadWindow(0, 0, 0, 0, 300, 300, "end");
+    calls.completeRead(id, "", window);
+
+    var restarted = retainedCalls();
+    var saved = restarted.find(id).orElseThrow();
+    assertEquals("", saved.result());
+    assertEquals(window, saved.fileWindow());
+    assertTrue(
+        new RunCallResumption(restarted)
+            .resumeWithReceipt(
+                saved,
+                ignored -> {
+                  throw new AssertionError("The retained read must not execute again");
+                },
+                result ->
+                    entries.appendRetainedResult(
+                        conversation,
+                        2,
+                        LoggedEntry.toolResult(tool.id(), result.text())
+                            .windowed(result.fileWindow()),
+                        null,
+                        id)));
+    var row = entries.pageOfLog(conversation, 0, 10).listed().getLast();
+    assertEquals("", row.excerpt());
+    assertEquals(window, row.fileWindow());
+    assertEquals(window, entries.forConversation(conversation).getLast().fileWindow());
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () -> entries.append(conversation, 2, LoggedEntry.toolResult("ordinary", "")));
+  }
+
+  @Test
+  void a_file_effect_receipt_survives_restart_without_changing_the_tool_result() {
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    var entries = new EntryStore(jdbc);
+    var approval = asked(conversation, "local", TEST);
+    String id = approval.id();
+    var calls = new JdbcSuspendedRunCalls(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
+    var tool = new ToolCall("call_file", "file_delete", "{\"path\":\"/fixture/demo.txt\"}");
+    int earlier = entries.append(conversation, 1, LoggedEntry.answer("", List.of(tool))).ordinal();
+    int original = entries.append(conversation, 2, LoggedEntry.answer("", List.of(tool))).ordinal();
+    calls.retainAt(id, conversation, "session", "local", "owner", tool, original);
+    assertTrue(store.allow(id, RunApproval.ONCE, null, "reviewer"));
+    calls.release(id);
+    assertTrue(calls.claim(id));
+
+    var sent = new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_SENT, "request-original");
+    calls.recordEffect(id, sent);
+    assertEquals(sent, retainedCalls().find(id).orElseThrow().effectReceipt());
+    var foreign =
+        new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_EFFECT_CONFIRMED, "other-request");
+    assertThrows(IllegalStateException.class, () -> calls.recordEffect(id, foreign));
+    var timeout =
+        new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, sent.providerRequestId());
+    calls.recordEffect(id, timeout);
+    assertThrows(IllegalStateException.class, () -> calls.recordEffect(id, sent));
+    String body = RunCallResumption.FILE_REPLY_TIMEOUT_RESULT;
+    calls.complete(id, body);
+
+    var recovered = retainedCalls();
+    var call = recovered.find(id).orElseThrow();
+    assertEquals(body, call.result());
+    assertEquals(timeout, call.effectReceipt());
+    assertFalse(recovered.claim(id));
+    assertTrue(
+        new RunCallResumption(recovered)
+            .resumeWithReceipt(
+                call,
+                ignored -> {
+                  throw new AssertionError("An unknown effect must never be replayed");
+                },
+                result -> {
+                  assertEquals(body, result.text());
+                  assertEquals(timeout, result.effectReceipt());
+                  entries.appendRetainedResult(
+                      conversation, 3, LoggedEntry.toolResult(tool.id(), body), null, id);
+                }));
+    assertTrue(recovered.pending(conversation).isEmpty());
+    entries.appendRetainedResult(
+        conversation, 4, LoggedEntry.toolResult(tool.id(), "replayed body"), null, id);
+    var log = entries.forConversation(conversation);
+    assertEquals(3, log.size());
+    assertEquals(body, log.getLast().content());
+    var receipts = calls.forPage(conversation, List.of(earlier, original), List.of());
+    assertEquals(
+        List.of(
+            new TrajectoryToolReceipts.Recorded(
+                id, original, tool.id(), log.getLast().ordinal(), timeout)),
+        receipts);
+    var page = EntryPageView.of(entries.pageOfLog(conversation, 0, 10), 0, 10, receipts);
+    assertEquals(null, page.entries().getFirst().toolCalls().getFirst().effectReceipt());
+    assertEquals(id, page.entries().get(1).toolCalls().getFirst().effectReceipt().invocationId());
+    assertEquals(body, page.entries().getLast().excerpt());
+    var incremental =
+        EntryPageView.trajectory(
+                entries.pageOfLogAfter(conversation, original, EntryStore.EVERY_KIND, false, 0, 10),
+                0,
+                10,
+                conversation,
+                calls)
+            .entries()
+            .getFirst();
+    assertEquals(original, incremental.retainedToolResult().answerOrdinal());
+    assertEquals(body, incremental.excerpt());
+    var traces = new JdbcToolCallTraces(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
+    var trace = traces.read(conversation, id).orElseThrow();
+    assertEquals("request-original", trace.requestId());
+    assertFalse(trace.replyTimedOutAt().isBefore(trace.sentAt()));
+    assertEquals(null, trace.replyObservedAt());
+    String other = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    assertTrue(traces.read(other, id).isEmpty());
+    assertTrue(traces.read(conversation, "missing").isEmpty());
+  }
+
+  @Test
+  void a_direct_invocation_keeps_its_exact_result_receipt_and_trace_across_recovery() {
+    String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
+    var entries = new EntryStore(jdbc);
+    var tool = new ToolCall("same-id", "file_edit", "{\"path\":\"/fixture/note.txt\"}");
+    int original = entries.append(conversation, 1, LoggedEntry.answer("", List.of(tool))).ordinal();
+    var store = new JdbcSuspendedRunCalls(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
+    var invocation = store.claimDirect(conversation, original, tool, "owner");
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.claimDirect(conversation, original, tool, "owner"));
+    assertTrue(store.pending(conversation).isEmpty());
+    assertTrue(store.pendingDirect(conversation, 0).isEmpty());
+    assertTrue(
+        store.pendingDirect(conversation, 2).isEmpty(),
+        "A different turn cannot settle an unclosed call");
+    assertEquals(
+        ToolEffectReceipt.Dispatch.MAY_HAVE_DISPATCHED,
+        store.pendingDirect(conversation, 1).getFirst().receipt().dispatch());
+    store.recordEffect(
+        invocation, new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_SENT, "original"));
+    var unknown = new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, "original");
+    store.recordEffect(invocation, unknown);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.recordEffect(
+                invocation,
+                new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_EFFECT_VERIFIED, "original")));
+
+    var restarted = new JdbcSuspendedRunCalls(receiptJdbc, receiptBudget, RECEIPT_DEADLINE);
+    var pending = restarted.pendingDirect(conversation, 1).getFirst();
+    assertEquals(tool, pending.tool());
+    assertEquals(unknown, pending.receipt());
+    RunCallResumption.reconcileDirect(
+        restarted,
+        pending,
+        result ->
+            entries.appendRetainedResult(
+                conversation,
+                2,
+                LoggedEntry.toolResult(tool.id(), result.text()),
+                null,
+                invocation));
+    assertTrue(restarted.pendingDirect(conversation, 1).isEmpty());
+    assertThrows(
+        IllegalStateException.class,
+        () -> restarted.claimDirect(conversation, original, tool, "owner"));
+    var page =
+        EntryPageView.trajectory(
+            entries.pageOfLog(conversation, 0, 10), 0, 10, conversation, restarted);
+    assertEquals(
+        invocation,
+        page.entries().getFirst().toolCalls().getFirst().effectReceipt().invocationId());
+    assertEquals(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT, page.entries().getLast().excerpt());
+    var trace =
+        new JdbcToolCallTraces(receiptJdbc, receiptBudget, RECEIPT_DEADLINE)
+            .read(conversation, invocation)
+            .orElseThrow();
+    assertEquals("original", trace.requestId());
+    assertEquals(null, trace.replyObservedAt());
+    assertFalse(trace.replyTimedOutAt().isBefore(trace.sentAt()));
   }
 
   @BeforeEach
@@ -91,7 +307,7 @@ class RunApprovalStoreTest {
         new WebApproval(Verb.SEARCH, "different sources", 1, 10, 30, null, "b".repeat(64));
     RunApproval approved =
         store.askWeb(project, conversation, conversation, "alice", "coder", request);
-    var calls = new JdbcSuspendedRunCalls(jdbc);
+    var calls = retainedCalls();
     calls.retain(
         approved.id(),
         conversation,
@@ -116,7 +332,7 @@ class RunApprovalStoreTest {
         "INSERT INTO admins(handle, password_hash, must_change_password) VALUES ('history-owner', 'fixture-hash', false) ON CONFLICT (handle) DO NOTHING");
     String conversation = new ConversationStore(jdbc).open(Home.of("payments"), Budget.of(20)).id();
     RunApproval asked = asked(conversation, "local", TEST);
-    SuspendedRunCalls calls = new JdbcSuspendedRunCalls(jdbc);
+    SuspendedRunCalls calls = retainedCalls();
     calls.retain(
         asked.id(),
         conversation,
@@ -189,7 +405,7 @@ class RunApprovalStoreTest {
             "/repo",
             "SECURITY asks about deletion",
             file);
-    SuspendedRunCalls calls = new JdbcSuspendedRunCalls(jdbc);
+    SuspendedRunCalls calls = retainedCalls();
     calls.retain(
         asked.id(),
         conversation,
@@ -240,7 +456,7 @@ class RunApprovalStoreTest {
                 io.aeyer.plowshare.server.agents.Budget.of(20))
             .id();
     RunApproval question = asked(conversation, "local", TEST);
-    SuspendedRunCalls retained = new JdbcSuspendedRunCalls(jdbc);
+    SuspendedRunCalls retained = retainedCalls();
     String arguments =
         "{\"command\":[\"program\",\"one argument\",\"\"],\"stdin\":\"line\\n\",\"timeout_seconds\":17}";
     retained.retain(
@@ -265,7 +481,7 @@ class RunApprovalStoreTest {
       for (var claim : claims) if (claim.get()) won++;
       assertEquals(1, won);
     }
-    SuspendedRunCalls recovered = new JdbcSuspendedRunCalls(jdbc);
+    SuspendedRunCalls recovered = retainedCalls();
     var pending = recovered.pending(conversation).getFirst();
     assertEquals("original-session", pending.session());
     assertEquals("original-owner", pending.owner());

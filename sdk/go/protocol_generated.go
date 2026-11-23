@@ -78,6 +78,7 @@ var operationNames = []string{
 	"conversation.projection",
 	"conversation.resume",
 	"conversation.search",
+	"conversation.tool.trace",
 	"conversation.trajectory",
 	"conversation.turns",
 	"document.ask",

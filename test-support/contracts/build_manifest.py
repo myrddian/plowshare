@@ -62,6 +62,7 @@ EXPLICIT_FRAMES = {
 }
 DESKTOP_FRAMES = {
     "project.list", "conversation.list", "conversation.open", "conversation.trajectory",
+    "conversation.tool.trace",
     "agent.list", "agent.run", "job.status", "job.cancel", "job.stream",
     "approval.list", "approval.answer", "board.topics", "board.messages", "swarm.status", "swarm.types",
     "conversation.follow", "inbox.list", "inbox.read", "orchestration.list", "orchestration.status",
@@ -285,7 +286,7 @@ def inventory():
     response_families = {}
     for family, name, expected_types, expected_operations in [
         ("administrative", "AdministrativeReplies", 41, 41),
-        ("conversation", "ConversationReplies", 42, 87),
+        ("conversation", "ConversationReplies", 42, 88),
         ("inspection", "InspectionReplies", 14, 8),
         ("information", "InformationReplies", 76, 73),
         ("messaging", "MessagingReplies", 5, 9),

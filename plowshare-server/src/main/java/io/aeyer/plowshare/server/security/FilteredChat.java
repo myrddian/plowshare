@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.security;
 
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.ChatRequest;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
@@ -70,6 +71,12 @@ public final class FilteredChat implements ChatFiltering {
                                 return c;
                               })
                           .toList();
+                  if (m.losslessToolText()) {
+                    var released = (Content.Text) parts.getFirst();
+                    return released.text().equals(m.content())
+                        ? m
+                        : ChatMessage.tool(m.toolCallId(), FileReadWindow.WITHHELD);
+                  }
                   return new ChatMessage(m.role(), parts, calls, m.toolCallId());
                 })
             .toList();

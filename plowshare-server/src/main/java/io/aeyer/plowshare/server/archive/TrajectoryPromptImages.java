@@ -75,7 +75,9 @@ public final class TrajectoryPromptImages implements PromptImages {
                   })
               .toList();
       messages.add(
-          new ChatMessage(message.role(), parts, message.toolCalls(), message.toolCallId()));
+          message.losslessToolText()
+              ? message
+              : new ChatMessage(message.role(), parts, message.toolCalls(), message.toolCallId()));
     }
     return request
         .withMessages(messages)

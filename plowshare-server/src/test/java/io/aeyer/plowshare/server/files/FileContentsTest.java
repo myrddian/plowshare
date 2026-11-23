@@ -48,6 +48,44 @@ class FileContentsTest {
   }
 
   @Test
+  void remote_text_keeps_the_original_bytes_and_legacy_peers_keep_their_view() {
+    var source = new Source("skip\n  雪\r\nlast".getBytes(StandardCharsets.UTF_8));
+    SessionChannel channel =
+        new SessionChannel() {
+          public boolean sources(String session) {
+            return true;
+          }
+
+          public FileReply ask(String session, FileRequest request) {
+            return source.apply(request);
+          }
+        };
+    var grants = List.of(new Grant(Scope.WORKSPACE, Mode.READ));
+    Path path = Path.of("/remote/Notes.txt");
+    var remote = new RemoteProvider(channel, "remote", grants);
+    var exact = assertInstanceOf(FileRead.Exact.class, remote.readWindow(path, Window.of(1, 1)));
+    assertEquals("  雪\r\n", exact.text());
+    assertEquals(2, exact.window().nextOffset());
+    assertEquals(2, source.asked.size());
+    assertEquals(
+        "last",
+        assertInstanceOf(FileRead.Exact.class, remote.readWindow(path, Window.of(2, 1))).text());
+    assertEquals(
+        3,
+        source.asked.size(),
+        "the continuation revalidates authorization and reuses the verified bytes");
+    SessionChannel legacy =
+        (session, request) -> {
+          assertEquals(FileRequest.READ, request.op());
+          return FileReply.answered(
+              request.id(), new Span(List.of("legacy"), 1, 2, false, Span.END));
+        };
+    assertEquals(
+        new FileRead.View(new Span(List.of("legacy"), 1, 2, false, Span.END)),
+        new RemoteProvider(legacy, "legacy", grants).readWindow(path, Window.of(1, 1)));
+  }
+
+  @Test
   void remote_code_snapshots_use_bounded_source_bytes_and_recheck_hash_after_transfer() {
     Source source = new Source("class Remote {}".getBytes(StandardCharsets.UTF_8));
     SessionChannel channel =

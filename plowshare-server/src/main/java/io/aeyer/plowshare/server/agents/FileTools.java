@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.aeyer.plowshare.protocol.DocumentType;
 import io.aeyer.plowshare.protocol.FileResult;
 import io.aeyer.plowshare.protocol.Found;
 import io.aeyer.plowshare.protocol.Home;
@@ -10,11 +11,15 @@ import io.aeyer.plowshare.protocol.Span;
 import io.aeyer.plowshare.protocol.Window;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.files.Changed;
+import io.aeyer.plowshare.server.files.FileMutationObservation;
 import io.aeyer.plowshare.server.files.FileProvider;
+import io.aeyer.plowshare.server.files.FileRead;
 import io.aeyer.plowshare.server.files.FileWords;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.ProviderRouter.Target;
+import io.aeyer.plowshare.server.files.VerifiedFileMutations;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -26,6 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -356,13 +362,44 @@ public final class FileTools {
     String runFrom(String argumentsJson, Home home, Function<Path, Target> targets);
   }
 
+  interface VerifiableMutation extends AgentTool {
+    String runVerifyingMutation(
+        String arguments,
+        Home home,
+        UsageAttribution usage,
+        Consumer<FileMutationObservation> observer);
+  }
+
+  interface RoutedMutation extends Routed, VerifiableMutation {
+    ProviderRouter router();
+
+    @Override
+    default String runVerifyingMutation(
+        String arguments,
+        Home home,
+        UsageAttribution usage,
+        Consumer<FileMutationObservation> observer) {
+      return runFrom(
+          arguments, home, path -> verified(router().targetForMutation(home, path), observer));
+    }
+  }
+
+  static Target verified(Target target, Consumer<FileMutationObservation> observer) {
+    return new Target(
+        target.provider(),
+        target.path(),
+        target.scopePath(),
+        target.roots(),
+        new VerifiedFileMutations(target.provider(), observer));
+  }
+
   // --- file_read ---------------------------------------------------------------
 
   /**
    * {@code file_read} — one window of one file's text, and, when the window does not reach the end,
    * the call that fetches the next one.
    */
-  public static final class Read implements Routed {
+  public static final class Read implements Routed, AgentTool.ContentTool {
 
     private final ProviderRouter router;
     private final Reads reads;
@@ -392,7 +429,7 @@ public final class FileTools {
                   + ". Omit for "
                   + MAX_READ_LINES
                   + "; a larger number is brought"
-                  + " down to it rather than refused, and the answer says so."));
+                  + " down to it rather than refused, and the window information says so."));
       this.schema =
           ToolSchema.from(
               READ_NAME, READ_DESCRIPTION, ToolArguments.object(properties, List.of("path")));
@@ -418,6 +455,33 @@ public final class FileTools {
       return answer(argumentsJson, targets);
     }
 
+    @Override
+    public boolean typedResults(Home home) {
+      return true;
+    }
+
+    @Override
+    public AgentTool.Result runResult(String arguments, Home home, UsageAttribution owner) {
+      return readResultFrom(arguments, path -> router.targetForRead(home, path));
+    }
+
+    AgentTool.Result readResultFrom(String arguments, Function<Path, Target> targets) {
+      try {
+        JsonNode args = readArguments(arguments);
+        Path path = path(args, READ_NAME);
+        Asked asked = window(args);
+        Target target = targets.apply(path);
+        FileRead read = target.provider().readWindow(target.path(), asked.window());
+        reads.saw(target.path());
+        if (read instanceof FileRead.Exact exact)
+          return new AgentTool.Result(
+              exact.text(), null, exact.window().requested(asked.limit()), codeHint(path, target));
+        return new AgentTool.Result(view(((FileRead.View) read).span(), path, target, asked), null);
+      } catch (BadArguments | WorkspaceRefusedException refused) {
+        return new AgentTool.Result(refused.getMessage(), null);
+      }
+    }
+
     private String answer(String argumentsJson, Function<Path, Target> targets) {
       try {
         return read(argumentsJson, targets);
@@ -432,34 +496,46 @@ public final class FileTools {
     }
 
     private String read(String argumentsJson, Function<Path, Target> targets) {
-      JsonNode args =
-          ToolArguments.parse(
-              argumentsJson,
-              READ_NAME,
-              "{\"path\": \"/srv/repo/src/Main.java\", \"offset\": 0, \"limit\": 500}");
+      JsonNode args = readArguments(argumentsJson);
       Path path = path(args, READ_NAME);
       Asked asked = window(args);
       Target target = targets.apply(path);
       Span span = target.provider().read(target.path(), asked.window());
       reads.saw(target.path());
-      var type = io.aeyer.plowshare.protocol.DocumentType.classify(path.toString(), null);
+      return view(span, path, target, asked);
+    }
+
+    private static JsonNode readArguments(String arguments) {
+      return ToolArguments.parse(
+          arguments,
+          READ_NAME,
+          "{\"path\": \"/srv/repo/src/Main.java\", \"offset\": 0, \"limit\": 500}");
+    }
+
+    private String view(Span span, Path path, Target target, Asked asked) {
+      var type = DocumentType.classify(path.toString(), null);
       String rendered = render(span, path, asked);
       return type.isCode()
           ? "[file_read metadata: corpus=code; type=code; subtype="
               + type.subtype()
               + "; language inferred from filename; offsets count from 0. "
               + "This is a live file window, not an indexed document revision."
-              + (reads.codeHint(target.path())
-                  ? " Harness hint: use code_map overview for the repository map,"
-                      + " symbols for a declaration-name prefix, or outline for this absolute path"
-                      + " within the selected pattern. code_map read uses the returned source_hash"
-                      + " and UTF-16 offsets; file_read offsets count lines."
-                      + " Check coverage before treating a missing symbol as absent."
-                  : "")
+              + (reads.codeHint(target.path()) ? " " + CODE_HINT : "")
               + "]\n\n"
               + rendered
           : rendered;
     }
+
+    private boolean codeHint(Path path, Target target) {
+      return DocumentType.classify(path.toString(), null).isCode() && reads.codeHint(target.path());
+    }
+
+    static final String CODE_HINT =
+        "Harness hint: use code_map overview for the repository map,"
+            + " symbols for a declaration-name prefix, or outline for this absolute path"
+            + " within the selected pattern. code_map read uses the returned source_hash"
+            + " and UTF-16 offsets; file_read offsets count lines."
+            + " Check coverage before treating a missing symbol as absent.";
 
     /**
      * The window that was read, beside the {@code limit} the model actually sent.
@@ -1239,9 +1315,15 @@ public final class FileTools {
   // --- file_edit ---------------------------------------------------------------
 
   /** {@code file_edit} — replace one file's contents, or one piece of text in it. */
-  public static final class Edit implements Routed {
+  public static final class Edit implements RoutedMutation {
 
     private final ProviderRouter router;
+
+    @Override
+    public ProviderRouter router() {
+      return router;
+    }
+
     private final Reads reads;
     private final ToolSchema schema;
 
@@ -1319,7 +1401,6 @@ public final class FileTools {
         throw new BadArguments(EDIT_NAME + " was given nothing to change." + SHAPES);
       }
       Target target = targets.apply(path);
-      FileProvider provider = target.provider();
       if (whole) {
         // requireExactText and never requireText: that method strips and
         // refuses blank, which for a file's contents means dropping the
@@ -1332,8 +1413,8 @@ public final class FileTools {
         // never replaced, and the owning machine enforces it.
         Changed written =
             reads.seen(target.path())
-                ? provider.write(target.path(), content)
-                : provider.create(target.path(), content);
+                ? target.mutations().write(target.path(), content)
+                : target.mutations().create(target.path(), content);
         reads.saw(target.path());
         // The line count and nothing of the text: it is exactly what the
         // model sent, so showing it back would spend a turn's worth of
@@ -1351,7 +1432,7 @@ public final class FileTools {
       String replacement =
           ToolArguments.requireExactText(
               args, "new", EDIT_NAME, "the text to put in its place, which may be empty." + SHAPES);
-      Changed edited = provider.edit(target.path(), old, replacement);
+      Changed edited = target.mutations().edit(target.path(), old, replacement);
       // The lines shown are not a read of the file, and only a read — or a
       // write of the whole of it — lets a whole-file write replace what is
       // there. Every line of the file, uncut, is the one exception, and the
@@ -1435,9 +1516,15 @@ public final class FileTools {
   // --- file_delete -------------------------------------------------------------
 
   /** {@code file_delete} — remove one file. */
-  public static final class Delete implements Routed {
+  public static final class Delete implements RoutedMutation {
 
     private final ProviderRouter router;
+
+    @Override
+    public ProviderRouter router() {
+      return router;
+    }
+
     private final Reads reads;
     private final ToolSchema schema;
 
@@ -1485,7 +1572,7 @@ public final class FileTools {
           ToolArguments.parse(argumentsJson, DELETE_NAME, "{\"path\": \"/srv/repo/src/Old.java\"}");
       Path path = path(args, DELETE_NAME);
       Target target = targets.apply(path);
-      Changed deleted = target.provider().delete(target.path());
+      Changed deleted = target.mutations().delete(target.path());
       reads.forget(target.path());
       return FileTools.deleted(path, deleted.facts());
     }
@@ -1494,9 +1581,15 @@ public final class FileTools {
   // --- file_move ---------------------------------------------------------------
 
   /** {@code file_move} — rename one file, never over another. */
-  public static final class Move implements Routed {
+  public static final class Move implements RoutedMutation {
 
     private final ProviderRouter router;
+
+    @Override
+    public ProviderRouter router() {
+      return router;
+    }
+
     private final Reads reads;
     private final ToolSchema schema;
 
@@ -1572,7 +1665,7 @@ public final class FileTools {
                 + " within one filesystem; read it, write it at the new path, and delete"
                 + " the old one");
       }
-      Changed moved = source.provider().move(source.path(), destination.path());
+      Changed moved = source.mutations().move(source.path(), destination.path());
       if (reads.seen(source.path())) {
         reads.forget(source.path());
         reads.saw(destination.path());
@@ -1822,17 +1915,16 @@ public final class FileTools {
             the beginning.
 
             One answer carries at most %d lines. A larger limit is brought \
-            down to that rather than refused, and the answer says when it was, \
+            down to that rather than refused, and the window information says when it was, \
             so a long file is read by paging through it and never by asking for \
             more of it at once.
 
-            Lines are numbered from 0, and offset is a line number. If the file \
-            continues past the window you asked for, the answer opens with a \
-            line saying which lines you were given, how many the file has, and \
-            the offset to send to get the next window — send that number and \
-            you carry on where you stopped. That line is written by this tool \
-            and is not in the file. A window that reaches the end of the file \
-            has no such line, so its absence means you have seen the rest.
+            Lines are numbered from 0, and offset is a line number. Exact UTF-8 \
+            results contain only the requested text, including original line \
+            endings. The harness reports the range, end of file, or next \
+            offset separately after the tool batch. Use that offset on the \
+            same path to continue. Converted or legacy file views can carry \
+            their continuation in the view itself.
 
             Sometimes the window fills up on size before it runs out of lines, \
             and the answer says so when it does. Asking again with a larger \

@@ -42,7 +42,9 @@ final class ApprovalProjection {
                   entry.recordedAt(),
                   entry.tookMillis(),
                   entry.ejectedAt(),
-                  entry.export()));
+                  entry.export(),
+                  null,
+                  entry.fileWindow()));
         }
       }
     }

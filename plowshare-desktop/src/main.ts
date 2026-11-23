@@ -932,7 +932,7 @@ background(
           return client.dispatch(request);
         }
         if (
-          request?.action !== 'history' ||
+          (request?.action !== 'history' && request?.action !== 'tool-trace') ||
           request.conversation !== held.conversation
         )
           throw new Error(

@@ -1,9 +1,14 @@
 package io.aeyer.plowshare.server.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.aeyer.plowshare.server.agents.Speaker;
+import io.aeyer.plowshare.server.approvals.ToolEffectReceipt;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.EntryPage;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * One entry of a conversation on the wire: where it came, what it is, as much of it as a page
@@ -101,7 +106,19 @@ public record EntryView(
     SourceView source,
     Integer promptTokens,
     Integer completionTokens,
-    Integer reasoningTokens) {
+    Integer reasoningTokens,
+    RetainedToolResultView retainedToolResult,
+    FileReadWindow fileWindow) {
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public FileReadWindow fileWindow() {
+    return fileWindow;
+  }
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public RetainedToolResultView retainedToolResult() {
+    return retainedToolResult;
+  }
 
   /**
    * The immediate recorded origin of an utterance, not a conversation's first cause. References
@@ -149,7 +166,10 @@ public record EntryView(
     }
   }
 
-  static EntryView of(EntryPage.Row row) {
+  static EntryView of(
+      EntryPage.Row row,
+      Map<String, TrajectoryToolReceipts.Recorded> receipts,
+      TrajectoryToolReceipts.Recorded result) {
     return new EntryView(
         row.ordinal(),
         row.turnOrdinal(),
@@ -160,7 +180,9 @@ public record EntryView(
         row.ejectedAt(),
         row.supersededBy(),
         row.toolCallId(),
-        row.toolCalls().stream().map(AskedView::of).toList(),
+        row.toolCalls().stream()
+            .map(asked -> AskedView.of(asked, receipts.get(asked.id())))
+            .toList(),
         // A string and not a UUID: the id travels as text everywhere
         // else on this surface, and result_read takes what it is given.
         row.handle() == null ? null : row.handle().toString(),
@@ -182,7 +204,11 @@ public record EntryView(
         SourceView.of(row.speaker()),
         row.promptTokens(),
         row.completionTokens(),
-        row.reasoningTokens());
+        row.reasoningTokens(),
+        result == null
+            ? null
+            : new RetainedToolResultView(result.answerOrdinal(), ToolEffectReceiptView.of(result)),
+        row.fileWindow());
   }
 
   /**
@@ -211,9 +237,15 @@ public record EntryView(
       int length,
       boolean cut,
       String salient,
-      OpenedView opened) {
+      OpenedView opened,
+      ToolEffectReceiptView effectReceipt) {
 
-    static AskedView of(EntryPage.Asked asked) {
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public ToolEffectReceiptView effectReceipt() {
+      return effectReceipt;
+    }
+
+    static AskedView of(EntryPage.Asked asked, TrajectoryToolReceipts.Recorded receipt) {
       return new AskedView(
           asked.id(),
           asked.name(),
@@ -223,9 +255,31 @@ public record EntryView(
           asked.salient(),
           asked.opened() == null
               ? null
-              : new OpenedView(asked.opened().conversation(), asked.opened().agent()));
+              : new OpenedView(asked.opened().conversation(), asked.opened().agent()),
+          receipt == null ? null : ToolEffectReceiptView.of(receipt));
     }
   }
+
+  /** Transport and effect evidence. Result text stays in its own existing entry. */
+  public record ToolEffectReceiptView(
+      String invocationId,
+      ToolEffectReceipt.Kind observation,
+      ToolEffectReceipt.Dispatch dispatch,
+      ToolEffectReceipt.Effect effect,
+      Integer resultOrdinal) {
+    static ToolEffectReceiptView of(TrajectoryToolReceipts.Recorded recorded) {
+      var receipt = recorded.receipt();
+      return new ToolEffectReceiptView(
+          recorded.invocationId(),
+          receipt.kind(),
+          receipt.dispatch(),
+          receipt.effect(),
+          recorded.resultOrdinal());
+    }
+  }
+
+  /** Lets a result-only page settle a call the reader already loaded. */
+  public record RetainedToolResultView(int answerOrdinal, ToolEffectReceiptView effectReceipt) {}
 
   /** Where a call's delegated child logs: its conversation and its agent. */
   public record OpenedView(String conversation, String agent) {}

@@ -13,6 +13,7 @@ import io.aeyer.plowshare.server.archive.ClientProjects;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRegistry;
 import io.aeyer.plowshare.server.files.ClientWork;
+import io.aeyer.plowshare.server.files.FileReplyTimeoutException;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.files.SessionCloseListener;
 import io.aeyer.plowshare.server.files.SessionGoneException;
@@ -43,6 +44,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,6 +125,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  * populated by anything and the whole remote path was unreachable from production.
  */
 public final class FileChannelHandler extends TextWebSocketHandler implements SessionChannel {
+  private static final Consumer<String> IGNORE_SEND = id -> {};
 
   private static final Logger log = LoggerFactory.getLogger(FileChannelHandler.class);
 
@@ -853,6 +856,18 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
 
       @Override
       public FileReply ask(String asked, FileRequest request, Duration wait) {
+        return askBound(asked, request, wait, IGNORE_SEND);
+      }
+
+      @Override
+      public FileReply askMutation(String asked, FileRequest request, Consumer<String> sent) {
+        if (FileRequest.CANCEL.equals(request.op()) || ClientWork.readOnly(request))
+          throw new IllegalArgumentException("File mutation evidence requires a mutation request");
+        return askBound(asked, request, deadline, Objects.requireNonNull(sent));
+      }
+
+      private FileReply askBound(
+          String asked, FileRequest request, Duration wait, Consumer<String> sent) {
         requireCurrent(asked);
         boolean mutation =
             !FileRequest.CANCEL.equals(request.op()) && !ClientWork.readOnly(request);
@@ -862,7 +877,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
         }
         Duration remaining = clientWork.requestBudget(wait);
         try {
-          return FileChannelHandler.this.ask(session, captured, request, remaining);
+          return FileChannelHandler.this.ask(session, captured, request, remaining, sent);
         } catch (SessionGoneException gone) {
           // A sent mutation may have completed on the lost connection. Retain its uncertainty
           // under the existing lifecycle and never replay it on a replacement connection.
@@ -912,6 +927,11 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
   }
 
   private FileReply ask(String session, Live live, FileRequest request, Duration deadline) {
+    return ask(session, live, request, deadline, IGNORE_SEND);
+  }
+
+  private FileReply ask(
+      String session, Live live, FileRequest request, Duration deadline, Consumer<String> sent) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(deadline, "deadline");
     requireCurrent(session, live);
@@ -950,10 +970,15 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
                 + " reached");
       }
       send(live, session, request);
+      // The send lock is released here. Durable evidence may be written before waiting for the
+      // reply; losing the process before that write leaves the retained execution claim in force.
+      long waitingSince = System.nanoTime();
+      sent.accept(request.id());
       // Blocking is free: this is a virtual thread and a job blocked here
       // holds no lane slot, exactly as a parent blocked on a child does
       // not. That is what lets the tool call simply return an answer.
-      FileReply reply = answer.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
+      long remaining = deadline.toNanos() - (System.nanoTime() - waitingSince);
+      FileReply reply = answer.get(Math.max(0, remaining), TimeUnit.NANOSECONDS);
       requireCurrent(session, live);
       return reply;
     } catch (TimeoutException wedged) {
@@ -963,7 +988,7 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
       // SessionGoneException, for the same reason and by the same rule —
       // the socket is open, and an ending that said otherwise would be
       // naming a situation that does not hold.
-      throw new WorkspaceUnavailableException(
+      String message =
           "the session '"
               + session
               + "' did not"
@@ -971,8 +996,9 @@ public final class FileChannelHandler extends TextWebSocketHandler implements Se
               + deadline.toSeconds()
               + " seconds; it is connected,"
               + " so it is either busy or stuck, and nothing can be concluded from the"
-              + " silence",
-          wedged);
+              + " silence";
+      if (sent == IGNORE_SEND) throw new WorkspaceUnavailableException(message, wedged);
+      throw new FileReplyTimeoutException(request.id(), message, wedged);
     } catch (ExecutionException failed) {
       if (failed.getCause() instanceof WorkspaceUnavailableException gone) {
         // The close's own sentence, carried through rather than

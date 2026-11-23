@@ -9,22 +9,30 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.JobDelta;
 import io.aeyer.plowshare.protocol.JobEvent;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.agents.Outcome.Ending;
+import io.aeyer.plowshare.server.approvals.DirectFileCalls;
 import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.approvals.RunCallResumption;
 import io.aeyer.plowshare.server.approvals.SuspendedRunCalls;
+import io.aeyer.plowshare.server.approvals.ToolEffectReceipt;
 import io.aeyer.plowshare.server.archive.ArchiveException;
 import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
@@ -33,6 +41,13 @@ import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.PassageIndex;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
+import io.aeyer.plowshare.server.files.FileMutationObservation;
+import io.aeyer.plowshare.server.files.FileReplyTimeoutException;
+import io.aeyer.plowshare.server.files.Grant;
+import io.aeyer.plowshare.server.files.LocalProvider;
+import io.aeyer.plowshare.server.files.Mode;
+import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.files.Scope;
 import io.aeyer.plowshare.server.files.SessionGoneException;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
@@ -43,6 +58,7 @@ import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.ModelMediaProfiles;
+import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.CallerAbandonedException;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Completion;
@@ -70,6 +86,7 @@ import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.security.ChatFiltering;
 import io.aeyer.plowshare.server.telemetry.FailureReporter;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -92,6 +109,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
 
 /**
@@ -7412,8 +7432,10 @@ class JobRuntimeTest {
     assertEquals(Ending.ANSWERED, outcome.ending());
   }
 
-  @Test
-  void a_retained_file_path_refusal_settles_the_call_and_preserves_earlier_work() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_retained_file_failure_settles_the_call_and_preserves_earlier_work(boolean sent)
+      throws Exception {
     String conversation = "cnv_personal";
     String approval = "apr_file";
     String name = FileTools.EDIT_NAME;
@@ -7426,15 +7448,29 @@ class JobRuntimeTest {
     when(question.id()).thenReturn(approval);
     when(question.conversation()).thenReturn(conversation);
     when(question.side()).thenReturn("local");
-    var tool = mock(RetainedApprovalTool.class);
+    var tool = mock(ReviewedFileTool.class);
     when(tool.schema()).thenReturn(Probe.returning(name, "").schema());
     when(tool.gate(eq(edit.arguments()), any(), any(), any()))
         .thenReturn(new ToolPre(edit.arguments(), "Awaiting approval", List.of()));
     when(tool.waitingApproval()).thenReturn(Optional.of(question));
     String retained = "retained edit arguments";
     when(tool.retainedArguments(eq(edit.arguments()), any())).thenReturn(retained);
-    when(tool.gateRetained(eq(retained), eq("local"), any(), any(), any()))
-        .thenThrow(new WorkspaceRefusedException(refusal));
+    String request = "file-edit-test";
+    if (sent) {
+      when(tool.gateRetained(eq(retained), eq("local"), any(), any(), any()))
+          .thenReturn(new ToolPre(edit.arguments(), null, List.of()));
+      when(tool.runObservingMutation(eq(edit.arguments()), any(), any(), any()))
+          .thenAnswer(
+              invocation -> {
+                Consumer<FileMutationObservation> observer = invocation.getArgument(3);
+                observer.accept(
+                    new FileMutationObservation(request, FileMutationObservation.Kind.SENT));
+                throw new FileReplyTimeoutException(request, "file peer did not reply", null);
+              });
+    } else {
+      when(tool.gateRetained(eq(retained), eq("local"), any(), any(), any()))
+          .thenThrow(new WorkspaceRefusedException(refusal));
+    }
     var calls = mock(SuspendedRunCalls.class);
     when(calls.find(approval))
         .thenReturn(
@@ -7464,6 +7500,20 @@ class JobRuntimeTest {
     doAnswer(
             invocation -> {
               log.record(invocation.getArgument(0));
+              return 7;
+            })
+        .when(transcript)
+        .recordRetainedCallBatch(any());
+    doAnswer(
+            invocation -> {
+              log.record(invocation.getArgument(0));
+              return null;
+            })
+        .when(transcript)
+        .recordRetainedResult(any(), eq(approval));
+    doAnswer(
+            invocation -> {
+              log.record(invocation.getArgument(0));
               return null;
             })
         .when(transcript)
@@ -7483,17 +7533,247 @@ class JobRuntimeTest {
     assertEquals(Ending.ANSWERED, outcome.ending(), outcome.text());
     assertEquals(List.of("{}"), search.seen());
     assertTrue(toolResults(transport, 1).contains("earlier search evidence"));
-    assertTrue(toolResults(transport, 1).contains(refusal));
+    String expected = sent ? RunCallResumption.FILE_REPLY_TIMEOUT_RESULT : refusal;
+    assertTrue(toolResults(transport, 1).contains(expected));
+    assertTrue(
+        log.entries().stream()
+            .anyMatch(
+                entry ->
+                    entry.kind() == EntryKind.DIAGNOSTIC
+                        && entry.content().contains("Approval " + approval)));
     assertEquals(
-        List.of(ToolLines.REFUSED),
+        List.of(sent ? ToolLines.ERROR : ToolLines.REFUSED),
         log.entries().stream()
             .filter(entry -> edit.id().equals(entry.toolCallId()))
             .map(LoggedEntry::outcome)
             .toList());
     verify(tool, never()).run(any(), any());
     verify(tool, never()).run(any(), any(), any());
-    verify(calls).complete(eq(approval), contains(refusal));
+    verify(calls).complete(eq(approval), contains(expected));
+    verify(calls).retainAt(eq(approval), eq(conversation), any(), eq("local"), any(), any(), eq(7));
+    verify(calls)
+        .recordEffect(
+            approval,
+            sent
+                ? new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, request)
+                : new ToolEffectReceipt(ToolEffectReceipt.Kind.PREFLIGHT_REFUSED, null));
     verify(calls).acknowledged(approval);
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_direct_file_result_uses_the_original_call_and_continues_after_a_timeout(boolean timedOut)
+      throws Exception {
+    String conversation = "cnv_direct_file";
+    String invocation = "file_claimed";
+    String request = "file-wire";
+    String raw = "  {\"status\":\"provider response\"}\n";
+    var edit =
+        call("edit", FileTools.EDIT_NAME, "{\"path\":\"/fixture/demo.txt\",\"content\":\"data\"}");
+    var file = mock(ReviewedFileTool.class);
+    when(file.schema()).thenReturn(Probe.returning(edit.name(), "").schema());
+    when(file.gate(eq(edit.arguments()), any(), any(), any()))
+        .thenReturn(ToolPre.allowed(edit.arguments()));
+    when(file.runVerifyingMutation(eq(edit.arguments()), any(), any(), any()))
+        .thenAnswer(
+            asked -> {
+              Consumer<FileMutationObservation> observed = asked.getArgument(3);
+              observed.accept(
+                  new FileMutationObservation(request, FileMutationObservation.Kind.SENT));
+              if (timedOut) throw new FileReplyTimeoutException(request, "no reply", null);
+              observed.accept(
+                  new FileMutationObservation(request, FileMutationObservation.Kind.VERIFIED));
+              return raw;
+            });
+    var calls = mock(DirectFileCalls.class);
+    when(calls.claimDirect(eq(conversation), eq(17), eq(edit), any())).thenReturn(invocation);
+    var storage = mock(Transcript.class);
+    when(storage.conversationId()).thenReturn(conversation);
+    when(storage.recordRetainedCallBatch(any())).thenReturn(17);
+    var transcript =
+        new AttributedTranscript(storage, UsageAttribution.LEGACY, UsageAttribution.LEGACY);
+    var transport = new Scripted().then(() -> asking("", edit)).then(() -> answer("Finished."));
+    var runtime = runtimeOver(transport, file);
+    runtime.useDirectFileCalls(calls);
+    var result =
+        runtime.run(
+            agent("echo").withTools(List.of(edit.name())),
+            "Edit",
+            Home.of("personal"),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript);
+
+    assertEquals(Ending.ANSWERED, result.ending(), result.text() + result.detail());
+    var body = timedOut ? RunCallResumption.FILE_REPLY_TIMEOUT_RESULT : raw;
+    assertTrue(toolResults(transport, 1).contains(body));
+    var ordered = inOrder(calls, storage, file);
+    ordered.verify(calls).claimDirect(eq(conversation), eq(17), eq(edit), any());
+    ordered.verify(file).runVerifyingMutation(eq(edit.arguments()), any(), any(), any());
+    ordered
+        .verify(calls)
+        .recordEffect(
+            invocation,
+            new ToolEffectReceipt(
+                timedOut
+                    ? ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT
+                    : ToolEffectReceipt.Kind.FILE_EFFECT_VERIFIED,
+                request));
+    ordered.verify(calls).complete(invocation, body);
+    ordered
+        .verify(storage)
+        .recordRetainedResult(
+            argThat(entry -> body.equals(entry.content()) && edit.id().equals(entry.toolCallId())),
+            eq(invocation));
+    ordered.verify(calls).acknowledged(invocation);
+  }
+
+  @Test
+  void a_stopped_turn_recovers_its_direct_file_result_without_a_new_execution() throws Exception {
+    String conversation = "cnv_direct_resume";
+    var edit =
+        call("edit", FileTools.EDIT_NAME, "{\"path\":\"/fixture/demo.txt\",\"content\":\"data\"}");
+    var receipt =
+        new ToolEffectReceipt(ToolEffectReceipt.Kind.FILE_REPLY_TIMEOUT, "sent-before-stop");
+    var calls = mock(DirectFileCalls.class);
+    when(calls.pendingDirect(conversation, 4))
+        .thenReturn(List.of(new DirectFileCalls.Pending("file_held", edit, receipt, null)));
+    var storage = mock(Transcript.class);
+    when(storage.conversationId()).thenReturn(conversation);
+    when(storage.continuingTurn()).thenReturn(4);
+    when(storage.before()).thenReturn(List.of(ChatMessage.assistant("", List.of(edit))));
+    var tool = mock(ReviewedFileTool.class);
+    when(tool.schema()).thenReturn(Probe.returning(edit.name(), "").schema());
+    var transport = new Scripted().then(() -> answer("Continued."));
+    var runtime = runtimeOver(transport, tool);
+    runtime.useDirectFileCalls(calls);
+    var transcript =
+        new AttributedTranscript(storage, UsageAttribution.LEGACY, UsageAttribution.LEGACY);
+    var result =
+        runtime.run(
+            agent("echo").withTools(List.of(edit.name())),
+            "Resume",
+            Home.of("personal"),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript);
+
+    assertEquals(Ending.ANSWERED, result.ending(), result.text() + result.detail());
+    assertTrue(toolResults(transport, 0).contains(RunCallResumption.FILE_REPLY_TIMEOUT_RESULT));
+    verify(storage)
+        .recordRetainedResult(
+            argThat(entry -> edit.id().equals(entry.toolCallId())), eq("file_held"));
+    verify(calls).acknowledged("file_held");
+    verify(calls, never()).claimDirect(any(), anyInt(), any(), any());
+    verify(tool, never()).runVerifyingMutation(any(), any(), any(), any());
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void a_file_tool_without_a_personal_review_session_is_also_fenced_and_verified(
+      boolean valid, @TempDir Path root) throws Exception {
+    Path path = Files.writeString(root.resolve("note.txt"), "before\r\n");
+    var provider =
+        LocalProvider.over(
+            FileAccess.of(List.of(root), List.of()),
+            List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)));
+    var file = new FileTools.Edit(new ProviderRouter(home -> List.of(provider)));
+    var arguments = new ObjectMapper().createObjectNode().put("path", path.toString());
+    if (valid) arguments.put("old", "before").put("new", "after");
+    var edit = call("plain-edit", FileTools.EDIT_NAME, arguments.toString());
+    var calls = mock(DirectFileCalls.class);
+    when(calls.claimDirect(eq("plain-log"), eq(3), eq(edit), any())).thenReturn("file_plain");
+    var transcript = mock(Transcript.class);
+    when(transcript.conversationId()).thenReturn("plain-log");
+    when(transcript.usage()).thenReturn(UsageAttribution.LEGACY);
+    when(transcript.recordRetainedCallBatch(any())).thenReturn(3);
+    var transport = new Scripted().then(() -> asking("", edit)).then(() -> answer("Finished."));
+    var runtime = runtimeOver(transport, file);
+    runtime.useDirectFileCalls(calls);
+    var result =
+        runtime.run(
+            agent("echo").withTools(List.of(edit.name())),
+            "Edit",
+            Home.of("project"),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            transcript);
+    assertEquals(Ending.ANSWERED, result.ending(), result.text() + result.detail());
+    assertEquals(valid ? "after\r\n" : "before\r\n", Files.readString(path));
+    var ordered = inOrder(calls, transcript);
+    ordered.verify(calls).claimDirect(eq("plain-log"), eq(3), eq(edit), any());
+    ordered
+        .verify(calls)
+        .recordEffect(
+            "file_plain",
+            new ToolEffectReceipt(
+                valid
+                    ? ToolEffectReceipt.Kind.FILE_LOCAL_CHANGED
+                    : ToolEffectReceipt.Kind.PREFLIGHT_REFUSED,
+                null));
+    String message = valid ? "Replaced the one occurrence" : "was given nothing to change";
+    ordered
+        .verify(transcript)
+        .recordRetainedResult(argThat(row -> row.content().contains(message)), eq("file_plain"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"  {\"error\":true}\r\n", "\t \r\n", ""})
+  void a_file_read_delivers_only_raw_text_and_places_window_facts_after_the_batch(
+      String body, @TempDir Path root) throws Exception {
+    var path =
+        Files.writeString(
+            root.resolve("sample.txt"), body.isEmpty() ? "" : "skip\n" + body + "last");
+    var provider =
+        LocalProvider.over(
+            FileAccess.of(List.of(root), List.of()),
+            List.of(new Grant(Scope.WORKSPACE, Mode.READ)));
+    var file = new FileTools.Read(new ProviderRouter(home -> List.of(provider)));
+    var read =
+        call(
+            "read-id",
+            FileTools.READ_NAME,
+            new ObjectMapper()
+                .createObjectNode()
+                .put("path", path.toString())
+                .put("offset", 1)
+                .put("limit", 1)
+                .toString());
+    var transport = new Scripted().then(() -> asking("", read)).then(() -> answer("Done."));
+    var runtime = runtimeOver(transport, file);
+    var records = new Recorded(List.of());
+    var result =
+        runtime.run(
+            agent("reader").withTools(List.of(file.schema().name())),
+            "Read",
+            Home.of("project"),
+            generous(),
+            () -> false,
+            null,
+            JobWatch.UNWATCHED,
+            records);
+    assertEquals(Ending.ANSWERED, result.ending(), result.text());
+    var messages = transport.conversation(1);
+    var tool = withRole(messages, ChatMessage.Role.TOOL).getFirst();
+    assertEquals(body, tool.content());
+    assertTrue(tool.losslessToolText());
+    var note = messages.get(messages.indexOf(tool) + 1);
+    assertEquals(ChatMessage.Role.USER, note.role());
+    assertTrue(note.content().contains(body.isEmpty() ? "End of file" : "offset 2"));
+    var retained =
+        records.entries().stream()
+            .filter(row -> row.kind() == EntryKind.TOOL_RESULT)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(body, retained.content());
+    assertEquals(ToolLines.OK, retained.outcome());
+    assertEquals(body.isEmpty() ? null : 2, retained.fileWindow().nextOffset());
   }
 
   /**

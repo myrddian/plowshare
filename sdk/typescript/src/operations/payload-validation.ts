@@ -803,6 +803,7 @@ export const SHAPES: Record<
     ['conversation'],
     ['offset', 'limit', 'after', 'before', 'tail', 'kinds', 'drawn'],
   ],
+  'conversation.tool.trace': [['conversation', 'invocationId'], []],
   'conversation.context': [['conversation'], ['agent']],
   'conversation.projection': [['conversation'], ['agent', 'turn']],
   'conversation.resume': [
@@ -1141,6 +1142,12 @@ export function commandProblem(
     ];
   for (const key of Object.keys(body))
     if (!allowed.includes(key)) return `${type} does not accept ${key}`;
+  if (
+    type === 'conversation.tool.trace' &&
+    (typeof body['invocationId'] !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/u.test(body['invocationId']))
+  )
+    return 'Invalid retained invocation ID';
   if (type === 'approval.policy.get' || type === 'approval.policy.save')
     return problem(type, body);
   if (type.startsWith('proc.')) return procProblem(type, body);

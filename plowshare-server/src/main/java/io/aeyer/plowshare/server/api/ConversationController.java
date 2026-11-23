@@ -11,6 +11,7 @@ import io.aeyer.plowshare.server.agents.JobRuntime;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.agents.TurnCap;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.CompactionStore;
 import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
@@ -169,6 +170,13 @@ public class ConversationController {
    * it.
    */
   private io.aeyer.plowshare.server.information.InformationJobs information;
+
+  private TrajectoryToolReceipts toolReceipts = (conversation, answers, results) -> List.of();
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void useToolReceipts(TrajectoryToolReceipts receipts) {
+    toolReceipts = receipts;
+  }
 
   @org.springframework.beans.factory.annotation.Autowired
   public void useInformationInputs(io.aeyer.plowshare.server.information.InformationJobs inputs) {
@@ -564,17 +572,15 @@ public class ConversationController {
     Set<EntryKind> narrowed = RequestedKinds.in(kinds);
     boolean onlyDrawn = Boolean.TRUE.equals(drawn);
     rules.requireExists(id, "trajectory");
+    var page =
+        below != RequestedBefore.FORWARD
+            ? entries.pageOfLogBefore(id, below, narrowed, onlyDrawn, window.skip(), window.most())
+            : from == 0 && narrowed.equals(EntryStore.EVERY_KIND) && !onlyDrawn
+                ? entries.pageOfLog(id, window.skip(), window.most())
+                : entries.pageOfLogAfter(
+                    id, from, narrowed, onlyDrawn, window.skip(), window.most());
     return ResponseEntity.ok(
-        EntryPageView.of(
-            below != RequestedBefore.FORWARD
-                ? entries.pageOfLogBefore(
-                    id, below, narrowed, onlyDrawn, window.skip(), window.most())
-                : from == 0 && narrowed.equals(EntryStore.EVERY_KIND) && !onlyDrawn
-                    ? entries.pageOfLog(id, window.skip(), window.most())
-                    : entries.pageOfLogAfter(
-                        id, from, narrowed, onlyDrawn, window.skip(), window.most()),
-            window.skip(),
-            window.most()));
+        EntryPageView.trajectory(page, window.skip(), window.most(), id, toolReceipts));
   }
 
   /**

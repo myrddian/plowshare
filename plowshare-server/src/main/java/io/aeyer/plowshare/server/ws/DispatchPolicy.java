@@ -147,6 +147,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "conversation.turns",
           "conversation.chat",
           "conversation.trajectory",
+          "conversation.tool.trace",
           "conversation.context",
           "conversation.context.count",
           "conversation.context.snapshot",

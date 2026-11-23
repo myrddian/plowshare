@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.ws;
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.api.EntryPageView;
+import io.aeyer.plowshare.server.approvals.TrajectoryToolReceipts;
 import io.aeyer.plowshare.server.archive.Conversations;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.requests.RequestedAfter;
@@ -49,14 +50,17 @@ public final class ConversationTrajectoryHandler implements FrameHandler {
 
   private final Conversations rules;
   private final EntryStore entries;
+  private final TrajectoryToolReceipts receipts;
 
   /**
    * @param rules the service the controller asks the existence question of
    * @param entries the one store both surfaces read a page from
    */
-  public ConversationTrajectoryHandler(Conversations rules, EntryStore entries) {
+  public ConversationTrajectoryHandler(
+      Conversations rules, EntryStore entries, TrajectoryToolReceipts receipts) {
     this.rules = Objects.requireNonNull(rules, "rules");
     this.entries = Objects.requireNonNull(entries, "entries");
+    this.receipts = Objects.requireNonNull(receipts, "receipts");
   }
 
   @Override
@@ -74,16 +78,15 @@ public final class ConversationTrajectoryHandler implements FrameHandler {
     Set<EntryKind> kinds = RequestedKinds.in(asked.kinds());
     boolean drawn = Boolean.TRUE.equals(asked.drawn());
     rules.requireExists(conversation, "trajectory");
+    var page =
+        before != RequestedBefore.FORWARD
+            ? entries.pageOfLogBefore(
+                conversation, before, kinds, drawn, window.skip(), window.most())
+            : after == 0 && kinds.equals(EntryStore.EVERY_KIND) && !drawn
+                ? entries.pageOfLog(conversation, window.skip(), window.most())
+                : entries.pageOfLogAfter(
+                    conversation, after, kinds, drawn, window.skip(), window.most());
     return Outcome.ok(
-        EntryPageView.of(
-            before != RequestedBefore.FORWARD
-                ? entries.pageOfLogBefore(
-                    conversation, before, kinds, drawn, window.skip(), window.most())
-                : after == 0 && kinds.equals(EntryStore.EVERY_KIND) && !drawn
-                    ? entries.pageOfLog(conversation, window.skip(), window.most())
-                    : entries.pageOfLogAfter(
-                        conversation, after, kinds, drawn, window.skip(), window.most()),
-            window.skip(),
-            window.most()));
+        EntryPageView.trajectory(page, window.skip(), window.most(), conversation, receipts));
   }
 }

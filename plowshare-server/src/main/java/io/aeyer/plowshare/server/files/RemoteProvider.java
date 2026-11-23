@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -143,9 +144,10 @@ public final class RemoteProvider implements FileProvider {
   private final ImageStore images;
   private final FileContents contents;
   private final Optional<PersonalWorkspace> personalWorkspace;
+  private final Consumer<FileMutationObservation> observer;
 
   /** How many file actions this session answered in an old client's words. */
-  private final AtomicInteger oldClientReplies = new AtomicInteger();
+  private final AtomicInteger oldClientReplies;
 
   /**
    * @param channel how to reach the session and wait for it
@@ -206,10 +208,16 @@ public final class RemoteProvider implements FileProvider {
     this.images = Objects.requireNonNull(images);
     this.contents = Objects.requireNonNull(contents);
     this.personalWorkspace = Objects.requireNonNull(personalWorkspace);
+    this.observer = null;
+    this.oldClientReplies = new AtomicInteger();
   }
 
-  private RemoteProvider(RemoteProvider provider) {
-    this.channel = provider.channel.bound(provider.session);
+  private RemoteProvider(
+      RemoteProvider provider,
+      SessionChannel channel,
+      Consumer<FileMutationObservation> observer,
+      AtomicInteger oldClientReplies) {
+    this.channel = channel;
     this.session = provider.session;
     this.anyGrant = provider.anyGrant;
     this.writable = provider.writable;
@@ -217,6 +225,13 @@ public final class RemoteProvider implements FileProvider {
     this.images = provider.images;
     this.contents = provider.contents;
     this.personalWorkspace = provider.personalWorkspace;
+    this.observer = observer;
+    this.oldClientReplies = oldClientReplies;
+  }
+
+  private RemoteProvider(RemoteProvider provider) {
+    this(
+        provider, provider.channel.bound(provider.session), provider.observer, new AtomicInteger());
   }
 
   @Override
@@ -232,6 +247,11 @@ public final class RemoteProvider implements FileProvider {
   @Override
   public FileProvider forReviewedMutation() {
     return anyGrant ? new RemoteProvider(this) : this;
+  }
+
+  @Override
+  public FileProvider observeMutation(Consumer<FileMutationObservation> observer) {
+    return new RemoteProvider(this, channel, Objects.requireNonNull(observer), oldClientReplies);
   }
 
   @Override
@@ -325,6 +345,13 @@ public final class RemoteProvider implements FileProvider {
       return new Span(List.of(), 0, total, total > 0, total > 0 ? Span.LINES : Span.END);
     }
     return span(FileRequest.STAT, reply);
+  }
+
+  @Override
+  public FileRead readWindow(Path path, Window window) {
+    refuseIfNoGrant();
+    if (!channel.sources(session)) return new FileRead.View(read(path, window));
+    return contents.remoteWindow(path.toString(), window, home, images, this::ask);
   }
 
   /**
@@ -427,7 +454,17 @@ public final class RemoteProvider implements FileProvider {
    * FileWords} or as the old client's sentence.
    */
   private Changed changed(FileRequest request) {
-    FileReply reply = ask(request);
+    FileReply reply =
+        observer == null
+            ? ask(request)
+            : checked(
+                request,
+                channel.askMutation(
+                    session,
+                    request,
+                    id ->
+                        observer.accept(
+                            new FileMutationObservation(id, FileMutationObservation.Kind.SENT))));
     if (reply.result() != null && !reply.result().made()) {
       // An ok outcome with a refusal's facts: the facts are the specific
       // half, and a refusal read as a change made is the wrong direction.
@@ -441,7 +478,11 @@ public final class RemoteProvider implements FileProvider {
             request.op(),
             "answered that it made a change of another" + " kind (" + reply.result().kind() + ")");
       }
-      return Changed.of(reply.result());
+      Changed result = Changed.of(reply.result());
+      if (observer != null)
+        observer.accept(
+            new FileMutationObservation(request.id(), FileMutationObservation.Kind.CONFIRMED));
+      return result;
     }
     heardFromAnOldClient(request.op());
     // Only an edit ever carried words on an ok reply: the view of the

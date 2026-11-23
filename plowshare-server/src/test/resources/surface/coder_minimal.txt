@@ -41,9 +41,9 @@ parameters:
 === tool: file_read ===
 Read one file by its absolute path, a window of lines at a time. Fast and free — no model runs. Omit offset and limit to read from the beginning.
 
-One answer carries at most 300 lines. A larger limit is brought down to that rather than refused, and the answer says when it was, so a long file is read by paging through it and never by asking for more of it at once.
+One answer carries at most 300 lines. A larger limit is brought down to that rather than refused, and the window information says when it was, so a long file is read by paging through it and never by asking for more of it at once.
 
-Lines are numbered from 0, and offset is a line number. If the file continues past the window you asked for, the answer opens with a line saying which lines you were given, how many the file has, and the offset to send to get the next window — send that number and you carry on where you stopped. That line is written by this tool and is not in the file. A window that reaches the end of the file has no such line, so its absence means you have seen the rest.
+Lines are numbered from 0, and offset is a line number. Exact UTF-8 results contain only the requested text, including original line endings. The harness reports the range, end of file, or next offset separately after the tool batch. Use that offset on the same path to continue. Converted or legacy file views can carry their continuation in the view itself.
 
 Sometimes the window fills up on size before it runs out of lines, and the answer says so when it does. Asking again with a larger limit returns the same text; ask for the next offset instead.
 
@@ -65,7 +65,7 @@ parameters:
     },
     "limit": {
       "type": "integer",
-      "description": "How many lines to read at most, from 1 to 300. Omit for 300; a larger number is brought down to it rather than refused, and the answer says so."
+      "description": "How many lines to read at most, from 1 to 300. Omit for 300; a larger number is brought down to it rather than refused, and the window information says so."
     }
   },
   "required": [

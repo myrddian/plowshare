@@ -183,6 +183,50 @@ export interface OpenedView {
   readonly conversation: string;
   readonly agent: string;
 }
+export type ToolEffectReceiptView = {
+  readonly invocationId: string;
+  readonly observation:
+    | 'PREFLIGHT_REFUSED'
+    | 'FILE_SENT'
+    | 'FILE_REPLY_TIMEOUT'
+    | 'FILE_EFFECT_CONFIRMED'
+    | 'FILE_EFFECT_VERIFIED'
+    | 'FILE_EFFECT_UNCHANGED'
+    | 'FILE_REPLY_UNVERIFIED'
+    | 'FILE_DISPATCH_UNCERTAIN'
+    | 'FILE_LOCAL_CHANGED'
+    | 'FILE_LOCAL_UNCHANGED'
+    | 'FILE_LOCAL_UNVERIFIED';
+  readonly dispatch:
+    'NOT_DISPATCHED' | 'SENT' | 'MAY_HAVE_DISPATCHED' | 'DISPATCHED';
+  readonly effect: 'NO_EFFECT' | 'UNKNOWN' | 'CONFIRMED';
+  readonly resultOrdinal: number | null;
+};
+export type ToolCallTrace = {
+  readonly invocationId: string;
+  readonly firstObservedAt: string;
+  readonly sentAt: string | null;
+  readonly replyObservedAt: string | null;
+  readonly replyTimedOutAt: string | null;
+  readonly requestId: string | null;
+};
+export type ToolTraceView = {
+  readonly trace: ToolCallTrace | null;
+};
+export type RetainedToolResultView = {
+  readonly answerOrdinal: number;
+  readonly effectReceipt: ToolEffectReceiptView;
+};
+export type FileReadWindow = {
+  readonly offset: number;
+  readonly linesRead: number;
+  readonly totalLines: number;
+  readonly byteLength: number;
+  readonly limit: number;
+  readonly requestedLimit: number;
+  readonly stoppedBy: 'end' | 'lines' | 'bytes';
+  readonly nextOffset: number | null;
+};
 export interface AskedView {
   readonly id: string;
   readonly name: string;
@@ -191,6 +235,7 @@ export interface AskedView {
   readonly cut: boolean;
   readonly salient: string | null;
   readonly opened: OpenedView | null;
+  readonly effectReceipt?: ToolEffectReceiptView;
 }
 export interface EntryView {
   readonly ordinal: number;
@@ -219,6 +264,8 @@ export interface EntryView {
   readonly promptTokens?: number | null;
   readonly completionTokens?: number | null;
   readonly reasoningTokens?: number | null;
+  readonly retainedToolResult?: RetainedToolResultView;
+  readonly fileWindow?: FileReadWindow;
 }
 export interface SourceView {
   readonly kind: string;
@@ -423,6 +470,7 @@ export interface ConversationReplies {
   'conversation.compactions': readonly CompactionView[];
   'conversation.chat': EntryPageView;
   'conversation.trajectory': EntryPageView;
+  'conversation.tool.trace': ToolTraceView;
   'conversation.context': ContextView;
   'conversation.projection': ProjectionView;
   'agent.list': readonly AgentView[];
@@ -595,6 +643,127 @@ const agent = record({
   commands: optional(list(commandEntry)),
 });
 const opened = record({ conversation: named, agent: named });
+const invocationId = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
+const receiptCheck = record(
+  {
+    invocationId,
+    observation: named,
+    dispatch: named,
+    effect: named,
+    resultOrdinal: nullable(positive),
+  },
+  (row) => {
+    switch (row['observation']) {
+      case 'PREFLIGHT_REFUSED':
+        return (
+          row['dispatch'] === 'NOT_DISPATCHED' && row['effect'] === 'NO_EFFECT'
+        );
+      case 'FILE_SENT':
+      case 'FILE_REPLY_TIMEOUT':
+      case 'FILE_REPLY_UNVERIFIED':
+        return row['dispatch'] === 'SENT' && row['effect'] === 'UNKNOWN';
+      case 'FILE_EFFECT_CONFIRMED':
+      case 'FILE_EFFECT_VERIFIED':
+        return row['dispatch'] === 'SENT' && row['effect'] === 'CONFIRMED';
+      case 'FILE_EFFECT_UNCHANGED':
+        return row['dispatch'] === 'SENT' && row['effect'] === 'NO_EFFECT';
+      case 'FILE_DISPATCH_UNCERTAIN':
+        return (
+          row['dispatch'] === 'MAY_HAVE_DISPATCHED' &&
+          row['effect'] === 'UNKNOWN'
+        );
+      case 'FILE_LOCAL_CHANGED':
+        return (
+          row['dispatch'] === 'DISPATCHED' && row['effect'] === 'CONFIRMED'
+        );
+      case 'FILE_LOCAL_UNCHANGED':
+        return (
+          row['dispatch'] === 'DISPATCHED' && row['effect'] === 'NO_EFFECT'
+        );
+      case 'FILE_LOCAL_UNVERIFIED':
+        return row['dispatch'] === 'DISPATCHED' && row['effect'] === 'UNKNOWN';
+      default:
+        return false;
+    }
+  },
+);
+export function isToolEffectReceipt(
+  value: unknown,
+): value is ToolEffectReceiptView {
+  return receiptCheck(value);
+}
+const retainedToolResult = record({
+  answerOrdinal: positive,
+  effectReceipt: receiptCheck,
+});
+const fileWindow = record(
+  {
+    offset: count,
+    linesRead: count,
+    totalLines: count,
+    byteLength: count,
+    limit: positive,
+    requestedLimit: positive,
+    stoppedBy: (value) =>
+      value === 'end' || value === 'lines' || value === 'bytes',
+    nextOffset: nullable(positive),
+  },
+  (row) => {
+    const {
+      offset,
+      linesRead,
+      totalLines,
+      byteLength,
+      limit,
+      requestedLimit,
+      nextOffset,
+      stoppedBy,
+    } = row;
+    if (
+      typeof offset !== 'number' ||
+      typeof linesRead !== 'number' ||
+      typeof totalLines !== 'number' ||
+      typeof byteLength !== 'number' ||
+      typeof limit !== 'number' ||
+      typeof requestedLimit !== 'number'
+    )
+      return false;
+    const remaining = Math.max(0, totalLines - offset);
+    return (
+      byteLength <= 96 * 1024 &&
+      limit <= 2000 &&
+      requestedLimit >= limit &&
+      linesRead <= limit &&
+      linesRead <= remaining &&
+      (linesRead === 0) === (byteLength === 0) &&
+      (remaining === 0 || linesRead > 0) &&
+      (remaining > linesRead
+        ? stoppedBy !== 'end' && nextOffset === offset + linesRead
+        : stoppedBy === 'end' && nextOffset === null)
+    );
+  },
+);
+
+export function isFileReadWindow(value: unknown): value is FileReadWindow {
+  return fileWindow(value);
+}
+const traceStamp = (value: unknown): boolean =>
+  typeof value === 'string' &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value) &&
+  Number.isFinite(Date.parse(value));
+const toolTrace = record({
+  trace: nullable(
+    record({
+      invocationId,
+      firstObservedAt: traceStamp,
+      sentAt: nullable(traceStamp),
+      replyObservedAt: nullable(traceStamp),
+      replyTimedOutAt: nullable(traceStamp),
+      requestId: nullable(invocationId),
+    }),
+  ),
+});
 const asked = record({
   id: text,
   name: text,
@@ -603,6 +772,7 @@ const asked = record({
   cut: bool,
   salient: nullable(text),
   opened: nullable(opened),
+  effectReceipt: optional(receiptCheck),
 });
 const source = record(
   {
@@ -624,6 +794,8 @@ const source = record(
 );
 /** Validate additive provenance and inference usage at the generated decoder boundary as well as WS outcome reads. */
 export function validateEntryMetadata(type: string, value: unknown): void {
+  if (type === 'conversation.tool.trace' && !toolTrace(value))
+    throw new Error('Invalid tool trace metadata');
   if (type !== 'conversation.chat' && type !== 'conversation.trajectory')
     return;
   const metadata = record({
@@ -632,6 +804,9 @@ export function validateEntryMetadata(type: string, value: unknown): void {
     reasoningTokens: (found) => found === undefined || nullable(count)(found),
     job: (found) => found === undefined || nullable(named)(found),
     source: (found) => found === undefined || nullable(source)(found),
+    toolCalls: list(record({ effectReceipt: optional(receiptCheck) })),
+    retainedToolResult: optional(retainedToolResult),
+    fileWindow: optional(fileWindow),
   });
   if (!object(value) || !list(metadata)(value['entries']))
     throw new Error('Invalid recorded entry metadata');
@@ -647,6 +822,8 @@ const entry = record({
   supersededBy: nullable(positive),
   toolCallId: nullable(text),
   toolCalls: list(asked),
+  retainedToolResult: optional(retainedToolResult),
+  fileWindow: optional(fileWindow),
   handle: nullable(text),
   recordedAt: nullable(named),
   tookMillis: nullable(count),
@@ -843,6 +1020,7 @@ const readers = {
   ),
   'conversation.chat': page,
   'conversation.trajectory': page,
+  'conversation.tool.trace': toolTrace,
   'conversation.context': context,
   'conversation.projection': record({
     agent: named,

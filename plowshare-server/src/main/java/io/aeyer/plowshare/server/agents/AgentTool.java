@@ -1,6 +1,7 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 
 /**
@@ -61,7 +62,15 @@ public interface AgentTool {
   }
 
   /** A typed result optionally retains invocation-bound images alongside its text projection. */
-  record Result(String text, ToolObservation observation) {
+  record Result(
+      String text,
+      ToolObservation observation,
+      FileReadWindow fileWindow,
+      boolean fileReadCodeHint) {
+    public Result(String text, ToolObservation observation) {
+      this(text, observation, null, false);
+    }
+
     public Result {
       java.util.Objects.requireNonNull(text);
     }

@@ -12,6 +12,7 @@ import io.aeyer.plowshare.server.approvals.FileApprovalConsent;
 import io.aeyer.plowshare.server.approvals.OperationApprovalReview;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.SecurityReviewer;
+import io.aeyer.plowshare.server.files.FileMutationObservation;
 import io.aeyer.plowshare.server.files.FileProvider;
 import io.aeyer.plowshare.server.files.ProviderRouter;
 import io.aeyer.plowshare.server.files.ProviderRouter.Target;
@@ -33,6 +34,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -40,7 +42,8 @@ import java.util.function.Function;
  * fences. Retained metadata is server-authored and is removed before hooks or tools see arguments.
  * A changed hook, provider or policy refuses the retained operation without starting new work.
  */
-final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentTool {
+final class ReviewedFileTool
+    implements RetainedApprovalTool, AgentTool.ContentTool, FileTools.VerifiableMutation {
   record Question(Home home, String side, FileApproval file, String reason) {}
 
   private record Prepared(
@@ -335,10 +338,41 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
 
   @Override
   public String run(String arguments, Home home, UsageAttribution usage) {
+    return runWithTargets(arguments, home, usage, Function.identity());
+  }
+
+  String runObservingMutation(
+      String arguments,
+      Home home,
+      UsageAttribution usage,
+      Consumer<FileMutationObservation> observer) {
+    return runWithTargets(
+        arguments,
+        home,
+        usage,
+        target ->
+            new Target(
+                target.provider().observeMutation(observer),
+                target.path(),
+                target.scopePath(),
+                target.roots()));
+  }
+
+  @Override
+  public String runVerifyingMutation(
+      String arguments,
+      Home home,
+      UsageAttribution usage,
+      Consumer<FileMutationObservation> observer) {
+    return runWithTargets(arguments, home, usage, target -> FileTools.verified(target, observer));
+  }
+
+  private String runWithTargets(
+      String arguments, Home home, UsageAttribution usage, Function<Target, Target> bind) {
     try {
       Prepared current = require(arguments, home);
       if (delegate instanceof FileTools.Routed routed)
-        return routed.runFrom(arguments, home, current.targets()::get);
+        return routed.runFrom(arguments, home, path -> bind.apply(current.targets().get(path)));
       return delegate.run(arguments, home, usage);
     } catch (WorkspaceRefusedException refused) {
       return refused.getMessage();
@@ -354,6 +388,8 @@ final class ReviewedFileTool implements RetainedApprovalTool, AgentTool.ContentT
   public AgentTool.Result runResult(String arguments, Home home, UsageAttribution usage) {
     try {
       Prepared current = require(arguments, home);
+      if (delegate instanceof FileTools.Read read)
+        return read.readResultFrom(arguments, current.targets()::get);
       if (delegate instanceof FileTools.Routed routed)
         return new AgentTool.Result(routed.runFrom(arguments, home, current.targets()::get), null);
       return delegate instanceof AgentTool.ContentTool content

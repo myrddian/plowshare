@@ -404,7 +404,9 @@ public final class Projection {
       }
       case TOOL_RESULT -> {
         unanswered.remove(entry.toolCallId());
-        yield ChatMessage.tool(entry.toolCallId(), entry.content());
+        yield entry.fileWindow() == null || entry.content() == null
+            ? ChatMessage.tool(entry.toolCallId(), entry.content())
+            : ChatMessage.losslessTool(entry.toolCallId(), entry.content());
       }
       case SUMMARY ->
           ChatMessage.system(
