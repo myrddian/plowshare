@@ -189,6 +189,14 @@ class SdkConsolePort:
             "collector": receipt.evidence.collector,
             "scan_id": receipt.scan_id,
             "revision": receipt.revision,
+            **(
+                {
+                    "comparison_revision": receipt.comparison_revision,
+                    "comparison_scan_id": receipt.comparison_scan_id,
+                }
+                if receipt.comparison_revision is not None
+                else {}
+            ),
             "mode": receipt.evidence.mode,
             "changes": receipt.evidence.changes,
             "issues": receipt.evidence.issues,

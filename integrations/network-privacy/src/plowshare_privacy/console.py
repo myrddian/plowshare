@@ -352,6 +352,10 @@ class OperatorConsole:
                 recovery.append(
                     "An effect has an unknown outcome. Check retained server receipts before admitting new work."
                 )
+            if any(item.pin_pending for item in self.worker.receipts.all()):
+                recovery.append(
+                    "An optional evidence upload is awaiting confirmation. The next investigation or device analysis using it will check the retained receipt."
+                )
             if self.credential_expires_at:
                 from datetime import datetime, timedelta, timezone
 
@@ -427,6 +431,7 @@ class OperatorConsole:
                 raise SettingsBusy(
                     "This scan already has an investigation intent; inspect its receipt"
                 )
+            receipt = await self.worker.retain_for_investigation(scan_id)
             entry = ManualInvestigation(
                 uuid(request_id), uuid(scan_id), utc_now(), "pending"
             )

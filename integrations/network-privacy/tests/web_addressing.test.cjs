@@ -138,6 +138,30 @@ test('the Evidence view lists assignments', async () => {
   assert.ok(!(await show([])).includes('Address assignment'));
 });
 
+test('collection days start collapsed and keep the selected expansion across refreshes', () => {
+  const {context, node} = dashboard();
+  const scan = {scan_id:'sample', when:'2026-11-24T00:00:00Z', phase:'done', local_completion:true,
+    mode:'tcp', change_count:0, issue_count:6};
+  const group = {day:'2026-11-24', scans:[scan]};
+  const render = days => call(context, 'renderCollections(value)', days);
+  render([group]);
+  const first = node('collections').children[0];
+  assert.equal(first.open, false);
+  assert.equal(first.children[0].tag, 'summary');
+  assert.ok(texts(first.children[0]).includes('1 collection · 0 comparison entries · 6 coverage notes'));
+  assert.ok(texts(first.children[1]).includes('Collected'));
+  first.open = true;
+  first.listeners.toggle();
+  render([{...group, scans:[scan, {...scan, scan_id:'next'}]}]);
+  const refreshed = node('collections').children[0];
+  assert.equal(refreshed.open, true);
+  assert.equal(refreshed.children.length, 3);
+  call(context, "setHouseholdZone('Pacific/Honolulu'); renderCollections(value, 'Australia/Melbourne')", [group]);
+  assert.equal(node('collection-zone').textContent, 'Australia/Melbourne');
+  const reported = call(context, "formatTimestamp(value, timestampFormatter('Australia/Melbourne'))", scan.when);
+  assert.ok(texts(node('collections')).includes(reported));
+});
+
 const modeDevice = (name, address, addressing) => ({name, address, identity:{mac:'02:00:00:00:00:' + address.slice(-2), device_id:'mac:' + address}, addressing});
 const state = (mode, basis, extra = {}) => ({mode, basis, services:[], expires_at:null, observed_at:null, previous_mode:null, changed_at:null, changed_in_latest:false, ...extra});
 const fullOverview = (devices, extra = {}) => ({devices, candidates:[], assessments:{summaries:[], usage:null},

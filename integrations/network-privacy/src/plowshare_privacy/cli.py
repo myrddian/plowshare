@@ -65,6 +65,7 @@ from .profile_research_port import SdkResearchPort
 from .reference_port import SdkReferencePort
 from .reference_requests import AssistantReferenceRequests, ReferenceRequests
 from .reference_service import open_references, project_scope
+from .rollups import CollectionRollups
 from .schedule_control import ScheduleRuntime, SdkScheduleRuntime
 from .schedule_editor import ScheduleEditor
 from .tool_journal_upgrade import open_tool_journal
@@ -204,14 +205,28 @@ async def execute(args: argparse.Namespace) -> None:
                 if getattr(args, "dashboard_settings", False)
                 else None
             )
+            sdk_port = SdkPrivacyPort(client, config)
+            rollups = CollectionRollups(config)
+            rollups.seed(receipts.all())
+
+            async def advance_rollups() -> None:
+                # Freezing a period must follow any in-flight snapshot that
+                # finished before midnight. Selection and intent persistence
+                # run before the publisher's first await.
+                if not worker.lock.locked():
+                    await rollups.advance(sdk_port)
+
             worker = Worker(
                 config,
-                SdkPrivacyPort(client, config),
+                sdk_port,
                 receipts,
                 configured_collector(config.collector, config.collection),
                 operator_store,
                 PresenceWatch(PresenceHistory(config.state_directory)),
+                rollups=rollups,
+                advance_rollups=advance_rollups,
             )
+
             worker.attention = AttentionOutbox(
                 config.state_directory, SdkAttentionPort(lambda: client, config.project)
             )
@@ -326,6 +341,7 @@ async def execute(args: argparse.Namespace) -> None:
                     if profiles is not None
                     else None,
                     zone=lambda: worker.config.zone,
+                    retain_scan=worker.retain_scan_revision,
                     flagged=deep_scans.flagged
                     if deep_scans is not None
                     else lambda device, report, requested_at: None,
@@ -379,6 +395,7 @@ async def execute(args: argparse.Namespace) -> None:
                 if external is not None:
                     await external.poll()
                 await worker.poll()
+                await advance_rollups()
                 print(json.dumps([asdict(item) for item in receipts.all()]))
                 return
             if args.command == "reconcile":
@@ -410,7 +427,7 @@ async def execute(args: argparse.Namespace) -> None:
             )
 
             async def recover(reconcile_manual: Callable[[], Awaitable[None]]) -> None:
-                nonlocal client, native
+                nonlocal client, native, sdk_port
                 async with worker.request_lock:
                     if worker.recovery_requested.is_set():
                         return  # A serialized manual/automatic check already settled this stop.
@@ -435,6 +452,7 @@ async def execute(args: argparse.Namespace) -> None:
                         previous = connections.pop_all()
                         try:
                             client = await connections.enter_async_context(replacement)
+                            sdk_port = candidate_port
                             worker.port = candidate_port
                             if issues is not None:
                                 issues.port = SdkIssuePort(
@@ -556,6 +574,7 @@ async def execute(args: argparse.Namespace) -> None:
                     managed_products,
                     advisories,
                     zone=lambda: worker.config.zone,
+                    retain_scan=worker.retain_scan_revision,
                 )
                 if operator_store is not None and config.collection.mode == "tcp"
                 else None

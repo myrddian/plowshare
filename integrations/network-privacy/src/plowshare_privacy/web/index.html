@@ -362,10 +362,10 @@
 
       <section id="view-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
         <div class="workspace">
-          <section class="panel"><div class="panel-heading"><h2>Collections</h2><span>Latest 50</span></div><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section>
+          <section class="panel"><div class="panel-heading"><h2>Collections</h2><span id="collection-zone">By day</span></div><p id="collection-rollup-detail" class="notice" role="status" hidden></p><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section>
           <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="quiet reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section>
         </div>
-        <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. A published collection does not mean an investigation has finished. Missing sources remain visible as gaps.</p>
+        <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. Missing sources remain visible as coverage gaps.</p>
       </section>
 
       <section id="view-ask" class="ask-view" role="tabpanel" aria-labelledby="tab-ask" hidden>
@@ -434,7 +434,7 @@
             <form id="zone-form" class="form-grid">
               <label>Time zone<input id="zone-input" list="zone-names" maxlength="64" autocomplete="off" spellcheck="false" placeholder="A city zone, e.g. Europe/London" aria-describedby="zone-help" required></label>
               <datalist id="zone-names"></datalist>
-              <p class="hint" id="zone-help">Used for every date on this dashboard, the times in new assessment reports and the midnight the daily limits reset at. It applies at once; reports already written keep their zone.</p>
+              <p class="hint" id="zone-help">Used immediately for dashboard dates, new assessment reports and daily limits. Collection days and rollups use the zone saved when reporting started.</p>
               <div class="actions"><button id="zone-save" type="submit">Save time zone</button><button id="zone-browser" type="button" class="secondary" hidden>Use this browser’s zone</button><button id="zone-clear" type="button" class="quiet" hidden>Use UTC instead</button></div>
             </form>
           </div>

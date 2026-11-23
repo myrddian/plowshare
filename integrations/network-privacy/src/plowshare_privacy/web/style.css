@@ -426,6 +426,12 @@ button.entry:disabled::after { display: none; }
 button.entry.selected { padding-left: var(--s3); background: var(--soot); box-shadow: inset 2px 0 0 var(--gilt); }
 .entry-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
 .entry small { margin-top: 2px; font-size: var(--text-xs); overflow-wrap: anywhere; }
+.collection-day { border-bottom: var(--rule); }
+.collection-day:last-child { border-bottom: 0; }
+.collection-day-summary { padding: var(--s3) 0; cursor: pointer; }
+.collection-day-summary strong { margin-left: var(--s1); }
+.collection-day-summary small { display: block; margin: var(--s1) 0 0 var(--s4); }
+.collection-day > button.entry { padding-left: var(--s4); }
 /* A record is an entry that does not open: it carries its own actions. */
 .record { padding: var(--s3) 0; border-bottom: var(--rule); }
 .record:last-child { border-bottom: 0; }

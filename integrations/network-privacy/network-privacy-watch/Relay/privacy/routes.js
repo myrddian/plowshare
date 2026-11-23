@@ -43,6 +43,8 @@ export function route(event) {
     // and the empty decision, and advances the subscription past this record.
     return [];
   }
+  // Local-only v2 completion notifications carry no admitted source and never
+  // route to a server-side investigation. v1 remains the retained-source path.
   if (!completion(result)) return [];
   if (result.investigation !== undefined) {
     if (!decision(result.investigation) || !result.investigation.requested) return [];

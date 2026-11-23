@@ -100,6 +100,27 @@ class NetworkPrivacyInvestigationTest {
   }
 
   @Test
+  void investigation_uses_an_exact_comparison_pinned_after_local_collection() throws Exception {
+    var host = new Host();
+    var current = (ObjectNode) JSON.readTree(host.sources.get(CURRENT));
+    current.remove("previous_revision");
+    host.sources.put(CURRENT, current.toString());
+    var previous = (ObjectNode) JSON.readTree(host.sources.get(BASELINE));
+    previous.put("scan_id", RESOURCE);
+    host.sources.put(BASELINE, previous.toString());
+    var completion = (ObjectNode) JSON.readTree(host.completion);
+    completion.put("comparison_revision", BASELINE);
+    completion.put("comparison_scan_id", RESOURCE);
+    host.setRequest(Map.of("payload", Map.of("kind", "TEXT", "text", completion.toString())));
+    host.advanceTo("privacy_reviewer");
+    host.accept(
+        "{\"verdict\":\"accepted\",\"assessment\":\"Comparison reviewed\",\"notes\":\"Both sources read\"}");
+    host.finish();
+    assertEquals(CURRENT, host.report.path("inputs").get(0).asText());
+    assertEquals(BASELINE, host.report.path("inputs").get(1).asText());
+  }
+
+  @Test
   void unchecked_review_is_retained_explicitly_as_unverified() throws Exception {
     var host = new Host();
     host.advanceTo("privacy_reviewer");

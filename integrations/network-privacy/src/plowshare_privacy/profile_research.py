@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Awaitable, Callable, Protocol
 from uuid import uuid4
 
 from plowshare import Delivery, Refusal, TransportError
@@ -43,6 +43,7 @@ from .identity_source import (
 from .journal import Receipts
 from .presence import PresenceView, epoch
 from .private_files import replace_private
+from .worker import ReconciliationRequired
 
 MAX_RECORDS = 256
 MAX_JOURNAL_BYTES = 6 * 1024 * 1024
@@ -324,6 +325,7 @@ class ProfileResearch:
         *,
         clock: Callable[[], str] = utc_now,
         zone: Callable[[], str] = lambda: "UTC",
+        retain_scan: Callable[[str], Awaitable[str]] | None = None,
     ):
         # Daily allowances follow the household's day (configuration timeZone),
         # read when used so a dashboard change applies at once.
@@ -335,6 +337,7 @@ class ProfileResearch:
         self.managed_products = managed_products
         self.advisories = advisories
         self.clock = clock
+        self.retain_scan = retain_scan
         self.error: str | None = None
         # Reads/writes have no awaits. Poll never holds this event-loop-owned state
         # across network IO, so operator review can progress during tool calls.
@@ -465,16 +468,12 @@ class ProfileResearch:
                 result.append(identity)
         return tuple(result)
 
-    def _retained_tcp(
+    async def _retained_tcp(
         self, identity: DeviceIdentity
     ) -> tuple[tuple[TcpObservation, ...], str | None]:
         # Match the MAC and address in the same full sweep before using port clues.
         for receipt in reversed(self.receipts.all()[-50:]):
-            if (
-                receipt.phase != "done"
-                or receipt.evidence is None
-                or receipt.revision is None
-            ):
+            if receipt.phase != "done" or receipt.evidence is None:
                 continue
             snapshot = receipt.evidence.snapshot
             if any(
@@ -482,9 +481,12 @@ class ProfileResearch:
                 and device.device_id == identity.device_id
                 for device in snapshot.devices
             ):
+                revision = receipt.revision
+                if revision is None and self.retain_scan is not None:
+                    revision = await self.retain_scan(receipt.scan_id)
                 return tuple(
                     probe for probe in snapshot.tcp if probe.address == identity.address
-                ), receipt.revision
+                ), revision
         return (), None
 
     async def _evidence(self, entry: ResearchEntry) -> ResearchEvidence:
@@ -513,7 +515,7 @@ class ProfileResearch:
                 nvd_status = "searched"
             except AdvisoryUnavailable:
                 nvd_status = "unavailable"
-        tcp, revision = self._retained_tcp(identity)
+        tcp, revision = await self._retained_tcp(identity)
         detection = detect_device(identity, tcp)
         return ResearchEvidence(
             identity.hostname or identity.label,
@@ -655,7 +657,13 @@ class ProfileResearch:
             try:
                 self.error = None
                 await self.poll()
-            except (Refusal, TransportError, ValueError, OSError):
+            except (
+                Refusal,
+                TransportError,
+                ReconciliationRequired,
+                ValueError,
+                OSError,
+            ):
                 self.error = "Profile research needs attention. Existing drafts and admissions were retained."
             try:
                 await asyncio.wait_for(stop.wait(), 30)

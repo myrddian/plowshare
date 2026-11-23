@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from typing import Awaitable, Callable, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from plowshare import Delivery, Refusal, TransportError
+from plowshare import CancelledRequest, Delivery, Refusal, TransportError
 from plowshare.contracts import RelayPublishRequest
 from plowshare.tools import ToolAttention
 
@@ -29,10 +29,11 @@ from .device_inventory import DeviceInventory, InventoryProjection
 from .diagnostics import refusal_detail
 from .journal import Publication, Receipt, Receipts, ScanOrigin
 from .limits import MAX_EVIDENCE_BYTES
-from .operator_state import OperatorStore
+from .operator_state import InvestigationDecision, OperatorStore
 from .ports import PrivacyPort, evidence_name
 from .presence import PresenceCollector, PresenceStatus, PresenceView, PresenceWatch
 from .recovery import wait_for_recovery
+from .rollups import CollectionRollups
 
 
 class ReconciliationRequired(RuntimeError):
@@ -70,12 +71,17 @@ class Worker:
         operator: OperatorStore | None = None,
         presence: PresenceWatch | None = None,
         facts: DeviceFactsStep | None = None,
+        rollups: CollectionRollups | None = None,
+        advance_rollups: Callable[[], Awaitable[None]] | None = None,
     ):
         self.attention: AttentionOutbox | None = None
         self.operator = operator
         self.presence = presence
         self.facts = facts
+        self.rollups = rollups
+        self._advance_rollups = advance_rollups
         self._facts_task: asyncio.Task[None] | None = None
+        self._rollup_task: asyncio.Future[None] | None = None
         self._facts_checked: str | None = None
         self.recovery_requested = asyncio.Event()
         self.last_contact: str | None = None
@@ -213,28 +219,56 @@ class Worker:
                 )
                 if len(evidence.encode().encode("utf-16-le")) // 2 > MAX_EVIDENCE_BYTES:
                     raise ValueError("Evidence exceeds the direct-read bound")
-                receipt = replace(receipt, phase="collected", evidence=evidence)
+                receipt = replace(
+                    receipt,
+                    phase="collected",
+                    evidence=evidence,
+                    comparison_scan_id=previous.scan_id
+                    if previous is not None
+                    and not evidence.is_baseline
+                    and self.rollups is not None
+                    else None,
+                )
                 self.receipts.save(receipt)
             if receipt.evidence is None:
                 raise ValueError("Receipt has no evidence")
             if receipt.phase == "collected":
-                self.state = "retaining"
-                self.receipts.save(replace(receipt, phase="uploading"))
-                self.operation = "information.upload"
-                try:
-                    retained = await self.port.upload(
-                        receipt.evidence, str(uuid5(UUID(receipt.scan_id), "evidence"))
+                if self.rollups is not None and receipt.investigation is None:
+                    decision = self._decide(receipt.evidence)
+                    previous = (
+                        self._scan(receipt.comparison_scan_id)
+                        if receipt.comparison_scan_id is not None
+                        else None
                     )
-                except Refusal:
+                    if (
+                        decision.requested
+                        and previous is not None
+                        and previous.pin_pending
+                    ):
+                        # An earlier optional upload can remain uncertain while
+                        # new scans continue. Hold only this investigation until
+                        # its exact comparison can be confirmed.
+                        try:
+                            await self._confirm_upload(previous)
+                        except (ReconciliationRequired, Refusal):
+                            decision = InvestigationDecision(
+                                False,
+                                "Comparison evidence upload is awaiting confirmation",
+                                decision.decided_at,
+                            )
+                    receipt = replace(
+                        receipt,
+                        investigation=decision,
+                        local_completion=not decision.requested,
+                    )
                     self.receipts.save(receipt)
-                    raise
-                except TransportError as error:
-                    if error.delivery == Delivery.NOT_SUBMITTED:
-                        self.receipts.save(receipt)
-                    raise
-                receipt = replace(receipt, phase="uploaded", revision=retained.revision)
-                self.receipts.save(receipt)
-            if receipt.phase == "uploaded":
+                if not receipt.local_completion:
+                    comparison = await self._retain_comparison(receipt)
+                    receipt = replace(receipt, comparison_revision=comparison)
+                    receipt = await self._upload_evidence(receipt)
+            if receipt.phase == "uploaded" or (
+                receipt.phase == "collected" and receipt.local_completion
+            ):
                 if self.operator is not None and receipt.investigation is None:
                     if receipt.evidence is None:
                         raise ValueError("Missing retained evidence")
@@ -253,16 +287,116 @@ class Worker:
                 except Refusal:
                     self.receipts.save(receipt)
                     raise
-                except TransportError as error:
+                except (TransportError, CancelledRequest) as error:
                     if error.delivery == Delivery.NOT_SUBMITTED:
                         self.receipts.save(receipt)
                     raise
-                self.receipts.save(replace(receipt, phase="done"))
+                self._settle(receipt)
                 self.state = "ready"
                 self.detail = "Retained scan completed; waiting for scheduled or queued collection."
                 return True
         self.state = "ready"
         return False
+
+    def _decide(self, evidence: Evidence) -> InvestigationDecision:
+        if self.operator is not None:
+            return self.operator.decide(evidence, self.receipts.all())
+        requested = evidence.is_baseline or bool(evidence.changes)
+        return InvestigationDecision(
+            requested,
+            "Baseline or changed observations"
+            if requested
+            else "No changes to investigate",
+            utc_now(),
+        )
+
+    def _settle(self, receipt: Receipt) -> None:
+        if self.rollups is not None:
+            self.rollups.record(receipt)
+        self.receipts.save(replace(receipt, phase="done"))
+
+    async def _upload_evidence(self, receipt: Receipt) -> Receipt:
+        evidence = receipt.evidence
+        if evidence is None:
+            raise ValueError("Evidence is unavailable")
+        self.state = "retaining" if receipt.phase != "done" else self.state
+        self.operation = "information.upload"
+        pin = receipt.phase == "done"
+        self.receipts.save(
+            replace(receipt, pin_pending=True)
+            if pin
+            else replace(receipt, phase="uploading")
+        )
+        try:
+            retained = await self.port.upload(
+                evidence, str(uuid5(UUID(receipt.scan_id), "evidence"))
+            )
+        except (Refusal, TransportError, CancelledRequest) as error:
+            if isinstance(error, Refusal) or error.delivery == Delivery.NOT_SUBMITTED:
+                self.receipts.save(receipt)
+            raise
+        confirmed = replace(
+            receipt,
+            phase="done" if pin else "uploaded",
+            revision=uuid(retained.revision),
+            pin_pending=False,
+        )
+        self.receipts.save(confirmed)
+        return confirmed
+
+    def _scan(self, scan_id: str) -> Receipt | None:
+        return next(
+            (item for item in self.receipts.all() if item.scan_id == scan_id), None
+        )
+
+    async def _retain_scan(self, receipt: Receipt) -> Receipt:
+        if receipt.phase != "done" or receipt.evidence is None:
+            raise ValueError("Choose a completed collection with local evidence")
+        if receipt.revision is not None:
+            return receipt
+        if receipt.pin_pending:
+            return await self._confirm_upload(receipt)
+        return await self._upload_evidence(receipt)
+
+    async def _retain_comparison(self, receipt: Receipt) -> str | None:
+        if receipt.evidence is None:
+            raise ValueError("Evidence is unavailable")
+        if receipt.comparison_revision is not None:
+            return receipt.comparison_revision
+        if (
+            receipt.evidence.previous_revision is not None
+            or receipt.comparison_scan_id is None
+        ):
+            # The original payload already names this exact revision, or there
+            # was no comparable snapshot.
+            return None
+        previous = self._scan(receipt.comparison_scan_id)
+        if previous is None:
+            raise ValueError("The comparison snapshot has aged out of local evidence")
+        return (await self._retain_scan(previous)).revision
+
+    async def retain_for_investigation(self, scan_id: str) -> Receipt:
+        """Pin exact selected evidence before admitting an operator's investigation."""
+        async with self.lock:
+            receipt = self._scan(scan_id)
+            if receipt is None or receipt.phase != "done":
+                raise ValueError("The collection has aged out of local evidence")
+            comparison = await self._retain_comparison(receipt)
+            retained = await self._retain_scan(receipt)
+            if retained.comparison_revision != comparison:
+                retained = replace(retained, comparison_revision=comparison)
+                self.receipts.save(retained)
+            return retained
+
+    async def retain_scan_revision(self, scan_id: str) -> str:
+        """Pin the exact completed scan consumed by device research or assessment."""
+        async with self.lock:
+            receipt = self._scan(scan_id)
+            if receipt is None:
+                raise ValueError("The collection has aged out of local evidence")
+            revision = (await self._retain_scan(receipt)).revision
+            assert revision is not None
+            return revision
 
     async def _collect_with_presence(
         self,
@@ -307,7 +441,9 @@ class Worker:
             await asyncio.gather(collection, return_exceptions=True)
 
     def completion_request(self, receipt: Receipt) -> RelayPublishRequest:
-        if receipt.evidence is None or receipt.revision is None:
+        if receipt.evidence is None or (
+            receipt.revision is None and not receipt.local_completion
+        ):
             raise ValueError("Completion requires retained evidence")
         return RelayPublishRequest(
             project=self.config.project,
@@ -328,13 +464,24 @@ class Worker:
         the owning evidence revision always retains the complete comparison.
         """
         evidence = receipt.evidence
-        if evidence is None or receipt.revision is None:
+        if evidence is None or (
+            receipt.revision is None and not receipt.local_completion
+        ):
             raise ValueError("Completion requires retained evidence")
         row = {
-            "version": 1,
+            "version": 2 if receipt.local_completion else 1,
             "collector": self.config.collector,
             "scan_id": receipt.scan_id,
-            "revision": receipt.revision,
+            **({"revision": receipt.revision} if not receipt.local_completion else {}),
+            **(
+                {
+                    "comparison_revision": receipt.comparison_revision,
+                    "comparison_scan_id": receipt.comparison_scan_id,
+                }
+                if receipt.comparison_revision is not None
+                and not receipt.local_completion
+                else {}
+            ),
             "mode": evidence.mode,
             "changes": evidence.changes
             if receipt.investigation is None or receipt.investigation.requested
@@ -451,26 +598,10 @@ class Worker:
                     )
                 self.receipts.save_publication(replace(publication, state="published"))
             for receipt in self.receipts.all():
+                # Optional pins belong to their next evidence consumer. A
+                # missing optional receipt cannot fence unrelated collection.
                 if receipt.phase == "uploading":
-                    if receipt.evidence is None:
-                        raise ValueError("No evidence to reconcile")
-                    sources = await self.port.sources(evidence_name(receipt.evidence))
-                    matches = [
-                        source
-                        for source in sources
-                        if source.source_name == evidence_name(receipt.evidence)
-                    ]
-                    if (
-                        len(matches) != 1
-                        or await self.port.read_source(matches[0].id)
-                        != receipt.evidence.encode()
-                    ):
-                        raise ReconciliationRequired(
-                            "Evidence upload remains unknown; no mutation was replayed"
-                        )
-                    self.receipts.save(
-                        replace(receipt, phase="uploaded", revision=matches[0].id)
-                    )
+                    await self._confirm_upload(receipt)
                 elif receipt.phase == "publishing":
                     expected = self.completion_request(receipt)
                     event = await self.port.find_event(
@@ -484,9 +615,34 @@ class Worker:
                         raise ReconciliationRequired(
                             "Completion publication remains unknown"
                         )
-                    self.receipts.save(replace(receipt, phase="done"))
+                    self._settle(receipt)
             if self.attention is not None:
                 await self.attention.reconcile()
+
+    async def _confirm_upload(self, receipt: Receipt) -> Receipt:
+        if receipt.evidence is None:
+            raise ValueError("No evidence to reconcile")
+        name = evidence_name(receipt.evidence)
+        matches = [
+            source
+            for source in await self.port.sources(name)
+            if source.source_name == name
+        ]
+        if (
+            len(matches) != 1
+            or await self.port.read_source(matches[0].id) != receipt.evidence.encode()
+        ):
+            raise ReconciliationRequired(
+                "Evidence upload remains unknown; no mutation was replayed"
+            )
+        confirmed = replace(
+            receipt,
+            phase="done" if receipt.pin_pending else "uploaded",
+            revision=uuid(matches[0].id),
+            pin_pending=False,
+        )
+        self.receipts.save(confirmed)
+        return confirmed
 
     async def release_absent_completion(self, scan_id: str) -> bool:
         """Explicit operator recovery for a completion the server never retained.
@@ -539,7 +695,7 @@ class Worker:
                     raise ReconciliationRequired(
                         "A different retained event holds this completion identity"
                     )
-                self.receipts.save(replace(receipt, phase="done"))
+                self._settle(receipt)
                 return False
             oldest = await self.port.oldest_event(expected.topic)
             if oldest is None or not earlier(oldest.occurred_at, expected.occurred_at):
@@ -547,7 +703,12 @@ class Worker:
                     "The retained log no longer reaches back before this completion; "
                     "its absence cannot be established"
                 )
-            self.receipts.save(replace(receipt, phase="uploaded"))
+            self.receipts.save(
+                replace(
+                    receipt,
+                    phase="collected" if receipt.local_completion else "uploaded",
+                )
+            )
             return True
 
     def presence_view(self) -> PresenceView:
@@ -649,6 +810,9 @@ class Worker:
         try:
             await self._run(stop, external, apply_settings, recover)
         finally:
+            if self._rollup_task is not None:
+                self._rollup_task.cancel()
+                await asyncio.gather(self._rollup_task, return_exceptions=True)
             await self.stop_facts()
 
     async def _run(
@@ -679,6 +843,12 @@ class Worker:
                         await self.port.available_topics()
                         idle_check_due = now + 30.0
                 await self.poll()
+                if self._advance_rollups is not None and (
+                    self._rollup_task is None or self._rollup_task.done()
+                ):
+                    if self._rollup_task is not None:
+                        self._rollup_task.result()
+                    self._rollup_task = asyncio.ensure_future(self._advance_rollups())
                 if self.attention is not None:
                     self.attention.recovered()
                     if self.attention.pending:

@@ -18,20 +18,25 @@ Application's `reasoning` binding.
 2. Python probes explicitly configured IP addresses and TCP ports. It can also
    read Pi-hole v6 device associations and recent DNS queries, or a normalized DNS
    observation export from an external monitoring system.
-3. The collector compares observations, uploads evidence to the project's
-   information store and publishes a completion event with retained identities.
+3. The collector compares observations and publishes a completion event.
+   Routine snapshots stay in the local journal. When an investigation needs
+   evidence, the collector retains the exact current and comparable prior
+   snapshots in the project's information store before admitting the work.
 4. Relay starts an investigation for a baseline or changed observations when the
    collector's operator admission policy permits it. Coverage changes remain findings;
    unchanged gaps remain visible evidence. A coordinator works with an analyst and reviewer to retain a
    draft report linked to its source evidence.
 5. The dashboard displays health, device history, expected findings, collection
-   receipts, observations, gaps and related
-   reports. Agents also get granted named tools for requesting a scan and reading
+   receipts grouped by household day, observations, gaps and related reports.
+   The collector publishes one Markdown document per completed day and one
+   rollup per completed month with collected data. Agents also get granted named
+   tools for requesting a scan and reading
    its scope, status, evidence and DNS destinations. Operator labels and observed
    device identities accompany evidence, with explicit gaps for unavailable data.
 
-Python handles collection and comparison. Plowshare owns scheduling, retained
-evidence and investigation work. The LLM contributes interpretation and review.
+Python handles collection, comparison and rollup assembly. Plowshare owns
+scheduling, published reports, retained investigation evidence and investigation
+work. The LLM contributes interpretation and review to investigations.
 A scan publication, completed collection and completed investigation are separate
 outcomes.
 

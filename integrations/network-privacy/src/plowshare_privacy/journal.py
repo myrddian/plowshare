@@ -1,4 +1,4 @@
-"""Adapter-owned receipts. The project information store owns retained evidence.
+"""Adapter-owned receipts and exact local scan evidence.
 
 The journal is one small index plus one immutable evidence file per scan, so a
 phase change rewrites a few hundred kilobytes at most, never every retained
@@ -61,6 +61,10 @@ class Receipt:
     evidence: Evidence | None = None
     revision: str | None = None
     investigation: InvestigationDecision | None = None
+    local_completion: bool = False
+    comparison_scan_id: str | None = None
+    comparison_revision: str | None = None
+    pin_pending: bool = False
 
     @classmethod
     def decode(cls, value: object) -> Receipt:
@@ -75,7 +79,13 @@ class Receipt:
                 "evidence",
                 "revision",
             },
-            {"investigation"},
+            {
+                "investigation",
+                "local_completion",
+                "comparison_scan_id",
+                "comparison_revision",
+                "pin_pending",
+            },
         )
         phases: tuple[Phase, ...] = (
             "queued",
@@ -94,11 +104,29 @@ class Receipt:
         revision = uuid(row["revision"]) if row["revision"] is not None else None
         scan_id = uuid(row["scan_id"])
         source_event = text(row["source_event"])
+        local_completion = row.get("local_completion", False)
+        pin_pending = row.get("pin_pending", False)
+        investigation = (
+            InvestigationDecision.decode(row["investigation"])
+            if row.get("investigation") is not None
+            else None
+        )
         if (
-            phase != "queued"
+            not isinstance(local_completion, bool)
+            or not isinstance(pin_pending, bool)
+            or phase != "queued"
             and evidence is None
             or phase in {"uploaded", "publishing", "done"}
             and revision is None
+            and not local_completion
+            or local_completion
+            and (
+                investigation is None
+                or investigation.requested
+                or phase not in {"collected", "publishing", "done"}
+            )
+            or pin_pending
+            and (phase != "done" or not local_completion or revision is not None)
         ):
             raise ValueError("Receipt is missing committed evidence")
         if evidence and (
@@ -113,9 +141,15 @@ class Receipt:
             phase,
             evidence,
             revision,
-            InvestigationDecision.decode(row["investigation"])
-            if row.get("investigation") is not None
+            investigation,
+            local_completion,
+            uuid(row["comparison_scan_id"])
+            if row.get("comparison_scan_id") is not None
             else None,
+            uuid(row["comparison_revision"])
+            if row.get("comparison_revision") is not None
+            else None,
+            pin_pending,
         )
 
 
@@ -202,9 +236,11 @@ class FileReceipts:
     missing or altered evidence refuses to open; an evidence file the index does
     not name is the remains of an interrupted write and is removed.
 
-    Retention. A scan may leave only when it is ``done`` and has a retained
-    revision, so the project information store still owns its evidence. Such a
-    scan leaves once it finished more than ``RETAINED_SCAN_DAYS`` ago, or when
+    Retention. A scan may leave once it is ``done`` with confirmed remote or
+    local-only completion and no outstanding pin. A local predecessor needed
+    by a still-retained scan stays until that comparison can be read remotely
+    or its dependent scan leaves. Otherwise a scan leaves once it finished
+    more than ``RETAINED_SCAN_DAYS`` ago, or when
     the journal exceeds ``MAX_RETAINED_SCANS``; the newest ``MIN_RETAINED_SCANS``
     settled scans always stay. Unsettled scans never leave, whatever their age.
     Leaving is one index write that removes the receipt, folds its per-address
@@ -422,6 +458,10 @@ class FileReceipts:
                 evidence=receipt.evidence,
                 revision=receipt.revision,
                 investigation=receipt.investigation,
+                local_completion=receipt.local_completion,
+                comparison_scan_id=receipt.comparison_scan_id,
+                comparison_revision=receipt.comparison_revision,
+                pin_pending=receipt.pin_pending,
             )
             != receipt
         ):
@@ -536,7 +576,8 @@ class FileReceipts:
             item
             for item in state.receipts.values()
             if item.phase == "done"
-            and item.revision is not None
+            and (item.revision is not None or item.local_completion)
+            and not item.pin_pending
             and item.evidence is not None
         ]
         candidates = settled[: max(0, len(settled) - MIN_RETAINED_SCANS)]
@@ -550,6 +591,16 @@ class FileReceipts:
             )
             if finished < horizon or len(leaving) < excess:
                 leaving.append(item)
+        departing = {item.scan_id for item in leaving}
+        needed = {
+            item.comparison_scan_id
+            for item in state.receipts.values()
+            if item.scan_id not in departing
+            and item.comparison_revision is None
+            and item.evidence is not None
+            and item.evidence.previous_revision is None
+        }
+        leaving = [item for item in leaving if item.scan_id not in needed]
         if not leaving:
             return state
         carried = state.carried
