@@ -84,9 +84,22 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.worker.config = replace(self.config, time_zone="Australia/Melbourne")
         for index in range(55):
             scan = str(uuid4())
-            self.receipts.save(
-                Receipt(scan, scan, "schedule.due", "2026-11-24T00:00:00Z")
-            )
+            stamp = "2026-11-24T00:00:00Z"
+            receipt = Receipt(scan, scan, "schedule.due", stamp)
+            if index < 2:
+                evidence = await self.collector.collect(scan, scan, None, None)
+                issues = (
+                    (
+                        "dns_truncated: device sample limit",
+                        "dns_truncated: combined destination limit",
+                        "Unclassified historical note",
+                    )
+                    if index == 0
+                    else ("dns_truncated: device sample limit",)
+                )
+                evidence = replace(evidence, finished_at=stamp, issues=issues)
+                receipt = replace(receipt, evidence=evidence, phase="done")
+            self.receipts.save(receipt)
         earlier = str(uuid4())
         self.receipts.save(
             Receipt(earlier, earlier, "schedule.due", "2026-11-23T12:59:00Z")
@@ -98,7 +111,16 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
             [group["day"] for group in groups], ["2026-11-24", "2026-11-23"]
         )
         self.assertEqual(len(groups[0]["scans"]), 55)
+        self.assertEqual(
+            groups[0]["coverage"],
+            [
+                {"kind": "dns_truncated", "collections": 2},
+                {"kind": "other", "collections": 1},
+            ],
+        )
+        self.assertEqual(sum(scan["baseline"] for scan in groups[0]["scans"]), 2)
         self.assertEqual(groups[1]["scans"][0]["scan_id"], earlier)
+        self.assertEqual(groups[1]["coverage"], [])
 
     async def test_named_tools_request_and_read_same_relay_collection(self) -> None:
         response = await self.client.get("/api/tools", headers=self.headers)

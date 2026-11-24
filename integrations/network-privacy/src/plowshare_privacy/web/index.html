@@ -187,112 +187,6 @@
         </section>
 
 
-        <aside id="side-pane" class="side-pane" aria-labelledby="pane-title" hidden>
-          <div class="pane-head">
-            <h2 id="pane-title" tabindex="-1">Device</h2>
-            <div class="actions"><button id="pane-back" type="button" class="secondary" hidden>Back to device</button><button id="pane-close" type="button" class="quiet">Close</button></div>
-          </div>
-          <nav id="pane-nav" class="pane-nav" aria-label="Sections of this device" hidden></nav>
-          <div id="pane-body" class="pane-body">
-            <div id="device-view" hidden>
-              <div id="device-identity"></div>
-              <div id="device-assessment"></div>
-              <div id="device-facts"></div>
-              <div id="device-analysis"></div>
-              <div id="device-history"></div>
-            </div>
-            <div class="pane-editor">
-            <form id="profile-form" hidden>
-              <h3 id="profile-editor-title">Device profile</h3>
-              <p id="profile-mac" class="hint"></p>
-              <button id="profile-bind-mac" type="button" class="secondary" hidden>Confirm observed MAC for this profile</button>
-              <label>Name<input id="profile-name" maxlength="128" required></label>
-              <label>Owner or responsible person<input id="profile-owner" maxlength="128"></label>
-              <label>Model<input id="profile-model" maxlength="128"></label>
-              <label>Associated monitored addresses<select id="profile-addresses" multiple required></select></label>
-              <label>Purpose<textarea id="profile-purpose" maxlength="512" rows="2"></textarea></label>
-              <label>Expected services and behaviour<textarea id="profile-expected" maxlength="1024" rows="3"></textarea></label>
-              <label class="wide">Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
-              <fieldset><legend>Linked privacy issues and mitigation progress</legend><p class="hint">Choose up to four issues. Links retain the reviewed plan; progress is your report of actions performed separately.</p><div id="profile-issue-links"></div></fieldset>
-              <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p>
-              <div class="actions"><button id="save-profile" type="submit">Save profile</button><button id="cancel-profile" type="button" class="quiet">Close editor</button></div>
-            </form>
-            <div id="profile-history"></div>
-            <div id="profile-markdown" class="document-reader" hidden></div>
-            </div>
-            <section id="device-research" class="pane-section" aria-labelledby="research-title" hidden>
-              <h3 id="research-title">Product and advisories</h3>
-              <p id="research-observation" class="hint"></p>
-              <div class="actions"><button id="research-unifi" type="button" class="secondary">Read UniFi product details</button></div>
-              <p id="research-unifi-result" role="status" class="hint"></p>
-              <form id="research-form" class="form-grid">
-                <label>Public manufacturer and exact model<input id="research-model" maxlength="128" required></label>
-                <p class="hint" id="research-search-status">Advisory search sends only this public model name to NVD. Review it before searching.</p>
-                <div class="actions"><button id="research-search" type="submit">Look up advisories</button><button id="research-profile" type="button" class="secondary">Use model in profile editor</button><button id="close-research" type="button" class="quiet">Close lookup</button></div>
-              </form>
-              <div id="research-results" aria-live="polite"></div>
-            </section>
-            <div class="pane-editor">
-            <form id="background-draft" hidden>
-              <h3>Agent research draft: <span id="background-draft-title"></span></h3>
-              <div id="background-draft-content"></div>
-              <label>Confirmed public model, if known<input id="background-draft-model" maxlength="128"></label>
-              <label>Feedback for the model<textarea id="background-draft-feedback" maxlength="512" rows="2"></textarea></label>
-              <div class="actions">
-                <button type="submit" id="background-draft-research">Research with feedback</button>
-                <button type="button" id="background-draft-editor" class="secondary">Use draft in profile editor</button>
-                <button type="button" id="background-draft-reviewed" class="secondary">Mark reviewed</button>
-                <button type="button" id="background-draft-dismiss" class="danger">Dismiss draft</button>
-              </div>
-            </form>
-            </div>
-            <div class="pane-editor">
-            <form id="issue-form" hidden>
-              <h3 id="issue-editor-title">Privacy issue</h3>
-              <label>Title<input id="issue-title" maxlength="128" required></label>
-              <label>Known issue and supporting facts<textarea id="issue-description" rows="3" maxlength="1024" required></textarea></label>
-              <label>Affected manufacturers and models<textarea id="issue-models" rows="2" maxlength="1024" required></textarea></label>
-              <label>Firmware versions (write unknown when unconfirmed)<input id="issue-firmware" maxlength="1024" required></label>
-              <label>Relevant settings and conditions<textarea id="issue-conditions" rows="2" maxlength="1024" required></textarea></label>
-              <label>Sources last checked<input id="issue-checked" type="date" required></label>
-              <fieldset><legend>Source citations</legend><div id="issue-sources"></div><button id="add-issue-source" type="button" class="secondary">Add source</button></fieldset>
-              <fieldset class="mitigation"><legend>Proposed mitigation for a linked device</legend>
-                <label>Mechanism<select id="issue-mechanism"><option value="firewall">Router or firewall rule</option><option value="pihole">Pi-hole domain block</option><option value="segmentation">Network segmentation</option><option value="device_setting">Device privacy setting</option></select></label>
-                <label>Direction<select id="issue-direction"><option value="outbound">Outbound from device</option><option value="inbound">Inbound to device</option><option value="lateral">Between local devices</option><option value="not_applicable">Not a traffic rule</option></select></label>
-                <label>Action<select id="issue-action"><option value="block">Block</option><option value="restrict">Restrict</option><option value="disable">Disable setting or service</option></select></label>
-                <label>Source<select id="issue-source-kind"><option value="device">This device</option><option value="peer">An IP, network or the internet</option></select></label>
-                <label id="issue-source-address-label">Source IP or network<input id="issue-source" maxlength="253" required placeholder="Exact source IP/CIDR or internet"></label>
-                <label id="issue-destination-choice-label">Destination<select id="issue-destination-kind"><option value="peer">An IP, network or the internet</option><option value="device">This device</option></select></label>
-                <label id="issue-destination-address-label">Destination IP/domain or setting<input id="issue-destination" maxlength="253" required placeholder="IP/CIDR or internet · domain · setting"></label>
-                <label>Protocol<select id="issue-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">All protocols</option><option value="not_applicable">Not a port rule</option></select></label>
-                <label>Destination ports<input id="issue-ports" placeholder="Up to eight comma-separated ports"></label>
-                <p id="issue-rule-help" class="hint"></p>
-                <label class="wide">Why this mitigation addresses the issue<textarea id="issue-reason" maxlength="768" rows="2" required></textarea></label>
-                <label class="wide">Expected impact and features to test<textarea id="issue-impact" maxlength="768" rows="2" required></textarea></label>
-                <label class="wide">Verification procedure<textarea id="issue-verification" maxlength="768" rows="3" required></textarea></label>
-                <label class="wide">Rollback procedure<textarea id="issue-rollback" maxlength="768" rows="2" required></textarea></label>
-              </fieldset>
-              <p class="hint">Save this shared issue first, then open a device profile to record applicability and progress. A listening-port scan cannot establish outbound traffic or that a mitigation works.</p>
-              <div class="actions"><button id="save-issue" type="submit">Save issue</button><button id="cancel-issue" type="button" class="quiet">Close editor</button></div>
-            </form>
-            <div id="issue-history"></div>
-            <div id="issue-markdown" class="document-reader" hidden></div>
-            </div>
-          </div>
-        </aside>
-
-        <section id="background-research" class="panel" hidden>
-          <div class="panel-heading"><h2>Background device profiles</h2><span id="background-research-count"></span></div>
-          <div class="panel-body">
-            <p>Use recent quick sightings to draft profiles with Plowshare. The model sees device-name, vendor and service clues. NVD receives only confirmed public model names.</p>
-            <label class="check"><input type="checkbox" id="background-research-enabled"> Enable background profile research</label>
-            <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions a day. Review each draft before saving a profile.</p>
-            <div class="actions"><button type="button" id="background-research-load" class="secondary">Load drafts and activity</button></div>
-            <p id="background-research-detail" role="status" class="hint"></p>
-            <div id="background-research-list" class="entries"></div>
-          </div>
-        </section>
-
         <section id="background-assessments" class="panel" hidden>
           <div class="panel-heading"><h2>Background device assessments</h2></div>
           <div class="panel-body">
@@ -327,17 +221,6 @@
           </div>
         </section>
 
-        <details id="device-profiles" class="panel" hidden>
-          <summary class="panel-heading"><h2>Device knowledge base</h2><span>Project documents · operator-confirmed context</span></summary>
-          <div class="panel-body">
-            <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
-            <div class="actions"><button id="new-profile" type="button" class="secondary">Create device profile</button><button id="load-profiles" type="button" class="secondary">Load profiles</button><button id="reconcile-profiles" type="button" class="secondary">Check retained writes</button></div>
-            <p id="profile-detail" class="hint">Load existing profiles or create one for a monitored device. A profile opens beside the list for reading and editing.</p>
-            <div id="profile-records" class="entries"></div>
-            <div id="profile-intents" class="hint"></div>
-          </div>
-        </details>
-
         <details id="privacy-issues" class="panel" hidden>
           <summary class="panel-heading"><h2>Privacy issues and mitigations</h2><span>Shared issue documents · proposed actions</span></summary>
           <div class="panel-body">
@@ -361,12 +244,135 @@
       </section>
 
       <section id="view-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
-        <div class="workspace">
-          <section class="panel"><div class="panel-heading"><h2>Collections</h2><span id="collection-zone">By day</span></div><p id="collection-rollup-detail" class="notice" role="status" hidden></p><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section>
-          <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="quiet reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Each collection keeps its scope, observations, changes and gaps. Select one to inspect the evidence.</p></div></section>
-        </div>
-        <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. Missing sources remain visible as coverage gaps.</p>
+        <nav class="view-nav evidence-nav" role="tablist" aria-label="Evidence sections">
+          <button id="evidence-tab-collections" type="button" role="tab" aria-selected="true" aria-controls="evidence-view-collections">Collections</button>
+          <button id="evidence-tab-profiles" type="button" role="tab" aria-selected="false" aria-controls="evidence-view-profiles" tabindex="-1">Device profiles</button>
+        </nav>
+        <section id="evidence-view-collections" role="tabpanel" aria-labelledby="evidence-tab-collections">
+          <div class="workspace">
+            <section class="panel"><div class="panel-heading"><h2>Collection days</h2><span id="collection-zone"></span></div><p id="collection-rollup-detail" class="notice" role="status" hidden></p><div id="collections" class="entries"><p class="empty">Loading collections…</p></div></section>
+            <section id="evidence-panel" class="panel reader-panel"><div class="panel-heading"><h2>Collection evidence</h2><span id="selection">Select a collection</span><button id="close-evidence" type="button" class="quiet reader-close">Close</button></div><div id="evidence" class="evidence"><p class="empty">Select a collection to see its observations and coverage.</p></div></section>
+          </div>
+          <p class="limit footnote">An observed DNS lookup does not reveal its encrypted payload. Missing sources remain visible as coverage gaps.</p>
+        </section>
+        <section id="evidence-view-profiles" role="tabpanel" aria-labelledby="evidence-tab-profiles" hidden>
+          <details id="background-research" class="panel" hidden>
+            <summary class="panel-heading"><h2>Background drafts</h2><span id="background-research-count"></span></summary>
+            <div class="panel-body">
+              <p>Use recent quick sightings to draft profiles with Plowshare. The model sees device-name, vendor and service clues. NVD receives only confirmed public model names.</p>
+              <label class="check"><input type="checkbox" id="background-research-enabled"> Enable background profile research</label>
+              <p class="hint">Requires quick presence checks. One draft runs at a time, up to four admissions a day. Review each draft before saving a profile.</p>
+              <div class="actions"><button type="button" id="background-research-load" class="secondary">Load drafts and activity</button></div>
+              <p id="background-research-detail" role="status" class="hint"></p>
+              <div id="background-research-list" class="entries"></div>
+            </div>
+          </details>
+          <details id="device-profiles" class="panel" hidden>
+            <summary class="panel-heading"><h2>Saved profiles</h2></summary>
+            <div class="panel-body">
+              <p>Profiles are Markdown documents in this Application's Plowshare project. Document access applies to their chapters and sections. Address associations describe operator confirmation, not proof of physical identity.</p>
+              <div class="actions"><button id="new-profile" type="button" class="secondary">Create device profile</button><button id="load-profiles" type="button" class="secondary">Load profiles</button><button id="reconcile-profiles" type="button" class="secondary">Check retained writes</button></div>
+              <p id="profile-detail" class="hint">Load existing profiles or create one for a monitored device. A profile opens beside the list for reading and editing.</p>
+              <div id="profile-records" class="entries"></div>
+              <div id="profile-intents" class="hint"></div>
+            </div>
+          </details>
+        </section>
       </section>
+
+      <aside id="side-pane" class="side-pane" aria-labelledby="pane-title" hidden>
+        <div class="pane-head">
+          <h2 id="pane-title" tabindex="-1">Device</h2>
+          <div class="actions"><button id="pane-back" type="button" class="secondary" hidden>Back to device</button><button id="pane-close" type="button" class="quiet">Close</button></div>
+        </div>
+        <nav id="pane-nav" class="pane-nav" aria-label="Sections of this device" hidden></nav>
+        <div id="pane-body" class="pane-body">
+          <div id="device-view" hidden>
+            <div id="device-identity"></div>
+            <div id="device-assessment"></div>
+            <div id="device-facts"></div>
+            <div id="device-analysis"></div>
+            <div id="device-history"></div>
+          </div>
+          <div class="pane-editor profile-pane-editor">
+          <form id="profile-form" hidden>
+            <h3 id="profile-editor-title">Device profile</h3>
+            <p id="profile-mac" class="hint"></p>
+            <button id="profile-bind-mac" type="button" class="secondary" hidden>Confirm observed MAC for this profile</button>
+            <label>Name<input id="profile-name" maxlength="128" required></label>
+            <label>Owner or responsible person<input id="profile-owner" maxlength="128"></label>
+            <label>Model<input id="profile-model" maxlength="128"></label>
+            <label>Associated monitored addresses<select id="profile-addresses" multiple required></select></label>
+            <label>Purpose<textarea id="profile-purpose" maxlength="512" rows="2"></textarea></label>
+            <label>Expected services and behaviour<textarea id="profile-expected" maxlength="1024" rows="3"></textarea></label>
+            <label class="wide">Operator notes<textarea id="profile-notes" maxlength="2048" rows="4"></textarea></label>
+            <fieldset><legend>Linked privacy issues and mitigation progress</legend><p class="hint">Choose up to four issues. Links retain the reviewed plan; progress is your report of actions performed separately.</p><div id="profile-issue-links"></div></fieldset>
+            <p class="hint">Saving creates a new immutable Information revision. It does not change scanning scope or network settings. Existing source-processing allowances apply.</p>
+            <div class="actions"><button id="save-profile" type="submit">Save profile</button><button id="cancel-profile" type="button" class="quiet">Close editor</button></div>
+          </form>
+          <div id="profile-history"></div>
+          <div id="profile-markdown" class="document-reader" hidden></div>
+          </div>
+          <section id="device-research" class="pane-section" aria-labelledby="research-title" hidden>
+            <h3 id="research-title">Product and advisories</h3>
+            <p id="research-observation" class="hint"></p>
+            <div class="actions"><button id="research-unifi" type="button" class="secondary">Read UniFi product details</button></div>
+            <p id="research-unifi-result" role="status" class="hint"></p>
+            <form id="research-form" class="form-grid">
+              <label>Public manufacturer and exact model<input id="research-model" maxlength="128" required></label>
+              <p class="hint" id="research-search-status">Advisory search sends only this public model name to NVD. Review it before searching.</p>
+              <div class="actions"><button id="research-search" type="submit">Look up advisories</button><button id="research-profile" type="button" class="secondary">Use model in profile editor</button><button id="close-research" type="button" class="quiet">Close lookup</button></div>
+            </form>
+            <div id="research-results" aria-live="polite"></div>
+          </section>
+          <div class="pane-editor profile-pane-editor">
+          <form id="background-draft" hidden>
+            <h3>Agent research draft: <span id="background-draft-title"></span></h3>
+            <div id="background-draft-content"></div>
+            <label>Confirmed public model, if known<input id="background-draft-model" maxlength="128"></label>
+            <label>Feedback for the model<textarea id="background-draft-feedback" maxlength="512" rows="2"></textarea></label>
+            <div class="actions">
+              <button type="submit" id="background-draft-research">Research with feedback</button>
+              <button type="button" id="background-draft-editor" class="secondary">Use draft in profile editor</button>
+              <button type="button" id="background-draft-reviewed" class="secondary">Mark reviewed</button>
+              <button type="button" id="background-draft-dismiss" class="danger">Dismiss draft</button>
+            </div>
+          </form>
+          </div>
+          <div class="pane-editor device-pane-editor">
+          <form id="issue-form" hidden>
+            <h3 id="issue-editor-title">Privacy issue</h3>
+            <label>Title<input id="issue-title" maxlength="128" required></label>
+            <label>Known issue and supporting facts<textarea id="issue-description" rows="3" maxlength="1024" required></textarea></label>
+            <label>Affected manufacturers and models<textarea id="issue-models" rows="2" maxlength="1024" required></textarea></label>
+            <label>Firmware versions (write unknown when unconfirmed)<input id="issue-firmware" maxlength="1024" required></label>
+            <label>Relevant settings and conditions<textarea id="issue-conditions" rows="2" maxlength="1024" required></textarea></label>
+            <label>Sources last checked<input id="issue-checked" type="date" required></label>
+            <fieldset><legend>Source citations</legend><div id="issue-sources"></div><button id="add-issue-source" type="button" class="secondary">Add source</button></fieldset>
+            <fieldset class="mitigation"><legend>Proposed mitigation for a linked device</legend>
+              <label>Mechanism<select id="issue-mechanism"><option value="firewall">Router or firewall rule</option><option value="pihole">Pi-hole domain block</option><option value="segmentation">Network segmentation</option><option value="device_setting">Device privacy setting</option></select></label>
+              <label>Direction<select id="issue-direction"><option value="outbound">Outbound from device</option><option value="inbound">Inbound to device</option><option value="lateral">Between local devices</option><option value="not_applicable">Not a traffic rule</option></select></label>
+              <label>Action<select id="issue-action"><option value="block">Block</option><option value="restrict">Restrict</option><option value="disable">Disable setting or service</option></select></label>
+              <label>Source<select id="issue-source-kind"><option value="device">This device</option><option value="peer">An IP, network or the internet</option></select></label>
+              <label id="issue-source-address-label">Source IP or network<input id="issue-source" maxlength="253" required placeholder="Exact source IP/CIDR or internet"></label>
+              <label id="issue-destination-choice-label">Destination<select id="issue-destination-kind"><option value="peer">An IP, network or the internet</option><option value="device">This device</option></select></label>
+              <label id="issue-destination-address-label">Destination IP/domain or setting<input id="issue-destination" maxlength="253" required placeholder="IP/CIDR or internet · domain · setting"></label>
+              <label>Protocol<select id="issue-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="any">All protocols</option><option value="not_applicable">Not a port rule</option></select></label>
+              <label>Destination ports<input id="issue-ports" placeholder="Up to eight comma-separated ports"></label>
+              <p id="issue-rule-help" class="hint"></p>
+              <label class="wide">Why this mitigation addresses the issue<textarea id="issue-reason" maxlength="768" rows="2" required></textarea></label>
+              <label class="wide">Expected impact and features to test<textarea id="issue-impact" maxlength="768" rows="2" required></textarea></label>
+              <label class="wide">Verification procedure<textarea id="issue-verification" maxlength="768" rows="3" required></textarea></label>
+              <label class="wide">Rollback procedure<textarea id="issue-rollback" maxlength="768" rows="2" required></textarea></label>
+            </fieldset>
+            <p class="hint">Save this shared issue first, then open a device profile to record applicability and progress. A listening-port scan cannot establish outbound traffic or that a mitigation works.</p>
+            <div class="actions"><button id="save-issue" type="submit">Save issue</button><button id="cancel-issue" type="button" class="quiet">Close editor</button></div>
+          </form>
+          <div id="issue-history"></div>
+          <div id="issue-markdown" class="document-reader" hidden></div>
+          </div>
+        </div>
+      </aside>
 
       <section id="view-ask" class="ask-view" role="tabpanel" aria-labelledby="tab-ask" hidden>
         <h2 class="vh">Conversation</h2>
@@ -444,7 +450,7 @@
           <div class="panel-body">
             <dl id="background-usage" class="facts"></dl>
             <p class="hint">Days follow the household time zone above. Change these on the Devices tab, where their drafts and reports are reviewed.</p>
-            <div class="actions"><button id="open-background" type="button" class="secondary">Open background work on Devices</button></div>
+            <div class="actions"><button id="open-background" type="button" class="secondary">Open background work</button></div>
           </div>
         </section>
         <section id="reference-requests" class="panel" hidden>

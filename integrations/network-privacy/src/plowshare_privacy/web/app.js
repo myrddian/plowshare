@@ -5,6 +5,7 @@ let bearer = '';
 let authenticated = false;
 let selected = null;
 const expandedCollectionDays = new Set();
+const expandedCollectionCoverage = new Set();
 let collectionSignature = null;
 let selectedReport = null;
 let refreshPending = false;
@@ -62,9 +63,9 @@ const byId = (name) => document.getElementById(name);
 
 const views = {
   overview: ['Network overview', 'What is on the network, who it talks to, how much it sends and what cannot be seen.'],
-  devices: ['Your devices', 'Device observations, profiles and linked privacy issues.'],
+  devices: ['Your devices', 'Device observations and linked privacy issues.'],
   findings: ['Findings and investigations', 'Review observed changes and read investigation reports.'],
-  evidence: ['Collection evidence', 'Retained observations, comparisons and coverage gaps.'],
+  evidence: ['Evidence', 'Collections, coverage gaps and device profiles.'],
   ask: ['Ask Privacy Watch', 'Ask about your network and follow the work it hands off.'],
   settings: ['Monitoring settings', 'Devices, connections and investigation preferences.'],
 };
@@ -72,11 +73,11 @@ const views = {
 // Switching a view changes presentation only. Keep forms and retained outcomes
 // mounted so navigation cannot clear a draft, resubmit work or reset a pending control.
 let currentView = 'overview';
+const evidenceTabs = ['collections', 'profiles'];
+let evidenceTab = 'collections';
 let restoring = false;
-// The fragment carries the open view and device so reload and Back restore
-// them. It is never sent to the server and holds no credential.
-// The fragment keeps the tab and, on Devices only, the open device and the
-// list's filter and order, so reload, Back and a shared link restore them.
+// The fragment lets reload, Back and shared links restore the open view and
+// its selection. It is never sent to the server and holds no credential.
 // Filter changes replace the entry rather than adding one per click.
 function recordLocation(replace = false) {
   if (restoring || !globalThis.history?.pushState) return;
@@ -86,6 +87,7 @@ function recordLocation(replace = false) {
     if (selectedDevice) parts.push('device=' + encodeURIComponent(selectedDevice));
     parts.push(...listParams());
   }
+  if (currentView === 'evidence' && evidenceTab === 'profiles') parts.push('section=profiles');
   const target = parts.length ? '#' + parts.join('&') : '';
   if (location.hash !== target) history[replace ? 'replaceState' : 'pushState'](null, '', location.pathname + target);
 }
@@ -117,10 +119,40 @@ function showView(name, focusHeading = false) {
   byId('page-description').textContent = views[name][1];
   byId('page-title').scrollIntoView({block:'start'});
   if (focusHeading) byId('page-title').focus({preventScroll:true});
+  if (name === 'evidence') selectEvidenceTab(evidenceTab);
+  else syncPane();
   recordLocation();
   // Reading the conversation marks it read, so it is read only while it is shown.
   if (name === 'settings') {followReferences(overview); followRequests(overview, true);}
   if (name === 'ask') {renderAsk(); readAsk().catch(error => notice(error.message, true));}
+}
+function selectEvidenceTab(name) {
+  evidenceTab = name === 'profiles' && !byId('evidence-tab-profiles').hidden ? 'profiles' : 'collections';
+  for (const tab of evidenceTabs) {
+    const selected = tab === evidenceTab;
+    byId(`evidence-view-${tab}`).hidden = !selected;
+    byId(`evidence-tab-${tab}`).setAttribute('aria-selected', String(selected));
+    byId(`evidence-tab-${tab}`).tabIndex = selected ? 0 : -1;
+  }
+  syncPane();
+}
+function openEvidenceTab(name, focusHeading = false) {
+  selectEvidenceTab(name);
+  if (currentView !== 'evidence' || focusHeading) showView('evidence', focusHeading);
+  else recordLocation();
+}
+for (const name of evidenceTabs) {
+  const tab = byId(`evidence-tab-${name}`);
+  tab.addEventListener('click', () => openEvidenceTab(name));
+  tab.addEventListener('keydown', event => {
+    const visible = evidenceTabs.filter(item => !byId(`evidence-tab-${item}`).hidden);
+    const index = visible.indexOf(name);
+    const next = {ArrowLeft:(index + visible.length - 1) % visible.length, ArrowRight:(index + 1) % visible.length, Home:0, End:visible.length - 1}[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    openEvidenceTab(visible[next]);
+    byId(`evidence-tab-${visible[next]}`).focus();
+  });
 }
 for (const name of Object.keys(views)) {
   const tab = byId(`tab-${name}`);
@@ -309,9 +341,9 @@ async function api(path, options = {}) {
   }
   return response.json();
 }
-function listItems(parent, title, values) {
+function listItems(parent, title, values, empty = 'None recorded.') {
   parent.append(element('h3', title));
-  if (!values.length) {parent.append(element('p', 'None recorded.', 'hint')); return;}
+  if (!values.length) {parent.append(element('p', empty, 'hint')); return;}
   const list = element('ul');
   values.forEach(value => list.append(element('li', value)));
   parent.append(list);
@@ -329,7 +361,7 @@ async function showEvidence(scanId) {
     const group = entry.closest('details');
     if (group) group.open = true;
   }
-  showView('evidence', true);
+  openEvidenceTab('collections', true);
   byId('evidence-panel').classList.toggle('reading', true);
   const evidence = result.evidence;
   const panel = byId('evidence');
@@ -358,7 +390,7 @@ async function showEvidence(scanId) {
   }
   const assignments = evidence.snapshot.addressing || [];
   if (assignments.length) listItems(panel, 'Address assignment', assignments.map(item => `${item.address} · ${addressingLabel(item)}`));
-  listItems(panel, 'Changes against the previous collection', evidence.changes);
+  listItems(panel, 'Changes against the previous collection', evidence.changes, 'No changes detected in comparable observations.');
   listItems(panel, 'Coverage and gaps', evidence.issues);
   const raw = element('details');
   raw.append(element('summary', 'Details · evidence revision and raw observations'),
@@ -408,18 +440,47 @@ async function showReport(revision) {
   byId('report-panel').classList.toggle('reading', true);
   byId('report-content').scrollTop = 0;
 }
+const coverageLabels = {
+  dns_truncated: 'DNS sample limit reached',
+  dns_partial: 'Incomplete DNS coverage',
+  identity_stale: 'Stale device associations',
+  identity_unavailable: 'Missing device associations',
+  identity_ambiguous: 'Conflicting device associations',
+  tcp_incomplete: 'Unanswered TCP probes',
+  other: 'Other coverage gaps',
+};
+function collectionCoverage(day, coverage) {
+  const details = element('details', undefined, 'collection-coverage');
+  details.open = expandedCollectionCoverage.has(day);
+  details.addEventListener('toggle', () => {
+    if (details.open) expandedCollectionCoverage.add(day);
+    else expandedCollectionCoverage.delete(day);
+  });
+  const summary = element('summary', 'Coverage gaps');
+  summary.dataset.collectionFocus = day + '-coverage';
+  const notes = element('ul');
+  for (const note of coverage) {
+    const row = element('li');
+    const label = Object.hasOwn(coverageLabels, note.kind)
+      ? coverageLabels[note.kind] : statusLabel(note.kind);
+    row.append(element('span', label), element('small', plural(note.collections, 'collection', 'collections')));
+    notes.append(row);
+  }
+  details.append(summary, notes);
+  return details;
+}
 function renderCollections(days, zone = householdZone) {
-  const signature = JSON.stringify([householdZone, zone, days]);
+  const signature = JSON.stringify([zone, days]);
   if (signature === collectionSignature) return;
   collectionSignature = signature;
   const container = byId('collections');
-  byId('collection-zone').textContent = zone === householdZone ? 'By day' : zone;
-  let collectionTimes = whenFormat;
+  let collectionTimes;
   try {
-    if (zone !== householdZone) collectionTimes = timestampFormatter(zone);
+    collectionTimes = new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit', timeZone:zone});
   } catch (error) {
-    collectionTimes = timestampFormatter('UTC');
+    collectionTimes = new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit', timeZone:'UTC'});
   }
+  byId('collection-zone').textContent = collectionTimes.resolvedOptions().timeZone;
   const focused = document.activeElement?.dataset?.collectionFocus;
   container.replaceChildren();
   if (!days.length) {container.append(element('p', 'No collections yet. Request a scan or wait for the configured schedule.', 'empty')); return;}
@@ -427,31 +488,38 @@ function renderCollections(days, zone = householdZone) {
   for (const day of expandedCollectionDays) {
     if (!visibleDays.has(day)) expandedCollectionDays.delete(day);
   }
-  days.forEach(({day, scans}) => {
+  for (const day of expandedCollectionCoverage) {
+    if (!visibleDays.has(day)) expandedCollectionCoverage.delete(day);
+  }
+  const fullTimes = timestampFormatter(collectionTimes.resolvedOptions().timeZone);
+  days.forEach(({day, scans, coverage = []}) => {
     const group = element('details', undefined, 'collection-day');
     group.open = expandedCollectionDays.has(day);
     const summary = element('summary', undefined, 'collection-day-summary');
     summary.dataset.collectionFocus = day;
-    summary.append(element('strong', formatDay(day)), element('small', [
-      plural(scans.length, 'collection', 'collections'),
-      plural(scans.reduce((total, scan) => total + scan.change_count, 0), 'comparison entry', 'comparison entries'),
-      plural(scans.reduce((total, scan) => total + scan.issue_count, 0), 'coverage note', 'coverage notes'),
-    ].join(' · ')));
+    const changes = scans.reduce((total, scan) => total + scan.change_count, 0);
+    const count = plural(scans.length, 'collection', 'collections');
+    summary.append(element('strong', formatDay(day)), element('small',
+      changes ? `${count} · ${plural(changes, 'change', 'changes')}` : count));
     group.append(summary);
+    if (coverage.length) group.append(collectionCoverage(day, coverage));
     group.addEventListener('toggle', () => {
       if (group.open) expandedCollectionDays.add(day);
       else expandedCollectionDays.delete(day);
     });
     for (const scan of scans) {
-      const button = element('button', undefined, `entry${selected === scan.scan_id ? ' selected' : ''}`);
+      const button = element('button', undefined, `entry collection-entry${selected === scan.scan_id ? ' selected' : ''}`);
       button.type = 'button';
       button.dataset.collectionFocus = scan.scan_id;
       button.setAttribute('aria-current', String(selected === scan.scan_id));
+      button.title = formatTimestamp(scan.when, fullTimes);
       const row = element('span', undefined, 'entry-line');
-      const phase = scan.local_completion && scan.phase === 'done'
-        ? 'Collected' : phases[scan.phase] || statusLabel(scan.phase);
-      row.append(element('span', formatTimestamp(scan.when, collectionTimes)), element('span', phase, 'badge'));
-      button.append(row, element('small', `${plural(scan.change_count, 'comparison entry', 'comparison entries')} · ${plural(scan.issue_count, 'coverage note', 'coverage notes')}${scan.mode === 'fixture' ? ' · fixture' : ''}`));
+      row.append(element('span', formatTimestamp(scan.when, collectionTimes)));
+      if (scan.change_count) row.append(element('small', plural(scan.change_count, 'change', 'changes'), 'collection-change'));
+      else if (scan.baseline) row.append(element('small', 'Baseline'));
+      if (scan.phase !== 'done') row.append(element('small', phases[scan.phase] || statusLabel(scan.phase)));
+      if (scan.mode === 'fixture') row.append(element('small', 'Fixture'));
+      button.append(row);
       button.disabled = scan.phase === 'queued';
       button.addEventListener('click', () => showEvidence(scan.scan_id).catch(error => notice(error.message, true)));
       group.append(button);
@@ -490,6 +558,11 @@ async function refresh() {
     byId('fixture-banner').hidden = status.mode !== 'fixture';
     byId('device-profiles').hidden = !status.profiles_available;
     byId('background-research').hidden = !status.profile_research_available;
+    byId('evidence-tab-profiles').hidden = !status.profiles_available && !status.profile_research_available;
+    if (evidenceTab === 'profiles' && byId('evidence-tab-profiles').hidden) {
+      selectEvidenceTab('collections');
+      if (currentView === 'evidence') recordLocation(true);
+    }
     if (!researchBusy) byId('background-research-enabled').checked = !!status.profile_research_enabled;
     const waitingDrafts = status.profile_drafts_waiting || 0;
     byId('background-research-count').textContent = waitingDrafts ? formatCount(waitingDrafts) + ' awaiting review' : '';
@@ -574,6 +647,7 @@ byId('disconnect').addEventListener('click', async () => {
   bearer = ''; authenticated = false; selected = null; selectedReport = null; settingsLoaded = false; preferencesLoaded = false; overview = null; scheduleDraft = null; liveCron = null; deviceSignature = null; findingSignature = null; notified = null;
   collectionSignature = null;
   expandedCollectionDays.clear();
+  expandedCollectionCoverage.clear();
   for (const id of ['health','checklist','recovery','recent-runs','device-cards','moves','findings','q-third','q-silent','q-volume']) byId(id).replaceChildren();
   for (const id of ['q-network','q-third-coverage','device-shown','health-detail']) byId(id).textContent = '';
   byId('device-search').value = ''; byId('device-presence').value = 'observed'; byId('device-sort').value = 'attention';
@@ -881,12 +955,17 @@ const fragment = new URLSearchParams(location.hash.slice(1));
 const handoff = fragment.get('token');
 let pendingDevice = fragment.get('device');
 let pendingTab = Object.hasOwn(views, fragment.get('tab') || '') ? fragment.get('tab') : pendingDevice ? 'devices' : null;
+if (pendingTab === 'evidence' && fragment.get('section') === 'profiles') evidenceTab = 'profiles';
 // The list's filter and order apply once the first overview arrives; values
 // are checked against the allowlists then.
 let pendingList = pendingTab === 'devices' ? fragment : null;
 if (location.hash) {
   const listed = ['show', 'presence', 'order'].filter(key => /^[a-z]{1,16}$/.test(fragment.get(key) || '')).map(key => key + '=' + fragment.get(key));
-  const kept = [pendingTab && 'tab=' + pendingTab, ...(pendingTab === 'devices' ? [pendingDevice && 'device=' + encodeURIComponent(pendingDevice), ...listed] : [])].filter(Boolean);
+  const kept = [
+    pendingTab && 'tab=' + pendingTab,
+    pendingTab === 'evidence' && evidenceTab === 'profiles' && 'section=profiles',
+    ...(pendingTab === 'devices' ? [pendingDevice && 'device=' + encodeURIComponent(pendingDevice), ...listed] : []),
+  ].filter(Boolean);
   history.replaceState(null, '', location.pathname + (kept.length ? '#' + kept.join('&') : ''));
 }
 async function connectLocal() {
@@ -1121,45 +1200,56 @@ function actionButton(label, className, action) {
   return button;
 }
 
-// The side pane is the one place detail opens: a device, its profile editor,
-// an issue or an agent draft. Nothing scrolls the page to a distant form. An
-// editor or reader replaces the device view in place: it opens at the top of
-// the pane, Back returns to the device where it was scrolled, and focus goes
-// back to the control that opened it.
+// Devices and Evidence share a pane so pending edits survive switching tabs.
+// Each view exposes only its own editors.
 let selectedDevice = null;
 const deviceParts = ['device-identity','device-assessment','device-facts','device-analysis','device-history'];
-const editorParts = ['profile-form','profile-markdown','device-research','background-draft','issue-form','issue-markdown'];
+const deviceEditors = ['device-research','issue-form','issue-markdown'];
+const profileEditors = ['profile-form','profile-markdown','background-draft'];
 let paneReturn = null;
-function paneEditing() {return editorParts.some(id => byId(id).hidden === false);}
+function inProfiles() {return currentView === 'evidence' && evidenceTab === 'profiles';}
+function paneEditing() {
+  const editors = inProfiles() ? profileEditors : deviceEditors;
+  return editors.some(id => !byId(id).hidden);
+}
 function syncPane() {
-  const visible = id => byId(id).hidden === false;
-  const editing = paneEditing();
-  const device = selectedDevice && overview ? overview.devices.find(item => item.address === selectedDevice) : null;
+  const profiles = inProfiles();
+  const devices = currentView === 'devices';
+  const editing = (profiles || devices) && paneEditing();
+  const address = profiles ? profileEdit?.address : selectedDevice;
+  const device = address && overview?.devices.find(item => item.address === address);
+  const showDevice = devices && !!device && !editing;
+  const pane = byId('side-pane');
   const body = byId('pane-body');
-  const opened = editing && !paneReturn;
-  if (opened) paneReturn = {scroll: body.scrollTop, opener: document.activeElement};
-  byId('device-view').hidden = !device || editing;
-  byId('pane-nav').hidden = !device || editing;
+  const context = profiles ? 'profiles' : devices ? 'devices' : null;
+  const opened = editing && context !== paneReturn?.context;
+  if (opened) paneReturn = {context, scroll: body.scrollTop, opener: document.activeElement};
+  byId('device-view').hidden = !showDevice;
+  byId('pane-nav').hidden = !showDevice;
   byId('pane-back').hidden = !device || !editing;
-  // Without a device, an editor names what it edits; editProfile has already
-  // moved the selection to the profile's own device when it is monitored.
   byId('pane-title').textContent = device ? device.name
-    : visible('issue-form') || visible('issue-markdown') ? 'Privacy issue'
-    : visible('background-draft') ? 'Agent research draft'
-    : profileEdit ? (profileEdit.name ? 'Profile: ' + profileEdit.name : 'New device profile') : 'Device profile';
-  byId('side-pane').hidden = !device && !editing;
+    : profiles ? (!byId('background-draft').hidden ? 'Agent research draft'
+      : profileEdit?.name ? 'Profile: ' + profileEdit.name : 'New device profile')
+    : 'Privacy issue';
+  pane.classList.toggle('profiles-context', profiles);
+  pane.hidden = !showDevice && !editing;
   if (opened) body.scrollTop = 0;
-  if (!editing && paneReturn) {
+  if (!editing && context && context === paneReturn?.context) {
     const back = paneReturn; paneReturn = null;
-    if (device) body.scrollTop = back.scroll;
-    if (back.opener?.isConnected) back.opener.focus({preventScroll:true});
-    else if (device) byId('pane-title').focus({preventScroll:true});
+    if (showDevice) body.scrollTop = back.scroll;
+    if (back.opener?.isConnected && !back.opener.closest?.('[hidden]')) back.opener.focus({preventScroll:true});
+    else if (showDevice || profiles) byId(showDevice ? 'pane-title' : 'evidence-tab-profiles').focus({preventScroll:true});
   }
 }
-function closeEditors() {
+function clearProfileEditor() {
   profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren();
-  issueEdit = null; byId('issue-form').hidden = true; byId('issue-markdown').hidden = true; byId('issue-history').replaceChildren();
+}
+function closeProfileEditors() {
+  clearProfileEditor();
   clearBackgroundDraft();
+}
+function closeDeviceEditors() {
+  issueEdit = null; byId('issue-form').hidden = true; byId('issue-markdown').hidden = true; byId('issue-history').replaceChildren();
   clearDeviceResearch();
   syncPane();
 }
@@ -1175,7 +1265,7 @@ function openDevice(address, record = true) {
   const device = overview?.devices.find(item => item.address === address);
   if (!device) return;
   const changed = selectedDevice !== address;
-  if (changed) closeEditors();
+  if (changed) closeDeviceEditors();
   selectedDevice = address;
   renderDeviceView(device);
   markSelectedRow(); syncPane();
@@ -1190,7 +1280,7 @@ function closePane(record = true) {
   const address = selectedDevice;
   selectedDevice = null;
   for (const id of deviceParts) byId(id).replaceChildren();
-  closeEditors();
+  closeDeviceEditors();
   markSelectedRow(); syncPane();
   if (record) recordLocation();
   if (address) {
@@ -1198,12 +1288,24 @@ function closePane(record = true) {
     card?.querySelector('.device-summary')?.focus({preventScroll:true});
   }
 }
-byId('pane-close').addEventListener('click', () => closePane());
-byId('pane-back').addEventListener('click', closeEditors);
+byId('pane-close').addEventListener('click', () => {
+  if (inProfiles()) closeProfileEditors(); else closePane();
+});
+byId('pane-back').addEventListener('click', () => {
+  if (inProfiles()) {
+    const address = profileEdit?.address;
+    closeProfileEditors();
+    showView('devices');
+    openDevice(address);
+    byId('pane-title').focus({preventScroll:true});
+  } else closeDeviceEditors();
+});
 // Escape steps back once: out of an editor to its device, then out of the pane.
 byId('side-pane').addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
-  if (selectedDevice && paneEditing()) closeEditors(); else closePane();
+  if (inProfiles()) closeProfileEditors();
+  else if (selectedDevice && paneEditing()) closeDeviceEditors();
+  else closePane();
 });
 globalThis.addEventListener?.('popstate', () => {
   const params = new URLSearchParams(location.hash.slice(1));
@@ -1211,10 +1313,11 @@ globalThis.addEventListener?.('popstate', () => {
   restoring = true;
   try {
     const view = Object.hasOwn(views, tab || '') ? tab : address ? 'devices' : 'overview';
+    if (view === 'evidence') selectEvidenceTab(params.get('section'));
     if (view !== currentView) showView(view);
     applyListParams(params); filterDevices();
     if (address && overview?.devices.some(item => item.address === address)) openDevice(address, false);
-    else if (selectedDevice) closePane(false);
+    else if (view === 'devices' && selectedDevice) closePane(false);
   } finally {restoring = false;}
 });
 
@@ -1363,7 +1466,7 @@ async function loadDeviceAnalysis(device) {
       const matches = confirmed.length ? confirmed
         : profiles.filter(view => !view.profile.fields.device_mac && view.profile.fields.addresses.includes(device.address));
       if (matches.length > 1) {
-        notes.append(element('p', 'Several profiles claim this device. Review their retained documents in the device knowledge base before editing.', 'limit'));
+        notes.append(element('p', 'Several profiles claim this device. Review their retained documents under Evidence → Device profiles → Saved profiles.', 'limit'));
       } else if (matches.length === 1) {
         const view = matches[0];
         const source = await api(`/api/profiles/${view.profile.profile_id}/${view.revision}`);
@@ -1423,7 +1526,7 @@ async function loadDeviceAnalysis(device) {
       } else {
         assessment.append(element('p', queue.enabled
           ? 'No draft for this device. Background research drafts profiles from recent quick sightings, one at a time; it cannot be requested for one device.'
-          : 'No draft for this device. Background profile research is off; enable it under Background device profiles.', 'hint'));
+          : 'No draft for this device. Enable research under Evidence → Device profiles → Background drafts.', 'hint'));
       }
     }
   } catch (error) {
@@ -2672,8 +2775,7 @@ function renderAttention(value) {
   const drafts = latestStatus?.profile_drafts_waiting || 0;
   if (drafts) items.push(attentionItem(formatCount(drafts), drafts === 1 ? 'Profile draft awaiting review' : 'Profile drafts awaiting review',
     'Background research drafted device profiles. Review each before it is saved.', 'Open drafts', () => {
-      showView('devices');
-      byId('background-research').scrollIntoView?.({block:'start'});
+      openBackgroundProfiles();
       loadBackgroundResearch().catch(error => notice(error.message, true));
     }));
   const ask = value.ask;
@@ -2858,10 +2960,19 @@ function renderOverview(value) {
   if (latest && notified !== null && notified !== latest.scan_id && value.preferences.browser_notifications && globalThis.Notification?.permission === 'granted') new Notification('Network Privacy Watch', {body:'New observations are ready for review in your private dashboard.'});
   if (latest) notified = latest.scan_id;
 }
+function openBackgroundProfiles() {
+  openEvidenceTab('profiles');
+  const drafts = byId('background-research');
+  drafts.open = true;
+  drafts.scrollIntoView?.({block:'start'});
+}
 byId('open-background').addEventListener('click', () => {
-  showView('devices');
-  const target = byId('background-assessments').hidden ? byId('background-research') : byId('background-assessments');
-  target.scrollIntoView?.({block:'start'});
+  const assessments = byId('background-assessments');
+  if (assessments.hidden) openBackgroundProfiles();
+  else {
+    showView('devices');
+    assessments.scrollIntoView?.({block:'start'});
+  }
 });
 byId('preferences-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -3107,6 +3218,7 @@ async function loadBackgroundResearch() {
 function backgroundDraftPath(id) {return '/api/profile-research/' + encodeURIComponent(id);}
 async function openBackgroundDraft(id) {
   const entry = await api(backgroundDraftPath(id));
+  clearProfileEditor();
   selectedResearch = entry;
   const draft = entry.draft;
   byId('background-draft-title').textContent = entry.identity.hostname || entry.model || entry.identity.address;
@@ -3138,8 +3250,10 @@ async function openBackgroundDraft(id) {
   byId('background-draft-editor').hidden = entry.phase !== 'review' || byId('device-profiles').hidden;
   byId('background-draft-reviewed').hidden = entry.phase !== 'review';
   byId('background-draft-dismiss').hidden = !['review','failed','queued'].includes(entry.phase);
-  byId('background-draft').hidden = false; syncPane();
+  byId('background-draft').hidden = false;
+  openEvidenceTab('profiles');
   byId('background-draft').scrollIntoView({block:'nearest'});
+  byId('pane-title').focus({preventScroll:true});
 }
 byId('background-research-load').addEventListener('click', () => loadBackgroundResearch().catch(error => notice(error.message, true)));
 byId('background-research-enabled').addEventListener('change', async () => {
@@ -3363,7 +3477,8 @@ async function editProfile(view, address = null, deviceMac = null) {
   const owner = profileDevice(fields, deviceMac);
   if (owner && owner.address !== selectedDevice) openDevice(owner.address);
   else if (!owner && selectedDevice) closePane();
-  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac, name:fields.name};
+  clearBackgroundDraft();
+  profileEdit = {id:view ? view.profile.profile_id : crypto.randomUUID(), revision:view ? view.revision : null, deviceMac:view?.profile.fields.device_mac || deviceMac, name:fields.name, address:owner?.address};
   byId('profile-mac').textContent = profileEdit.deviceMac
     ? 'Confirmed device MAC · ' + profileEdit.deviceMac
     : 'Address-only profile. A matching address alone does not establish device identity.';
@@ -3376,9 +3491,8 @@ async function editProfile(view, address = null, deviceMac = null) {
   byId('profile-addresses').replaceChildren(...choices.map(value => {const option = element('option', value); option.value = value; option.selected = fields.addresses.includes(value); return option;}));
   await renderIssueLinks(fields.issues || [], view?.evidence || []);
   byId('profile-editor-title').textContent = view ? `Edit ${fields.name}` : 'Create a device profile';
-  // The editor opens in the side pane, in place; the page does not move.
-  if (byId('view-devices').hidden) showView('devices');
-  byId('profile-form').hidden = false; syncPane();
+  byId('profile-form').hidden = false;
+  openEvidenceTab('profiles');
   const history = byId('profile-history'); history.replaceChildren(); byId('profile-markdown').hidden = true;
   if (view) {
     history.append(advisoryLookup(view));
@@ -3405,7 +3519,7 @@ async function openDeviceProfile(address, mac = null, bind = false) {
     : !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
   const legacy = profiles.some(value => !value.profile.fields.device_mac && value.profile.fields.addresses.includes(address));
   if (matches.length > 1) throw new Error('Several profiles claim this device. Review their retained documents before editing.');
-  if (mac && !matches.length && legacy) throw new Error('This address has a legacy profile. Review it in the knowledge base before confirming a MAC association.');
+  if (mac && !matches.length && legacy) throw new Error('This address has a legacy profile. Review it under Evidence → Device profiles → Saved profiles before confirming a MAC association.');
   await editProfile(matches[0] || null, address, bind ? mac : null);
 }
 
@@ -3417,14 +3531,14 @@ byId('profile-bind-mac').addEventListener('click', () => {
 });
 byId('load-profiles').addEventListener('click', () => loadProfiles().catch(error => notice(error.message,true)));
 byId('new-profile').addEventListener('click', () => editProfile(null).catch(error => notice(error.message,true)));
-byId('cancel-profile').addEventListener('click', () => {profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren(); syncPane();});
+byId('cancel-profile').addEventListener('click', closeProfileEditors);
 byId('profile-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!profileEdit || profileBlocked) return;
   setBusy(byId('save-profile'), true);
   const fields = {name:byId('profile-name').value,owner:byId('profile-owner').value,model:byId('profile-model').value,purpose:byId('profile-purpose').value,expected_services:byId('profile-expected').value,notes:byId('profile-notes').value,addresses:[...byId('profile-addresses').selectedOptions].map(value => value.value),issues:readIssueLinks(),device_mac:profileEdit.deviceMac || null};
   try {
     const receipt = await api('/api/profiles', {method:'POST',body:JSON.stringify({profile_id:profileEdit.id,request_id:crypto.randomUUID(),expected_revision:profileEdit.revision,fields})});
-    if (receipt.phase === 'confirmed') {profileEdit = null; byId('profile-form').hidden = true; byId('profile-markdown').hidden = true; byId('profile-history').replaceChildren(); syncPane(); const shown = selectedDevice && overview?.devices.find(item => item.address === selectedDevice); if (shown) loadDeviceAnalysis(shown); notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}
+    if (receipt.phase === 'confirmed') {closeProfileEditors(); const shown = selectedDevice && overview?.devices.find(item => item.address === selectedDevice); if (shown) loadDeviceAnalysis(shown); notice('Device profile saved in Plowshare. Processing may still be pending; load profiles again when ready.');}
     else notice(`Profile write ${receipt.request_id} needs reconciliation. It has not been resent.`, true);
   } catch(error) {notice(error.message,true);} finally {markBusy(byId('save-profile'), false); await profileReceipts().catch(() => {byId('save-profile').disabled = true;});}
 });
@@ -3518,10 +3632,12 @@ async function editIssue(view = null) {
   byId('issue-form').scrollIntoView({block:'nearest'});
   byId('issue-title').focus({preventScroll:true});
 }
-async function readIssue(identity, revision) {
+async function readIssue(identity, revision, reader = byId('issue-markdown')) {
   const source = await api(`/api/issues/${identity}/${revision}`);
-  byId('issue-markdown').replaceChildren(foldDetails(PrivacyMarkdown.render(source.text))); byId('issue-markdown').hidden = false; syncPane();
-  byId('issue-markdown').scrollIntoView({block:'nearest'});
+  reader.replaceChildren(foldDetails(PrivacyMarkdown.render(source.text)));
+  reader.hidden = false;
+  syncPane();
+  reader.scrollIntoView({block:'nearest'});
 }
 async function renderIssueLinks(links, evidence) {
   if (!issuesAvailable) {
@@ -3544,14 +3660,41 @@ async function renderIssueLinks(links, evidence) {
     const status = element('select'); status.dataset.field = 'status'; status.replaceChildren(...optionList(mitigationLabels,old?.mitigation_status || 'proposed')); labelled(card, 'Mitigation progress', status);
     const notes = element('textarea'); notes.rows = 3; notes.maxLength = 512; notes.value = old?.notes || ''; notes.dataset.field = 'notes'; labelled(card, 'Assessment, action taken and verification result', notes);
     const revisions = element('select'); revisions.multiple = true; revisions.dataset.field = 'evidence'; revisions.replaceChildren(...[...new Set([...evidence,...(old?.evidence || [])])].map(value => {const option = element('option', value); option.value = value; option.selected = old?.evidence.includes(value); return option;})); labelled(card, 'Supporting evidence revisions (up to four)', revisions);
-    const read = element('button', 'Read issue and mitigation plan', 'secondary'); read.type = 'button'; read.addEventListener('click', () => readIssue(identity,card.dataset.revision).catch(error => notice(error.message,true))); card.append(read);
-    if (head && old && head.revision !== old.revision) {
-      const updated = element('p', 'A newer issue revision is available. This device still references the reviewed plan.', 'hint');
-      const adopt = element('button', 'Review and use latest plan', 'secondary'); adopt.type = 'button'; adopt.addEventListener('click', async () => {
-        try {await readIssue(identity,head.revision); card.dataset.revision = head.revision; status.value = 'proposed'; applicability.value = 'unresolved'; notes.value = ''; revisions.selectedIndex = -1; updated.textContent = 'Latest plan selected. Review applicability and progress, then save the device profile.'; adopt.disabled = true;} catch(error) {notice(error.message,true);}
-      }); card.append(updated,adopt);
+    const preview = element('div', undefined, 'document-reader'); preview.hidden = true;
+    const read = element('button', 'Read issue and mitigation plan', 'secondary');
+    read.type = 'button';
+    const adopt = head && old && head.revision !== old.revision
+      ? element('button', 'Review and use latest plan', 'secondary') : null;
+    // The displayed plan and the revision to save must agree even on a slow read.
+    async function previewPlan(revision, selectRevision) {
+      if (read.disabled) return;
+      setBusy(read, true);
+      if (adopt) adopt.disabled = true;
+      try {
+        await readIssue(identity, revision, preview);
+        selectRevision?.();
+      } catch (error) {notice(error.message, true);}
+      finally {
+        setBusy(read, false);
+        if (adopt) adopt.disabled = card.dataset.revision === head.revision;
+      }
     }
-    card.append(element('p', 'Progress is recorded in profile history. Saving does not apply a rule. Explain confirmed issues and applied, verified or reverted actions.', 'hint')); parent.append(card);
+    read.addEventListener('click', () => previewPlan(card.dataset.revision));
+    card.append(read);
+    if (adopt) {
+      const updated = element('p', 'A newer issue revision is available. This device still references the reviewed plan.', 'hint');
+      adopt.type = 'button';
+      adopt.addEventListener('click', () => previewPlan(head.revision, () => {
+        card.dataset.revision = head.revision;
+        status.value = 'proposed';
+        applicability.value = 'unresolved';
+        notes.value = '';
+        revisions.selectedIndex = -1;
+        updated.textContent = 'Latest plan selected. Review applicability and progress, then save the device profile.';
+      }));
+      card.append(updated, adopt);
+    }
+    card.append(preview, element('p', 'Progress is recorded in profile history. Saving does not apply a rule. Explain confirmed issues and applied, verified or reverted actions.', 'hint')); parent.append(card);
   }
 }
 function readIssueLinks() {

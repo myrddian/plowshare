@@ -138,27 +138,34 @@ test('the Evidence view lists assignments', async () => {
   assert.ok(!(await show([])).includes('Address assignment'));
 });
 
-test('collection days start collapsed and keep the selected expansion across refreshes', () => {
+test('collection days keep quiet rows and preserve disclosures across refreshes', () => {
   const {context, node} = dashboard();
   const scan = {scan_id:'sample', when:'2026-11-24T00:00:00Z', phase:'done', local_completion:true,
     mode:'tcp', change_count:0, issue_count:6};
-  const group = {day:'2026-11-24', scans:[scan]};
+  const group = {day:'2026-11-24', scans:[scan], coverage:[{kind:'dns_truncated', collections:1}]};
   const render = days => call(context, 'renderCollections(value)', days);
   render([group]);
   const first = node('collections').children[0];
   assert.equal(first.open, false);
   assert.equal(first.children[0].tag, 'summary');
-  assert.ok(texts(first.children[0]).includes('1 collection · 0 comparison entries · 6 coverage notes'));
-  assert.ok(texts(first.children[1]).includes('Collected'));
+  assert.ok(texts(first.children[0]).includes('1 collection'));
+  assert.equal(first.children[1].open, false);
+  assert.deepEqual(texts(first.children[1]), ['Coverage gaps', 'DNS sample limit reached', '1 collection']);
+  assert.equal(texts(first.children[2]).length, 1);
   first.open = true;
   first.listeners.toggle();
-  render([{...group, scans:[scan, {...scan, scan_id:'next'}]}]);
+  first.children[1].open = true;
+  first.children[1].listeners.toggle();
+  render([{...group, scans:[scan, {...scan, scan_id:'next', change_count:1}]}]);
   const refreshed = node('collections').children[0];
   assert.equal(refreshed.open, true);
-  assert.equal(refreshed.children.length, 3);
+  assert.equal(refreshed.children.length, 4);
+  assert.equal(refreshed.children[1].open, true);
+  assert.ok(texts(refreshed.children[0]).includes('2 collections · 1 change'));
+  assert.ok(texts(refreshed.children[3]).includes('1 change'));
   call(context, "setHouseholdZone('Pacific/Honolulu'); renderCollections(value, 'Australia/Melbourne')", [group]);
   assert.equal(node('collection-zone').textContent, 'Australia/Melbourne');
-  const reported = call(context, "formatTimestamp(value, timestampFormatter('Australia/Melbourne'))", scan.when);
+  const reported = call(context, "formatTimestamp(value, new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit', timeZone:'Australia/Melbourne'}))", scan.when);
   assert.ok(texts(node('collections')).includes(reported));
 });
 
