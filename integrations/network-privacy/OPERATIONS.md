@@ -14,10 +14,10 @@ investigations. **Review findings** opens the dedicated Findings view. Pause and
 Expand **System health** for connection, agent, tool and credential details;
 **Check retained work** reconciles existing receipts without replaying effects.
 
-**Devices** holds observed device cards, Markdown profiles and linked privacy
-issues. **Findings** holds observed changes, acknowledgements and investigation
-reports beside a Markdown reader. **Evidence** holds the underlying collections,
-observations and coverage gaps.
+**Devices** holds observed device cards and shared privacy issues. **Findings**
+holds observed changes, acknowledgements and investigation reports beside a
+Markdown reader. **Evidence** holds the underlying collections and device
+profiles, including background drafts and saved Markdown profiles.
 Opening evidence from a device history or finding selects Evidence automatically.
 Opening a report selects Findings; it does not replace selected collection evidence.
 Report and document readers format headings, lists, tables, quotations, code and
@@ -472,8 +472,10 @@ Future automatic investigation decisions omit acknowledged patterns when no
 other new finding needs attention. Previously admitted work is unaffected.
 The dashboard keeps the latest occurrence of each pattern from the last 50 scans.
 
-Expand a day under **Evidence**, then select a collection to read its evidence,
-admission decision, any explicit start
+Expand a day under **Evidence → Collections** to see its collection times and
+any detected changes. **Coverage gaps** lists recurring limitations and how
+many collections were affected. Select a collection to read its observations,
+exact coverage notes, admission decision, any explicit start
 receipt, and reports whose retained inputs actually cite that revision. Recent
 project runs are shown separately: the integration does not guess that a run
 belongs to a particular scan merely because their times are close.
@@ -687,7 +689,7 @@ Before a project conversation exists, visibility remains unknown.
 
 ## Background device profiles
 
-Under **Devices → Background device profiles**, enable research after enabling
+Under **Evidence → Device profiles → Background drafts**, enable research after enabling
 quick presence checks and deploying the matching Application source and collector.
 It starts off. The collector admits one profile research run at a time, with up
 to four admissions per UTC day. A candidate needs a fresh MAC association and
@@ -716,7 +718,8 @@ holds up to 256 device records.
 
 ## Device knowledge base
 
-Open **Device knowledge base** or choose **Device profile** on a device card.
+Open **Evidence → Device profiles → Saved profiles** or choose **Device profile**
+on a device card.
 Load existing project profiles, or create one for selected monitored addresses.
 Give it a name, responsible person, model, purpose, expected services/behaviour and
 operator notes. These are operator-confirmed expectations, separate from observed

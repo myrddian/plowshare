@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import hmac
 import os
+import re
 import time
+from collections import Counter
 from dataclasses import asdict
 from importlib.resources import files
 from ipaddress import IPv4Network
@@ -1336,32 +1338,53 @@ def application(
 
     async def collection_days(request: web.Request) -> web.Response:
         grouped: dict[str, list[dict[str, object]]] = {}
+        coverage: dict[str, Counter[str]] = {}
         receipts = worker.receipts.all()
         zone = worker.rollups.zone if worker.rollups else worker.config.zone
         for item in reversed(receipts):
-            stamp = item.evidence.finished_at if item.evidence else item.occurred_at
+            evidence = item.evidence
+            stamp = evidence.finished_at if evidence else item.occurred_at
             day = household_day(stamp, zone).isoformat()
+            if evidence and evidence.issues:
+                # Several notes can describe the same gap in a single snapshot.
+                # Count affected collections once and keep exact notes on the snapshot.
+                kinds = set()
+                for note in evidence.issues:
+                    code, separator, _ = note.partition(":")
+                    kinds.add(
+                        code
+                        if separator and re.fullmatch(r"[a-z][a-z0-9_]{0,47}", code)
+                        else "other"
+                    )
+                coverage.setdefault(day, Counter()).update(kinds)
             grouped.setdefault(day, []).append(
                 {
                     "scan_id": item.scan_id,
                     "when": stamp,
                     "phase": item.phase,
                     "local_completion": item.local_completion,
-                    "mode": item.evidence.mode
-                    if item.evidence
+                    "mode": evidence.mode
+                    if evidence
                     else worker.config.collection.mode,
+                    "baseline": evidence.is_baseline if evidence else False,
                     "change_count": sum(
-                        not value.startswith("Baseline")
-                        for value in item.evidence.changes
+                        not value.startswith("Baseline") for value in evidence.changes
                     )
-                    if item.evidence
+                    if evidence
                     else 0,
-                    "issue_count": len(item.evidence.issues) if item.evidence else 0,
+                    "issue_count": len(evidence.issues) if evidence else 0,
                 }
             )
         return web.json_response(
             [
-                {"day": day, "scans": grouped[day]}
+                {
+                    "day": day,
+                    "scans": grouped[day],
+                    "coverage": [
+                        {"kind": kind, "collections": count}
+                        for kind, count in sorted(coverage.get(day, {}).items())
+                    ],
+                }
                 for day in sorted(grouped, reverse=True)
             ]
         )

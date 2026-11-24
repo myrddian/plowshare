@@ -447,7 +447,7 @@ test('device profile selection follows a confirmed MAC when its former IP is reu
   assert.equal(vm.runInContext('selectedProfile', context), 'first');
 });
 
-test('a profile opened from the knowledge base is edited under its own device, never another', async () => {
+test('a saved profile opens under Evidence with the correct device association', async () => {
   const {context, node} = await dashboard();
   const tv = {address:'192.0.2.10', name:'Living room TV', identity:{source:'unifi', mac:'02:00:00:00:00:0a'}};
   const speaker = {address:'192.0.2.20', name:'Kitchen speaker', identity:{source:'unifi', mac:'02:00:00:00:00:0b'}};
@@ -465,7 +465,7 @@ test('a profile opened from the knowledge base is edited under its own device, n
     renderDeviceView = device => { renderedDevice = device.address; }; loadDeviceAnalysis = () => {};
     advisoryLookup = () => ({});
     var renderedDevice = null;`, context);
-  vm.runInContext("openDevice('192.0.2.10')", context);
+  vm.runInContext("showView('devices'); openDevice('192.0.2.10')", context);
   assert.equal(node('pane-title').textContent, 'Living room TV');
 
   // Bound by MAC to another monitored device: the pane switches to that device.
@@ -475,9 +475,28 @@ test('a profile opened from the knowledge base is edited under its own device, n
   assert.equal(node('pane-title').textContent, 'Kitchen speaker');
   assert.equal(node('profile-form').hidden, false);
   assert.equal(node('pane-back').hidden, false);
+  assert.equal(node('view-evidence').hidden, false);
+  assert.equal(node('evidence-view-profiles').hidden, false);
+  assert.equal(node('device-view').hidden, true);
+  node('evidence-tab-collections').listeners.click();
+  assert.equal(node('side-pane').hidden, true);
+  node('evidence-tab-profiles').listeners.click();
+  assert.equal(node('side-pane').hidden, false);
+
+  node('profile-notes').value = 'Unsaved profile notes';
+  vm.runInContext("showView('devices'); openDevice('192.0.2.10')", context);
+  assert.equal(node('device-view').hidden, false);
+  vm.runInContext("showView('evidence')", context);
+  assert.equal(node('profile-form').hidden, false);
+  assert.equal(node('profile-notes').value, 'Unsaved profile notes');
+  assert.equal(node('pane-title').textContent, 'Kitchen speaker');
+  node('pane-back').listeners.click();
+  assert.equal(node('view-devices').hidden, false);
+  assert.equal(node('device-view').hidden, false);
+  assert.equal(vm.runInContext('selectedDevice', context), '192.0.2.20');
 
   // An address-only profile of the open device stays under that device.
-  vm.runInContext("closeEditors(); openDevice('192.0.2.10')", context);
+  vm.runInContext("closeDeviceEditors(); openDevice('192.0.2.10')", context);
   await vm.runInContext('editProfile(profileViews.tvByAddress)', context);
   assert.equal(vm.runInContext('selectedDevice', context), '192.0.2.10');
   assert.equal(node('pane-title').textContent, 'Living room TV');
@@ -494,7 +513,7 @@ test('a profile opened from the knowledge base is edited under its own device, n
   assert.equal(node('side-pane').hidden, false);
 
   // A new profile from the knowledge base has no device either.
-  vm.runInContext("closeEditors(); openDevice('192.0.2.20'); crypto = {randomUUID: () => 'new-profile'}", context);
+  vm.runInContext("closeDeviceEditors(); openDevice('192.0.2.20'); crypto = {randomUUID: () => 'new-profile'}", context);
   await vm.runInContext('editProfile(null)', context);
   assert.equal(vm.runInContext('selectedDevice', context), null);
   assert.equal(node('pane-title').textContent, 'New device profile');
@@ -502,11 +521,49 @@ test('a profile opened from the knowledge base is edited under its own device, n
 
 function assessmentDom(context) {
   context.document.createElement = tag => ({
-    tag, children: [], listeners: {}, append(...children) { this.children.push(...children); },
+    tag, children: [], dataset: {}, listeners: {}, append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener(name, handler) { this.listeners[name] = handler; },
+    scrollIntoView() {},
   });
 }
+
+test('profile issue links preview retained and latest plans inside the profile editor', async () => {
+  const {context, node} = await dashboard();
+  assessmentDom(context);
+  let finishRetainedRead;
+  const requests = [];
+  context.fetch = async url => {
+    requests.push(url);
+    if (url.endsWith('/retained')) await new Promise(resolve => {finishRetainedRead = resolve;});
+    return {ok:true, json:async () => url === '/api/issues'
+      ? {issues:[{issue:{issue_id:'issue',fields:{title:'Fixture issue'}},revision:'latest'}]}
+      : {text:url.endsWith('/latest') ? 'Latest plan' : 'Retained plan'}};
+  };
+  vm.runInContext("issuesAvailable = true; foldDetails = article => article; openEvidenceTab('profiles')", context);
+  await vm.runInContext("renderIssueLinks([{issue_id:'issue',revision:'retained',notes:'Checked',evidence:[]}], [])", context);
+  const [card] = node('profile-issue-links').children;
+  const preview = card.children.find(child => child.className === 'document-reader');
+  const read = card.children.find(child => child.textContent === 'Read issue and mitigation plan');
+  const adopt = card.children.find(child => child.textContent === 'Review and use latest plan');
+  assert.equal(preview.hidden, true);
+  const retainedRead = read.listeners.click();
+  assert.equal(read.disabled, true);
+  assert.equal(adopt.disabled, true);
+  await adopt.listeners.click();
+  assert.deepEqual(requests, ['/api/issues', '/api/issues/issue/retained']);
+  finishRetainedRead();
+  await retainedRead;
+  assert.equal(preview.hidden, false);
+  assert.equal(preview.children[0].source, 'Retained plan');
+  assert.equal(card.dataset.revision, 'retained');
+  await adopt.listeners.click();
+  assert.equal(preview.children[0].source, 'Latest plan');
+  assert.equal(card.dataset.revision, 'latest');
+  assert.equal(adopt.disabled, true);
+  assert.equal(node('issue-markdown').children.length, 0);
+});
+
 const assessmentTexts = node => [node.textContent, ...(node.children || []).flatMap(assessmentTexts)].filter(Boolean);
 const assessmentButtons = nodes => nodes.flatMap(function walk(node) {
   return [...(node.tag === 'button' ? [node] : []), ...(node.children || []).flatMap(walk)];

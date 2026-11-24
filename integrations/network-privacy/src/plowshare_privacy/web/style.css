@@ -231,6 +231,8 @@ footer { display: flex; justify-content: space-between; gap: var(--s3); padding-
 .view-nav button:hover { color: var(--parchment); }
 .view-nav button[aria-selected="true"] { color: var(--parchment); box-shadow: inset 0 -2px 0 var(--gilt); }
 .view-nav button[aria-selected="true"]::after { content: ''; position: absolute; left: calc(50% - 6px); bottom: -7px; width: 12px; height: 7px; background: var(--gilt); clip-path: var(--tri-down); }
+.view-nav.evidence-nav { position: static; justify-content: flex-start; gap: var(--s5); margin-bottom: var(--s5); }
+.evidence-nav button { padding-top: var(--s1); }
 #page-title { scroll-margin-top: 64px; }
 .view-heading { padding: var(--s6) 0 var(--s5); }
 .view-heading p, .view-intro { margin: var(--s2) 0 0; color: var(--tallow); max-width: 70ch; }
@@ -431,7 +433,13 @@ button.entry.selected { padding-left: var(--s3); background: var(--soot); box-sh
 .collection-day-summary { padding: var(--s3) 0; cursor: pointer; }
 .collection-day-summary strong { margin-left: var(--s1); }
 .collection-day-summary small { display: block; margin: var(--s1) 0 0 var(--s4); }
-.collection-day > button.entry { padding-left: var(--s4); }
+.collection-day > button.collection-entry { padding: var(--s2) var(--s5) var(--s2) var(--s4); }
+.collection-entry .entry-line { justify-content: flex-start; flex-wrap: wrap; }
+.collection-entry .collection-change { color: var(--gilt); }
+.collection-coverage { margin: 0 0 var(--s2) var(--s4); font-size: var(--text-sm); color: var(--tallow); }
+.collection-coverage summary { padding: var(--s1) 0; cursor: pointer; }
+.collection-coverage ul { list-style: none; margin: 0; padding: var(--s1) 0 var(--s2); }
+.collection-coverage li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--s3); padding: 2px 0; }
 /* A record is an entry that does not open: it carries its own actions. */
 .record { padding: var(--s3) 0; border-bottom: var(--rule); }
 .record:last-child { border-bottom: 0; }
@@ -518,7 +526,9 @@ button.device-summary:focus-visible { outline-offset: -2px; }
    Every block in it is a pane section: a gilt title, then facts or a figure
    with its source, the limits of that figure, detail, and actions last. */
 .side-pane { position: fixed; top: 0; right: 0; bottom: 0; z-index: 10; width: var(--pane); display: flex; flex-direction: column; background: var(--bitumen); border-left: var(--rule-frame); }
-body:has(#view-devices:not([hidden]) #side-pane:not([hidden])) :is(.masthead, main, footer) { margin-right: var(--pane); }
+body:has(#side-pane:not([hidden])) :is(.masthead, main, footer) { margin-right: var(--pane); }
+#side-pane:not(.profiles-context) .profile-pane-editor,
+#side-pane.profiles-context :is(.device-pane-editor, #device-research) { display: none; }
 .pane-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: var(--s4) var(--inset) var(--s3); border-bottom: var(--rule-frame); }
 .pane-head h2 { font: 400 var(--display-2)/1.15 var(--display); overflow-wrap: anywhere; }
 /* The section menu stays put above the scrolling body. */
@@ -667,8 +677,8 @@ details > .hint { display: flex; flex-wrap: wrap; justify-content: space-between
   footer { flex-direction: column; }
   /* Narrow screens: the pane and the readers become full-screen sheets. */
   .side-pane { border-left: 0; }
-  body:has(#view-devices:not([hidden]) #side-pane:not([hidden])) { overflow: hidden; }
-  body:has(#view-devices:not([hidden]) #side-pane:not([hidden])) :is(.masthead, main, footer) { margin-right: auto; }
+  body:has(#side-pane:not([hidden])) { overflow: hidden; }
+  body:has(#side-pane:not([hidden])) :is(.masthead, main, footer) { margin-right: auto; }
   .pane-head { padding: var(--s3) var(--inset); }
   .side-pane .facts { grid-template-columns: 104px minmax(0, 1fr); }
   .reader-panel { position: static; max-height: none; }
@@ -676,7 +686,7 @@ details > .hint { display: flex; flex-wrap: wrap; justify-content: space-between
   .reader-panel.reading::before { display: none; }
   .reader-panel.reading .reader-close { display: inline-block; margin-left: auto; }
   .reader-panel.reading .evidence, .reader-panel.reading .report-reader { flex: 1; }
-  body:has(#view-findings:not([hidden]) .reader-panel.reading, #view-evidence:not([hidden]) .reader-panel.reading) { overflow: hidden; }
+  body:has(#view-findings:not([hidden]) .reader-panel.reading, #view-evidence:not([hidden]) #evidence-view-collections:not([hidden]) .reader-panel.reading) { overflow: hidden; }
 }
 @media (max-width: 600px) {
   /* Search stays; show, order and signal filters fold behind one control so a device row is on the first screen. */

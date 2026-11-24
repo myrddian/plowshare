@@ -1025,7 +1025,7 @@ manifest assignments. The packaged collector uses its deployed provider authorit
 rather than the interactive connection command. See [provider scopes](../../docs/tool-scopes.md)
 for equivalent SDK operations and the present MCP transport/schema limits.
 
-The dashboard also maintains a [device knowledge base](OPERATIONS.md#device-knowledge-base)
+The dashboard also maintains [saved device profiles](OPERATIONS.md#device-knowledge-base)
 using the project's existing Plowshare Information documents. The [public capability
 gaps](GAPS.md) record the separately scoped chapter-outline read limitation.
 
