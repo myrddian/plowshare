@@ -148,6 +148,38 @@ class NetworkPrivacyInvestigationTest {
   }
 
   @Test
+  void review_can_omit_the_outer_brace_after_all_three_fields() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    int delegationsBeforeReviewResult = host.delegations;
+    host.accept(
+        "```json\n{\"verdict\":\"accepted\",\"assessment\":\"Complete assessment\",\"notes\":[\"Checked evidence\"]");
+    host.finish();
+    assertEquals(1, host.writes);
+    assertEquals(delegationsBeforeReviewResult, host.delegations);
+    assertTrue(host.report.path("text").asText().contains("Complete assessment"));
+  }
+
+  @Test
+  void incomplete_review_content_stops_without_writing_or_repeating_the_review() throws Exception {
+    var host = new Host();
+    host.advanceTo("privacy_reviewer");
+    int delegationsBeforeReviewResult = host.delegations;
+    for (String response :
+        new String[] {
+          "The review follows.\n```json\n{\"verdict\":\"accepted\",\"assessment\":\"A partial assessment",
+          "{\"verdict\":\"accepted\",\"assessment\":\"Complete assessment\"",
+          "{\"verdict\":\"accepted\",\"assessment\":\"Complete assessment\",\"notes\":\"Checked\","
+        }) {
+      var failure = assertThrows(IllegalStateException.class, () -> host.accept(response));
+      assertTrue(
+          failure.getMessage().contains("Reviewer JSON ended before the review was complete"));
+      assertEquals(0, host.writes);
+      assertEquals(delegationsBeforeReviewResult, host.delegations);
+    }
+  }
+
+  @Test
   void absent_assessment_stops_before_review_or_report() throws Exception {
     var host = new Host();
     host.advanceTo("privacy_analyst");
@@ -196,6 +228,7 @@ class NetworkPrivacyInvestigationTest {
           "E_NO_EXEC: tool unavailable",
           "E_GENERAL_TOOL_FAILURE: failure",
           "Information request refused: no access",
+          "UNAVAILABLE: {\"verdict\":\"accepted\",\"assessment\":\"text\",\"notes\":\"ok\"",
           "not JSON",
           "{\"verdict\":\"accepted\",\"notes\":\"ok\",\"assessment\":\"\"}",
           "{\"verdict\":\"accepted\",\"notes\":[],\"assessment\":\"text\"}",

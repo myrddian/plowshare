@@ -62,6 +62,13 @@ public final class StandardModelOutputRecovery implements ModelOutputRecovery {
           List.of(new Issue(Problem.CONTENT, "response", 0, 0)),
           "none");
     Decoded decoded = ModelOutputRecoveryCodec.decode(raw);
+    if (decoded.truncated())
+      return terminal(
+          request,
+          Action.NEEDS_REVIEW,
+          "Model JSON ended early; missing content requires review",
+          decoded.issues(),
+          decoded.pass());
     Map<String, String> candidate = decoded.fields();
     var issues = new ArrayList<>(decoded.issues());
     boolean repaired = request.checkpoint().isPresent();

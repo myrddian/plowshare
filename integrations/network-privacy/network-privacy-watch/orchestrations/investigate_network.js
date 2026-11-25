@@ -40,7 +40,7 @@ function uuid(value, field) {
 function toolResult(value) {
   text(value, 'tool result', 131072);
   // Host refusals are never model answers or candidates for JSON repair.
-  if (/^E_(NO_ACCESS|NO_CONNECTION|NO_EXEC|GENERAL_TOOL_FAILURE):/.test(value.trimStart())
+  if (/^(E_(NO_ACCESS|NO_CONNECTION|NO_EXEC|GENERAL_TOOL_FAILURE)|UNAVAILABLE|REFUSED):/.test(value.trimStart())
       || /^(Information request refused:|Information arguments are invalid:|Information result serialization failed:)/.test(value.trimStart())) {
     fail('Tool refused: ' + value.slice(0,2048) + '; inspect the retained command receipt.');
   }
@@ -86,8 +86,17 @@ function initial(input) {
 function reviewResult(result) {
   // Shared bounded local parsing adds no model call. Never repair references or fabricate a review.
   const recovered = llmJson.parse(toolResult(result));
-  if (!recovered.pass) fail('Reviewer returned invalid JSON; inspect the paid response.');
-  const review = recovered.value;
+  const partial = recovered.truncation;
+  const review = recovered.pass ? recovered.value : partial?.value;
+  if (!recovered.pass) {
+    if (!partial) fail('Reviewer returned invalid JSON; inspect the paid response.');
+    // Accept a missing root brace only after all three fields have arrived in full.
+    if (!partial.onlyMissingClose || !review || Array.isArray(review)
+        || Object.keys(review).length !== 3
+        || !['verdict','assessment','notes'].every(key => Object.hasOwn(review, key))) {
+      fail('Reviewer JSON ended before the review was complete; inspect the retained response.');
+    }
+  }
   if (!review || Array.isArray(review) || !['accepted','needs_corrections','not_checked'].includes(review.verdict)) fail('Invalid reviewer verdict');
   // Reviewers may return each correction as a separate note. Bound the whole
   // rendered section and keep the same validation for string notes.

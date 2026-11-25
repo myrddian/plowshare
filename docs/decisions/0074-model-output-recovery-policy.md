@@ -28,7 +28,10 @@ claims, allowed evidence, references, judgments and acceptance.
    Code merges the result with unchanged fields; the worker cannot replace them.
 4. For syntax or structural errors, permit one narrow correction. Existing valid
    fields must remain unchanged. Ambiguous duplicate keys, tool markup, recognized
-   host failures and excessive response sizes do not trigger a model repair.
+   host failures, truncated JSON and excessive response sizes do not trigger a
+   model repair. The JSON parser separately exposes the complete prefix of a
+   truncated object or array. Exact-schema callers can validate and use it when
+   the only missing syntax is the final delimiter and every field is present.
 5. Revalidate the result. Preserve identifiers, CVEs, URLs, versions, uncertainty
    and negative qualifiers with conservative checks. These checks are not proof
    of semantic equivalence; the owning domain must still validate the result.

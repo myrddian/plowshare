@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
@@ -554,6 +555,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
   private static Sampling sampling(String where, String at, Map<?, ?> fields) {
     Sampling sampling = Sampling.NONE;
     ReasoningPolicy reasoning = null;
+    OptionalInt resultTokens = OptionalInt.empty();
     for (Map.Entry<?, ?> field : fields.entrySet()) {
       String key = String.valueOf(field.getKey());
       Object value = field.getValue();
@@ -563,6 +565,7 @@ public final class SamplingProfiles implements ModelMediaProfiles {
         case "top_p" -> sampling = sampling.withTopP(number(where, at, key, value).doubleValue());
         case "top_k" -> sampling = sampling.withTopK(whole(where, at, key, value));
         case "max_tokens" -> sampling = sampling.withMaxTokens(whole(where, at, key, value));
+        case "result_tokens" -> resultTokens = OptionalInt.of(whole(where, at, key, value));
         case "reasoning_effort" ->
             sampling = sampling.withReasoningEffort(effort(where, at, value));
         case "reasoning" -> reasoning = reasoning(where, at, value);
@@ -576,10 +579,21 @@ public final class SamplingProfiles implements ModelMediaProfiles {
                     + at
                     + "' names '"
                     + key
-                    + "', which is not a sampling"
-                    + " parameter this server can send. It knows temperature,"
-                    + " top_p, top_k, max_tokens, reasoning_effort and reasoning");
+                    + "', which is not a supported sampling profile field. It knows temperature,"
+                    + " top_p, top_k, max_tokens, result_tokens, reasoning_effort and reasoning");
       }
+    }
+    if (resultTokens.isPresent()) {
+      String row = where + "'s '" + at + "'";
+      if (sampling.maxTokens().isPresent())
+        throw new IllegalStateException(row + " cannot set both result_tokens and max_tokens");
+      int thinkingBudget = reasoning == null ? 0 : reasoning.thinkingTokenBudget();
+      int resultBudget = resultTokens.getAsInt();
+      if (resultBudget <= 0 || resultBudget > Integer.MAX_VALUE - thinkingBudget)
+        throw new IllegalStateException(
+            row + " requires positive result_tokens with a representable total generation budget");
+      // Resolve the provider's combined limit once so dispatch and context reservation agree.
+      sampling = sampling.withMaxTokens(thinkingBudget + resultBudget);
     }
     return reasoning == null ? sampling : sampling.withReasoning(reasoning);
   }

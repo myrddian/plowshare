@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.llm;
 
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.io.JsonEOFException;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -9,8 +12,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Pure, bounded parsing of model-emitted JSON, shared by Java callers and Graal scripts. Recovery
@@ -20,6 +27,8 @@ import java.util.List;
 public final class LlmJson {
   public static final int MAX_INPUT = 524288;
   public static final int MAX_RECOVERY = 32768;
+  private static final Pattern PARTIAL_LITERAL =
+      Pattern.compile("^Unrecognized token '(?:t|tr|tru|f|fa|fal|fals|n|nu|nul)':");
   private static final ObjectMapper JSON =
       JsonMapper.builder()
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
@@ -27,6 +36,7 @@ public final class LlmJson {
           .build();
   private static final ObjectReader STRICT;
   private static final ObjectReader LENIENT;
+  private static final ObjectReader PREFIX;
 
   static {
     JSON.getFactory()
@@ -41,6 +51,7 @@ public final class LlmJson {
             .with(JsonReadFeature.ALLOW_SINGLE_QUOTES.mappedFeature())
             .with(JsonReadFeature.ALLOW_TRAILING_COMMA.mappedFeature())
             .with(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature());
+    PREFIX = LENIENT.without(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
 
   private LlmJson() {}
@@ -48,7 +59,14 @@ public final class LlmJson {
   public record Attempt(
       String pass, String response, String error, int line, int column, long offset) {}
 
-  public record Recovery(JsonNode value, String pass, List<Attempt> attempts) {
+  /**
+   * Complete top-level members or items from a container that ended unexpectedly. A member whose
+   * value is incomplete is omitted as a whole, even if it contained complete nested values.
+   */
+  public record Truncation(JsonNode value, String incompleteField, boolean onlyMissingClose) {}
+
+  public record Recovery(
+      JsonNode value, String pass, List<Attempt> attempts, Optional<Truncation> truncation) {
     public boolean recovered() {
       return pass != null;
     }
@@ -58,6 +76,13 @@ public final class LlmJson {
       ObjectNode result = JSON.createObjectNode();
       if (recovered()) result.set("value", value);
       result.put("pass", pass);
+      truncation.ifPresent(
+          prefix -> {
+            var partial = result.putObject("truncation");
+            partial.set("value", prefix.value());
+            partial.put("incompleteField", prefix.incompleteField());
+            partial.put("onlyMissingClose", prefix.onlyMissingClose());
+          });
       var history = result.putArray("attempts");
       for (Attempt attempt : attempts) {
         var entry = history.addObject().put("pass", attempt.pass());
@@ -83,13 +108,12 @@ public final class LlmJson {
       attempts.add(
           new Attempt(
               "strict", response, "LLM JSON exceeds " + MAX_INPUT + " characters", 0, 0, 0));
-      return new Recovery(null, null, List.copyOf(attempts));
+      return new Recovery(null, null, List.copyOf(attempts), Optional.empty());
     }
     Recovery parsed = attempt("strict", response, STRICT, attempts);
     if (parsed != null) return parsed;
-    if (response.length() > MAX_RECOVERY) return new Recovery(null, null, List.copyOf(attempts));
-
     String cleaned = clean(response);
+    if (response.length() > MAX_RECOVERY) return incomplete(response, cleaned, attempts);
     parsed = attempt("fences_and_prose", cleaned, STRICT, attempts);
     if (parsed != null) return parsed;
     // Read valid single-quoted values before double-quote-oriented repair heuristics.
@@ -116,7 +140,71 @@ public final class LlmJson {
     if (parsed != null) return parsed;
     String fallback = commas.replace("\\\"", "\"").replaceAll("\\\\([^\"\\\\bfnrt/u])", "$1");
     parsed = attempt("escape_fallback", repairUnescapedQuotes(fallback), STRICT, attempts);
-    return parsed != null ? parsed : new Recovery(null, null, List.copyOf(attempts));
+    return parsed != null ? parsed : incomplete(response, cleaned, attempts);
+  }
+
+  private static Recovery incomplete(String raw, String cleaned, List<Attempt> attempts) {
+    String leading = raw.stripLeading();
+    Optional<Truncation> prefix =
+        leading.startsWith("<|")
+                || leading.startsWith("<tool_call")
+                || leading.startsWith("<function=")
+            ? Optional.empty()
+            : truncatedPrefix(cleaned);
+    return new Recovery(null, null, List.copyOf(attempts), prefix);
+  }
+
+  private static Optional<Truncation> truncatedPrefix(String text) {
+    try (var parser = PREFIX.createParser(text)) {
+      JsonToken root = parser.nextToken();
+      if (root != JsonToken.START_OBJECT && root != JsonToken.START_ARRAY) return Optional.empty();
+      boolean object = root == JsonToken.START_OBJECT;
+      var fields = JSON.createObjectNode();
+      var items = JSON.createArrayNode();
+      JsonToken close = object ? JsonToken.END_OBJECT : JsonToken.END_ARRAY;
+      String field = null;
+      String previousField = null;
+      int lastEnd = -1;
+      try {
+        for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+          if (token == close) return Optional.empty();
+          if (object) {
+            field = parser.currentName();
+            token = parser.nextToken();
+          }
+          if (token == null) break;
+          JsonNode value = PREFIX.readTree(parser);
+          int end = Math.toIntExact(parser.currentLocation().getCharOffset());
+          // EOF alone cannot tell whether a number was meant to continue, e.g. 12 vs 123.
+          if (value.isNumber() && end == text.length())
+            return Optional.of(new Truncation(object ? fields : items, field, false));
+          if (object) fields.set(field, value);
+          else items.add(value);
+          lastEnd = end;
+          previousField = field;
+          field = null;
+        }
+      } catch (JsonParseException stopped) {
+        if (!endedEarly(stopped, text.length())) return Optional.empty();
+        // Jackson may see the field name while lexing its value, before returning FIELD_NAME.
+        if (object && field == null && !Objects.equals(previousField, parser.currentName()))
+          field = parser.currentName();
+      }
+      boolean onlyMissingClose = field == null && lastEnd >= 0 && text.substring(lastEnd).isBlank();
+      return Optional.of(new Truncation(object ? fields : items, field, onlyMissingClose));
+    } catch (IOException malformed) {
+      // Unexpected EOF is the only condition that establishes a structurally usable prefix.
+      return Optional.empty();
+    }
+  }
+
+  private static boolean endedEarly(JsonParseException error, int length) {
+    if (error instanceof JsonEOFException) return true;
+    if (error.getLocation() == null || error.getLocation().getCharOffset() != length) return false;
+    // Jackson uses a generic parse exception after a trailing comma or a partial keyword.
+    String message = error.getOriginalMessage();
+    return message.startsWith("Unexpected end-of-input within/between ")
+        || PARTIAL_LITERAL.matcher(message).find();
   }
 
   private static Recovery attempt(
@@ -128,7 +216,7 @@ public final class LlmJson {
         return null;
       }
       attempts.add(new Attempt(pass, text, null, 0, 0, 0));
-      return new Recovery(value, pass, List.copyOf(attempts));
+      return new Recovery(value, pass, List.copyOf(attempts), Optional.empty());
     } catch (JsonProcessingException failed) {
       var at = failed.getLocation();
       attempts.add(
@@ -144,10 +232,11 @@ public final class LlmJson {
   }
 
   private static String clean(String raw) {
-    String text = raw.strip();
+    // Keep trailing whitespace: it can disambiguate a complete number from a cut-off one.
+    String text = raw.stripLeading();
     if (text.startsWith("```")) {
       int start = text.indexOf('\n'), end = text.lastIndexOf("```");
-      if (start > 0 && end > start) text = text.substring(start + 1, end).strip();
+      if (start > 0 && end > start) text = text.substring(start + 1, end).stripLeading();
     }
     if (!text.startsWith("{") && !text.startsWith("[")) {
       int object = text.indexOf('{'), array = text.indexOf('[');
