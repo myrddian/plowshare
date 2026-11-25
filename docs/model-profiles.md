@@ -105,6 +105,20 @@ Adding `media` requires integer `version: 2`; quoting the version is invalid.
 Use a profile-aware server: older binaries may ignore these new fields rather
 than enforce them. No shipped model's media support is assumed from its name.
 
+## Generation token limits
+
+Set `result_tokens` to a positive integer in a sampling row. Plowshare adds the
+row's configured `thinking_token_budget` and uses the sum as the provider's
+generation limit. Without a separate thinking budget, `result_tokens` is the
+whole generation limit. Any thinking the provider generates counts against that
+shared limit.
+
+Existing profiles may specify `max_tokens` directly as the combined limit. It
+must exceed `thinking_token_budget` when a reasoning block is present. Choose
+one of `result_tokens` or `max_tokens` per row. To migrate with the same total,
+set `result_tokens` to the previous `max_tokens` minus any configured thinking
+budget.
+
 ## vLLM thinking budgets and reasoning recovery
 
 Select `provider: vllm` on a local pool to enable vLLM's `thinking_token_budget`
@@ -125,7 +139,7 @@ modes:
       temperature: 1.0
       top_p: 0.95
       top_k: 20
-      max_tokens: 8192
+      result_tokens: 8192
       reasoning_effort: medium
       reasoning:
         thinking_token_budget: 4096
@@ -138,12 +152,14 @@ modes:
     exploratory: *thinking
 ```
 
-These are example budgets, not measured optimal settings. `max_tokens` must exceed
-`thinking_token_budget` to reserve output capacity after thinking. vLLM forces
-the configured end-of-reasoning marker at the token budget, allowing the same
-generation to proceed into an answer; setting `max_tokens` alone can instead
-truncate the response before an answer. This requires compatible engine/parser
-configuration; selecting the driver is an operator declaration, not a live probe.
+This example sends `thinking_token_budget: 4096` and `max_tokens: 12288` to vLLM.
+It reserves 8,192 tokens for the result even when the model uses its full
+thinking budget. vLLM can use unspent thinking tokens for the result up to the
+combined limit.
+
+vLLM forces the configured end-of-reasoning marker at the thinking budget,
+allowing the same generation to proceed into an answer. This requires compatible
+engine and parser configuration.
 See [vLLM thinking budget control](https://docs.vllm.ai/en/latest/features/reasoning_outputs/#thinking-budget-control).
 
 `reasoning_seconds` starts at the first reasoning delta and also bounds a stream

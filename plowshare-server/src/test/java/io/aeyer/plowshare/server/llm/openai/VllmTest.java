@@ -7,12 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.server.llm.OpenAiCompatible;
 import io.aeyer.plowshare.server.llm.PoolProperties;
+import io.aeyer.plowshare.server.llm.SamplingProfiles;
 import io.aeyer.plowshare.server.llm.dispatch.ChatMessage;
 import io.aeyer.plowshare.server.llm.dispatch.Deltas;
 import io.aeyer.plowshare.server.llm.dispatch.LlmTransportException;
 import io.aeyer.plowshare.server.llm.dispatch.ReasoningStoppedException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.vllm.Vllm;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +23,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 @Timeout(value = 10, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class VllmTest {
@@ -38,7 +42,27 @@ class VllmTest {
   }
 
   @Test
-  void onlyVllmSendsTheThinkingBudgetAndHostLimitsStayPrivate() throws Exception {
+  void onlyVllmSendsTheThinkingBudgetAndTheTotalIncludesTheResultBudget(@TempDir Path directory)
+      throws Exception {
+    Files.writeString(
+        directory.resolve("fixture.yaml"),
+        """
+        modes:
+          default:
+            precise: &thinking
+              result_tokens: 8192
+              reasoning_effort: medium
+              reasoning:
+                thinking_token_budget: 4096
+                reasoning_seconds: 10
+                completion_seconds: 30
+            balanced: *thinking
+            exploratory: *thinking
+        """);
+    Files.writeString(directory.resolve("models.yaml"), "models: {fixture: {profile: fixture}}");
+    Sampling sampling =
+        SamplingProfiles.read(directory).resolve("fixture", Sampling.Intent.BALANCED).sampling();
+
     try (MockWebServer server = new MockWebServer()) {
       server.enqueue(
           new MockResponse()
@@ -49,13 +73,15 @@ class VllmTest {
         assertEquals(
             "done",
             driver
-                .complete("fixture", List.of(ChatMessage.user("review")), sampling(), List.of())
+                .complete("fixture", List.of(ChatMessage.user("review")), sampling, List.of())
                 .content());
       }
       var request = server.takeRequest(1, TimeUnit.SECONDS);
       var body = new ObjectMapper().readTree(request.getBody().readUtf8());
       assertEquals(4096, body.path("thinking_token_budget").asInt());
+      assertEquals(12288, body.path("max_tokens").asInt());
       assertEquals("medium", body.path("reasoning_effort").asText());
+      assertTrue(body.path("result_tokens").isMissingNode());
       assertTrue(body.path("reasoning").isMissingNode());
       try (OpenAiCompatible standard =
           new OpenAiCompatible(properties(server), new ObjectMapper())) {
@@ -63,7 +89,7 @@ class VllmTest {
             IllegalArgumentException.class,
             () ->
                 standard.complete(
-                    "fixture", List.of(ChatMessage.user("review")), sampling(), List.of()));
+                    "fixture", List.of(ChatMessage.user("review")), sampling, List.of()));
       }
       assertEquals(1, server.getRequestCount());
     }

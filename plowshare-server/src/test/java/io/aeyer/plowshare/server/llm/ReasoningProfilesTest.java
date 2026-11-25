@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.llm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import java.nio.file.Files;
@@ -14,14 +15,17 @@ class ReasoningProfilesTest {
   @TempDir Path directory;
 
   private Sampling load(String reasoning, String effort, int maxTokens) throws Exception {
-    String row =
+    return load(
         "{max_tokens: "
             + maxTokens
             + ", reasoning_effort: "
             + effort
             + ", reasoning: "
             + reasoning
-            + "}";
+            + "}");
+  }
+
+  private Sampling load(String row) throws Exception {
     Files.writeString(
         directory.resolve("loop-control.yaml"),
         "modes:\n  thinking:\n    precise: "
@@ -47,6 +51,7 @@ class ReasoningProfilesTest {
             "medium",
             8192);
     var policy = sampling.reasoning().orElseThrow();
+    assertEquals(8192, sampling.maxTokens().orElseThrow());
     assertEquals(4096, policy.thinkingTokenBudget());
     assertEquals(Duration.ofSeconds(120), policy.reasoningTimeout());
     assertEquals(Duration.ofSeconds(240), policy.completionTimeout());
@@ -67,5 +72,30 @@ class ReasoningProfilesTest {
           "{" + valid + ", repetition_window_characters: 100000}"
         }) assertThrows(RuntimeException.class, () -> load(invalid, "medium", 8192));
     assertThrows(RuntimeException.class, () -> load("{" + valid + "}", "medium", 4096));
+  }
+
+  @Test
+  void resultBudgetWithoutAThinkingReserveUsesTheSharedLimit() throws Exception {
+    Sampling sampling = load("{result_tokens: 4096, reasoning_effort: medium}");
+    assertEquals(4096, sampling.maxTokens().orElseThrow());
+    assertEquals(Sampling.Effort.MEDIUM, sampling.reasoningEffort().orElseThrow());
+    assertTrue(sampling.reasoning().isEmpty());
+  }
+
+  @Test
+  void resultBudgetRequiresAnUnambiguousRepresentableTotal() {
+    String reasoning =
+        "reasoning: {thinking_token_budget: 4096, reasoning_seconds: 120, completion_seconds: 240}";
+    for (String row :
+        new String[] {
+          "{result_tokens: 0}",
+          "{result_tokens: 8192, max_tokens: 8192, " + reasoning + "}",
+          "{result_tokens: 0, " + reasoning + "}",
+          "{result_tokens: -1, " + reasoning + "}",
+          "{result_tokens: 1.5, " + reasoning + "}",
+          "{result_tokens: 2147483647, " + reasoning + "}"
+        }) {
+      assertThrows(IllegalStateException.class, () -> load(row), row);
+    }
   }
 }

@@ -31,14 +31,8 @@
 # whether it was read. The day somebody confirms the spelling against a live
 # endpoint, one enum constant in OpenAiTransport.carries() turns this file on.
 #
-# MAX_TOKENS. 30 000 is the vendor's own figure for a high-effort generation, so
-# it is a ceiling that cannot truncate a correct answer rather than a budget
-# somebody guessed. It is here and not in the other two profiles because it is
-# the only such figure any of these vendors publishes. PoolProperties:343 records
-# that this server's ten-minute stream cap exists precisely because there was no
-# max_tokens to stop a runaway; this is the first real bound, and it is a loose
-# one -- a tight per-task bound is a per-agent fact and does not belong in a file
-# about a model.
+# The 30000-token limit covers all generated tokens, including thinking.
+# Reasoning effort changes how the model uses that shared budget.
 
 version: 2
 response-guard: harmony
@@ -51,16 +45,16 @@ modes:
       temperature: 1.0
       top_p: 0.95
       reasoning_effort: low
-      max_tokens: 30000
+      result_tokens: 30000
 
     balanced:
       temperature: 1.0
       top_p: 0.95
       reasoning_effort: medium
-      max_tokens: 30000
+      result_tokens: 30000
 
     exploratory:
       temperature: 1.0
       top_p: 0.95
       reasoning_effort: high
-      max_tokens: 30000
+      result_tokens: 30000
