@@ -166,6 +166,11 @@ public interface MessagingRepository {
 
   Optional<String> externalCommand(String message);
 
+  void bindMailboxAlert(String message, MessageService.PersonalAlert alert);
+
+  Optional<MessageService.PersonalAlert> mailboxAlert(
+      String message, String account, String project, String conversation, String agent);
+
   void lockRequest(String message);
 
   Optional<String> finalReply(String message);

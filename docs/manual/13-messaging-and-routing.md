@@ -391,6 +391,45 @@ its synchronized server union working tree. Server default changes require resta
 ordinary manifest changes are read for new sends. Another account's Personal
 remains inaccessible regardless of manifest contents or route alias.
 
+### Route alerts to your Personal bot
+
+For [schedule alerts and Personal reactions](08-automation-and-integrations.md#notify-your-personal-bot-when-a-result-arrives),
+add `routes/internal.json` to `routing.routeFiles` in your Personal workspace's
+active manifest. If you have no manifest, you can create a
+root-level `plowshare` file with this configuration. Replace `alice` with your
+account name.
+
+```json
+{
+  "version": 1,
+  "name": "Personal:alice",
+  "routing": {"routeFiles": ["routes/internal.json"]}
+}
+```
+
+Create or update `routes/internal.json` in the same Personal workspace. Append
+the route to any existing routes. Replace `farnsworth` with the definition name
+of your Personal bot and supply the ID of the active Personal conversation
+where you want alerts.
+
+```json
+{
+  "version": 1,
+  "routes": [
+    {
+      "name": "personal-alerts",
+      "project": "Personal:alice",
+      "agent": "farnsworth",
+      "conversation": "cnv_0123456789ABCDEF"
+    }
+  ]
+}
+```
+
+Omit `conversation` to use the bot's default messaging instance. Let both
+files sync to the server before enabling the schedule alert or activating the
+reaction. The route must stay within your own Personal workspace.
+
 ## What crosses the project boundary
 
 The message body crosses. The sender's tool grants, file roots, private conversation

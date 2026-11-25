@@ -15,6 +15,11 @@ type Page = { readonly offset?: number; readonly limit?: number };
 export interface AdministrativePayloads {
   'approval.policy.get': Record<string, never>;
   'approval.policy.save': { readonly policy: ApprovalPolicy };
+  'personal.subscription.preview': Record<string, never>;
+  'personal.subscription.activate': {
+    readonly revision: string;
+    readonly expectedActiveRevision: string;
+  };
   'approval.list': Tier & {
     readonly conversation?: string | null;
     readonly mine?: boolean;

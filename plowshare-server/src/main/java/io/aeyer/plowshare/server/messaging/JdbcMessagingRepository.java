@@ -408,6 +408,42 @@ public final class JdbcMessagingRepository implements MessagingRepository {
     changed(jdbc.update("UPDATE message_routes SET handled_at = now() WHERE message = ?", message));
   }
 
+  @Override
+  public void bindMailboxAlert(String message, MessageService.PersonalAlert alert) {
+    if (alert.firing() == null) throw new IllegalArgumentException("A Mailbox firing is required");
+    int changed =
+        jdbc.update(
+            "UPDATE message_external_tasks SET personal_alert_item=?,personal_alert_firing=?"
+                + " WHERE message=? AND personal_alert_item IS NULL",
+            alert.item(),
+            alert.firing(),
+            message);
+    if (changed != 1) throw new IllegalStateException("The alert has no new ingress receipt");
+  }
+
+  @Override
+  public Optional<MessageService.PersonalAlert> mailboxAlert(
+      String message, String account, String project, String conversation, String agent) {
+    return jdbc
+        .query(
+            """
+            SELECT t.personal_alert_item,t.personal_alert_firing
+            FROM message_external_tasks t
+            JOIN message_routes r ON r.message=t.message
+            JOIN message_instances i ON i.id=r.recipient
+            WHERE t.message=? AND t.account=? AND t.project=? AND t.personal_alert_item IS NOT NULL
+              AND i.conversation=? AND i.agent=? AND i.account=t.account AND i.project=t.project
+            """,
+            (row, index) -> new MessageService.PersonalAlert(row.getString(1), row.getString(2)),
+            message,
+            account,
+            project,
+            conversation,
+            agent)
+        .stream()
+        .findFirst();
+  }
+
   public Optional<String> externalCommand(String message) {
 
     return jdbc

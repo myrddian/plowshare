@@ -6,8 +6,10 @@ import io.aeyer.plowshare.server.agents.CommandCatalog;
 import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.OrchestrationResolver;
 import io.aeyer.plowshare.server.agents.SkillResolver;
+import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -38,6 +40,11 @@ public final class ScheduleActionAuthority implements ScheduleDefinitions.Author
 
   public void validate(ScheduleDefinitionStore.Source source, ScheduledWork definition) {
     var target = definition.target();
+    if (definition.notifyPersonalBot() != null) {
+      if (ServiceCredentials.principal(source.account())
+          || !PersonalSpaces.name(source.account()).equals(source.project()))
+        throw new CallerFault("Only the owner's Personal schedules can notify a Personal bot");
+    }
     String session = files.executionSession(source);
     String project = target.project() == null ? source.project() : target.project();
     if (target.kind().equals("message")) {

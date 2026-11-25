@@ -35,7 +35,9 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
         "WITH RECURSIVE edges(child,parent) AS (SELECT id,parent_id FROM conversations WHERE parent_id IS NOT NULL"
             + " UNION SELECT conductor_conversation,caller_conversation FROM orchestrations WHERE caller_conversation IS NOT NULL"
             + " UNION SELECT o.conductor_conversation,p.conductor_conversation FROM orchestrations o JOIN orchestrations p ON p.id=o.parent"
-            + " UNION SELECT conductor_conversation,id FROM orchestrations), parents(id) AS (SELECT ?::text UNION SELECT e.parent FROM edges e JOIN parents p ON e.child=p.id) SELECT EXISTS(SELECT 1 FROM parents p JOIN information_job_inputs i ON i.job_id=p.id)",
+            + " UNION SELECT conductor_conversation,id FROM orchestrations), parents(id) AS (SELECT ?::text UNION SELECT e.parent FROM edges e JOIN parents p ON e.child=p.id)"
+            + " SELECT EXISTS(SELECT 1 FROM parents p JOIN information_job_inputs i ON i.job_id=p.id)"
+            + " OR EXISTS(SELECT 1 FROM parents p JOIN information_relay_log_inputs i ON i.log_id=p.id)",
         Boolean.class,
         log);
   }
@@ -82,12 +84,25 @@ public class JdbcJobInformationRepository implements JobInformationRepository {
             + " UNION SELECT conductor_conversation,caller_conversation FROM orchestrations WHERE caller_conversation IS NOT NULL"
             + " UNION SELECT o.conductor_conversation,p.conductor_conversation FROM orchestrations o JOIN orchestrations p ON p.id=o.parent"
             + " UNION SELECT conductor_conversation,id FROM orchestrations), parents(id) AS"
-            + " (SELECT ?::text UNION SELECT e.parent FROM edges e JOIN parents p ON e.child=p.id)"
+            + " (SELECT ?::text UNION SELECT e.parent FROM edges e JOIN parents p ON e.child=p.id),"
+            + " relay_sources AS (INSERT INTO information_relay_log_inputs(log_id,project_id)"
+            + " SELECT DISTINCT ?,i.project_id FROM information_relay_log_inputs i JOIN parents p ON p.id=i.log_id ON CONFLICT DO NOTHING)"
             + " INSERT INTO information_job_inputs(job_id,owner_handle,revision_id,scope,project_name,include_shared)"
             + " SELECT DISTINCT ?,i.owner_handle,i.revision_id,i.scope,i.project_name,i.include_shared"
             + " FROM information_job_inputs i JOIN parents p ON p.id=i.job_id ON CONFLICT DO NOTHING",
         source,
+        target,
         target);
+  }
+
+  @Override
+  public void bindSourceProject(String log, long sourceProject) {
+    Objects.requireNonNull(log, "Relay log");
+    if (sourceProject < 1) throw new IllegalArgumentException("Invalid Relay source project");
+    jdbc.update(
+        "INSERT INTO information_relay_log_inputs(log_id,project_id) VALUES (?,?) ON CONFLICT DO NOTHING",
+        log,
+        sourceProject);
   }
 
   public boolean logAllowed(String log, String account) {

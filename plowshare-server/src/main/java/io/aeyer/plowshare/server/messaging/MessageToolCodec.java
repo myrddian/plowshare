@@ -6,10 +6,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
 import java.io.IOException;
+import java.util.List;
 
-/** Typed output boundary for the unchanged message tool receipts and incoming-message text. */
-final class MessageToolCodec {
+/** Typed output boundary for message receipts, refusals, directory pages and incoming text. */
+public final class MessageToolCodec {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -42,10 +44,35 @@ final class MessageToolCodec {
 
   private record DelegateResult(Outcome.Ending ending, String output) {}
 
+  // Keep the receipt's `message` field reserved for an accepted message ID.
+  private record Refusal(Code code, String detail) {}
+
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record DirectoryEntry(
+      String definition,
+      String project,
+      String instanceKind,
+      String to,
+      boolean messageable,
+      Code code) {}
+
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record DirectoryPage(List<DirectoryEntry> items, Integer nextOffset) {}
+
   private MessageToolCodec() {}
 
   static String receipt(Receipt receipt) {
     return encode(receipt);
+  }
+
+  public static String refusal(Code code, String detail) {
+    return encode(new Refusal(code, detail));
+  }
+
+  static String directory(DirectoryPage page) {
+    return encode(page);
   }
 
   static String incoming(IncomingMessage message) {

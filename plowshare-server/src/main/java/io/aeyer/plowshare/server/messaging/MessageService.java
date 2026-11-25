@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.messaging;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
+import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.Budget;
@@ -30,6 +31,26 @@ import java.util.function.Consumer;
  */
 public interface MessageService
     extends Dispatcher.Wakes, Messaging, NativeMessageExports, MessageIngress {
+  /** Verify a named alert route resolves to an eligible bot in the account's own Personal home. */
+  void requirePersonalAlertRoute(String account, String route);
+
+  /**
+   * Enqueue a reference-only alert through private messaging. Identical item and route retry
+   * safely.
+   */
+  String sendPersonalAlert(
+      String account, String route, PersonalAlert reference, RelayCausation cause);
+
+  /** A notice may carry a capability to read one exact account Mailbox result. */
+  record PersonalAlert(String item, String firing) {
+    public PersonalAlert {
+      item = ScheduledWork.identity(item, "Personal alert item");
+      if (firing != null) firing = ScheduledWork.identity(firing, "Personal alert firing");
+    }
+  }
+
+  Optional<PersonalAlert> mailboxAlertFor(RunExtras.Context context);
+
   /** Signals waiting instances when a turn in their retained conversation releases its gate. */
   void whenFree(String conversation);
 
@@ -214,6 +235,11 @@ public interface MessageService
 
   public interface Definitions {
     AgentDefinition resolve(String name, String project);
+
+    /** The server-side exported candidates visible to this account in the messaging destination. */
+    default List<String> exported(String account, String project) {
+      return List.of();
+    }
   }
 
   public record Address(
@@ -225,6 +251,11 @@ public interface MessageService
 
   public interface Routing {
     Address resolve(String account, String source, String project, String to, String route);
+
+    /** Resolve a direct destination using the same account-specific aliases as message sends. */
+    default String project(String account, String source, String destination) {
+      return destination == null ? source : destination;
+    }
 
     void require(String account, String source, String destination);
 

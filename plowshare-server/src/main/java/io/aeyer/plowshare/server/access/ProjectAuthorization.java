@@ -438,6 +438,12 @@ public class ProjectAuthorization {
       return;
     }
     boolean service = ServiceCredentials.principal(account);
+    if (operation.equals("personal.subscription.preview")
+        || operation.equals("personal.subscription.activate")) {
+      if (service || !accounts.isEnabled(account))
+        throw new CallerFault("Personal subscriptions need an active human account");
+      return;
+    }
     if (operation.equals("approval.policy.get") || operation.equals("approval.policy.save")) {
       // The policy service verifies the exact permanent USER owner; a project grant is not
       // authority to manage another account's consent or to let a service approve itself.

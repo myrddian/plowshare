@@ -125,7 +125,8 @@ class NothingEnumeratesImagesTest {
    *
    * <p>{@code send_message} sends supplied text and returns a routing receipt. It does not inspect
    * image stores or enumerate image ids. Any ids carried in a later reply are data explicitly
-   * supplied by that participant.
+   * supplied by that participant. {@code agent_list} returns permitted agent addresses and routing
+   * decisions without image data.
    *
    * <p>{@code relay_publish} publishes supplied TEXT and returns only a broker receipt. It cannot
    * read topic bodies, image stores or filesystem listings. Topic authority is explicitly granted;
@@ -135,6 +136,7 @@ class NothingEnumeratesImagesTest {
   void the_tools_an_agent_may_hold_are_these_and_none_of_them_lists_images() {
     List<String> allowed =
         List.of(
+            "agent_list",
             "agent_run",
             "code_map",
             "conversation_chat",
@@ -203,7 +205,7 @@ class NothingEnumeratesImagesTest {
                         && !Set.of("document_search", "document_list", "document_rank")
                             .contains(tool)
                         && !tool.equals(RelayPublishTool.NAME)
-                        && !tool.equals("send_message"))
+                        && !Set.of("agent_list", "send_message").contains(tool))
             .toList(),
         declared.stream()
             .filter(tool -> !tool.equals("run") && !tool.equals("information_write"))

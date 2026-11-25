@@ -122,19 +122,28 @@ public final class JdbcApplicationInboxStore implements ApplicationInboxStore {
             // The application publishes this output to its Managers; it does not grant access to
             // the private source log. Inspection of that log still uses ordinary log authorization.
             if (jdbc.update(
-                    "INSERT INTO user_inbox(id,handle,kind,ending,answer,about,arrived_at) "
-                        + "VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
-                    identity(project, key, manager),
+                    "INSERT INTO user_inbox(id,handle,kind,ending,answer,about,arrived_at,"
+                        + "attention_copy_project,attention_copy_of) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+                    attentionIdentity(project, key, manager),
                     manager,
                     notice.kind().equals("run") ? "application" : notice.kind(),
                     notice.ending(),
                     notice.text(),
                     notice.about(),
-                    Timestamp.from(at))
+                    Timestamp.from(at),
+                    project,
+                    id)
                 == 1) inserted.add(manager);
           }
           return List.copyOf(inserted);
         });
+  }
+
+  private static String attentionIdentity(long project, String key, String account) {
+    // Preserve existing attention IDs while separating the account named "application" from
+    // the original row's namespace.
+    return identity(
+        project, key, account.equals("application") ? "\0attention:application" : account);
   }
 
   private static String identity(long project, String key, String recipient) {
@@ -196,6 +205,35 @@ public final class JdbcApplicationInboxStore implements ApplicationInboxStore {
   }
 
   @Override
+  public boolean containsSubscriptionItem(long project, String item, String kind) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS(SELECT 1 FROM user_inbox
+          WHERE application_project_id=? AND id=? AND kind=? AND settled_at IS NULL AND about IS NULL)
+        """,
+            Boolean.class,
+            project,
+            item,
+            kind));
+  }
+
+  @Override
+  public Optional<InboxItem> subscriptionItem(long project, String item) {
+    return jdbc
+        .query(
+            "SELECT "
+                + COLUMNS
+                + " FROM user_inbox WHERE application_project_id=? AND id=?"
+                + " AND settled_at IS NULL AND about IS NULL AND octet_length(answer)<=32768",
+            (row, index) -> item(row),
+            project,
+            item)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
   public int read(long project, List<String> ids, Instant at) {
     if (project < 1 || ids == null || ids.isEmpty() || ids.size() > 200)
       throw new IllegalArgumentException("Choose 1..200 application inbox items");
@@ -227,7 +265,7 @@ public final class JdbcApplicationInboxStore implements ApplicationInboxStore {
                 + "AND application_project_id IS NULL AND kind='approval' AND read_at IS NULL AND settled_at IS NULL "
                 + "AND (question_alert_attempted_at IS NULL OR question_alert_attempted_at<=?)",
             Timestamp.from(at),
-            identity(project, key, manager),
+            attentionIdentity(project, key, manager),
             manager,
             Timestamp.from(at.minus(retry)))
         == 1;

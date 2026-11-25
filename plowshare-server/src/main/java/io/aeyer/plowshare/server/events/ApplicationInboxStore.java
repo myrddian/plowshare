@@ -46,6 +46,11 @@ public interface ApplicationInboxStore {
 
   InboxStore.Page page(long project, boolean unread, int offset, int limit);
 
+  /** Exact published result eligible for a subscription, with no acknowledgement. */
+  Optional<InboxItem> subscriptionItem(long project, String item);
+
+  boolean containsSubscriptionItem(long project, String item, String kind);
+
   int read(long project, List<String> ids, Instant at);
 
   int unread(long project);

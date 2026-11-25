@@ -1,12 +1,15 @@
 package io.aeyer.plowshare.server.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentTool;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -18,7 +21,21 @@ class InboxNoticingTest {
   private final Inbox inbox = mock(Inbox.class);
   private final SpeakerHandles speakers =
       session -> "s-enzo".equals(session) ? Optional.of("enzo") : Optional.empty();
-  private final InboxNoticing noticing = new InboxNoticing(store, inbox, speakers);
+  private final InboxNoticing noticing = new InboxNoticing(store, inbox, speakers, true);
+
+  @Test
+  void personal_default_requires_the_owners_home_and_authenticated_session() {
+    Home personal = Home.of(PersonalSpaces.name("enzo"));
+    assertTrue(noticing.defaultInPersonal(personal, "enzo", "s-enzo"));
+    assertFalse(noticing.defaultInPersonal(Home.of("project"), "enzo", "s-enzo"));
+    assertFalse(noticing.defaultInPersonal(personal, "enzo", null));
+    assertFalse(noticing.defaultInPersonal(personal, "enzo", "s-nobody"));
+    assertFalse(
+        noticing.defaultInPersonal(Home.of(PersonalSpaces.name("alice")), "alice", "s-enzo"));
+    assertFalse(
+        new InboxNoticing(store, inbox, speakers, false)
+            .defaultInPersonal(personal, "enzo", "s-enzo"));
+  }
 
   @Test
   void new_unread_arrivals_since_the_last_turn_are_noticed_with_when_and_how_many() {

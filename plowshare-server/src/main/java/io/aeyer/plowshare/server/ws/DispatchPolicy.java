@@ -74,6 +74,7 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "document.chunk",
           "document.citations",
           "inbox.list",
+          "personal.subscription.preview",
           "approval.list",
           "orchestration.list",
           "orchestration.status",

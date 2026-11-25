@@ -15,6 +15,30 @@ public final class JdbcRelayRetirementRepository implements RelayRetirementRepos
   }
 
   @Override
+  public void retireMailboxCursor(Relay.SubscriptionKey owner) {
+    if (!(owner.topic().scope() instanceof Relay.ProjectScope)
+        || !owner.topic().name().equals("mailbox.item.added")
+        || !owner.subscriber().matches("personal-mailbox\\.[0-9a-f-]{36}"))
+      throw new IllegalArgumentException("Not a Personal Mailbox cursor");
+    work.inTransaction(
+        () -> {
+          String scope = RelayScopeCodec.write(owner.topic());
+          String topic = owner.topic().name();
+          jdbc.query(
+              "SELECT name FROM relay_topics WHERE scope_key=? AND name=? FOR UPDATE",
+              row -> {},
+              scope,
+              topic);
+          jdbc.update(
+              "DELETE FROM relay_subscriptions WHERE scope_key=? AND topic=? AND subscriber=?",
+              scope,
+              topic,
+              owner.subscriber());
+          return null;
+        });
+  }
+
+  @Override
   public boolean retireOwned(Relay.SubscriptionKey owner) {
     Objects.requireNonNull(owner);
     return work.inTransaction(

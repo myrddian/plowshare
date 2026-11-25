@@ -13,6 +13,45 @@ const input = (operation, value, valid) =>
 const result = (operation, value, valid) =>
   cases.push({ boundary: 'result', operation, value, valid });
 const push = (value, valid) => cases.push({ boundary: 'push', value, valid });
+const personalRevision = 'a'.repeat(64);
+input('personal.subscription.preview', {}, true);
+input('personal.subscription.preview', {project:'another-personal'}, false);
+input('personal.subscription.activate', {revision:personalRevision,expectedActiveRevision:''}, true);
+input('personal.subscription.activate', {revision:personalRevision,expectedActiveRevision:'b'.repeat(64)}, true);
+input('personal.subscription.activate', {revision:personalRevision}, false);
+for (const value of ['incorrect', 'A'.repeat(64), personalRevision+'\n', '\n', null]) {
+  input('personal.subscription.activate', {revision:value,expectedActiveRevision:''}, false);
+  input('personal.subscription.activate', {revision:personalRevision,expectedActiveRevision:value}, false);
+}
+const personalView = {revision:personalRevision,activeRevision:'',subscriptions:[],active:[]};
+result('personal.subscription.preview', personalView, true);
+const personalStatus = {id:'prices',state:'completed',item:'inb_fixture',job:'job_fixture',detail:'ANSWERED'};
+result('personal.subscription.activate', {...personalView,activeRevision:personalRevision,active:[personalStatus]}, true);
+result('personal.subscription.activate', {...personalView,active:[{...personalStatus,state:false}]}, false);
+const personalRelaySubscription = {
+  id:'follow-research', source:{kind:'relay',project:'research',topic:'research.completed'},
+  handler:{kind:'skill',agent:'assistant',name:'track'}, paused:false,
+};
+const personalRelayView = {...personalView,subscriptions:[personalRelaySubscription],
+  active:[{...personalStatus,item:null,event:'event_fixture'}]};
+result('personal.subscription.preview', personalRelayView, true);
+result('personal.subscription.preview', {...personalRelayView,
+  subscriptions:[{...personalRelaySubscription,source:{kind:'relay',topic:'research.completed'}}]}, false);
+const personalNativeSources = [
+  {kind:'application-inbox',project:'research',copy:'project'},
+  {kind:'application-inbox',project:'research',copy:'attention'},
+  {kind:'job',project:'research',event:'ended'},
+  {kind:'orchestration',project:'research',event:'ended'},
+  {kind:'board',project:'research',event:'message.posted'},
+  {kind:'board',project:'research',event:'resolved'},
+  {kind:'information',project:'research',event:'report.finalised'},
+];
+for (const source of personalNativeSources)
+  result('personal.subscription.preview', {...personalView,
+    subscriptions:[{...personalRelaySubscription,source}]}, true);
+result('personal.subscription.preview', {...personalView, subscriptions:[{
+  ...personalRelaySubscription,source:{kind:'application-inbox',project:'research',copy:'both'},
+}]}, false);
 // External selectors are opaque account-local labels; no SDK may repair or reinterpret them.
 const externalLocator = {project:'fixture',source:'sdk.instance',externalConversation:'Case/opaque:ID-1'};
 for (const operation of ['conversation.open.ex','agent.run.ex']) {

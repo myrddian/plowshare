@@ -92,7 +92,7 @@ describe('typed requests cover the actual server contracts', () => {
       (frame) => !cli.has(frame),
     );
     expect([...cli, ...remaining].sort()).toEqual(typed);
-    expect(cli.size).toBe(291);
+    expect(cli.size).toBe(293);
     expect(remaining.sort()).toEqual([
       'acting.context.close',
       'acting.context.open',
@@ -103,6 +103,12 @@ describe('typed requests cover the actual server contracts', () => {
     ]);
   });
   it.each([
+    [
+      'personal.subscription.activate',
+      'personal/PersonalEventSubscriptions',
+      'Activation',
+      [],
+    ],
     [
       'conversation.open.ex',
       'api/OpenConversationRequestEx',

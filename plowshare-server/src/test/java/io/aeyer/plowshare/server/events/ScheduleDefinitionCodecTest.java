@@ -7,6 +7,36 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import org.junit.jupiter.api.Test;
 
 class ScheduleDefinitionCodecTest {
+  @Test
+  void personal_bot_notice_is_optional_and_requires_a_local_mailbox() {
+    var base = definition("agent", null, null);
+    assertFalse(ScheduleDefinitionCodec.write(base).contains("notifyPersonalBot"));
+    var notice = new ScheduledWork.PersonalBotNotice("personal-alerts");
+    var active =
+        new ScheduledWork(
+            base.version(),
+            base.cron(),
+            base.zone(),
+            base.paused(),
+            base.action(),
+            base.target(),
+            base.limits(),
+            notice);
+    assertEquals(active, ScheduleDefinitionCodec.read(ScheduleDefinitionCodec.write(active)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ScheduledWork(
+                base.version(),
+                base.cron(),
+                base.zone(),
+                base.paused(),
+                base.action(),
+                new ScheduledWork.Target("mailbox", "shared", null, null, null),
+                base.limits(),
+                notice));
+  }
+
   static ScheduledWork definition(String kind, String name, String mode) {
     return new ScheduledWork(
         1,

@@ -31,9 +31,10 @@ public final class JdbcRelayRepository implements RelayRepository {
   // The payload bytes live once in relay_payloads; a publication names them by digest. Every read
   // of a publication joins the store in its own query, so a page of records costs one query and
   // the running byte sum below can use the length PostgreSQL already recorded.
-  private static final String PUBLICATION_COLUMNS =
+  private static final String PUBLICATION_METADATA =
       "p.position, p.event_id, p.publisher, p.occurred_at, p.published_at, p.correlation_id,"
-          + " p.causation_id, p.relay_causation::text, p.schema_version, q.payload::text";
+          + " p.causation_id, p.relay_causation::text, p.schema_version";
+  private static final String PUBLICATION_COLUMNS = PUBLICATION_METADATA + ", q.payload::text";
   private static final String PUBLICATION_SOURCE =
       " FROM relay_publications p JOIN relay_payloads q ON q.digest=p.payload_digest";
 
@@ -450,6 +451,40 @@ public final class JdbcRelayRepository implements RelayRepository {
   public Relay.Topic topic(Relay.TopicKey key) {
     Objects.requireNonNull(key, "key");
     return transactions.inTransaction(() -> topic(key, false));
+  }
+
+  @Override
+  public Relay.Follow follow(Relay.TopicKey key, UUID generation, long after) {
+    return transactions.inTransaction(
+        () -> {
+          // Commit the owning intent and cursor before prune or replacement can change this
+          // incarnation. A mismatch or gap returns metadata without materializing a body.
+          Relay.Topic topic = topic(key, false);
+          if (!generation.equals(topic.generation())
+              || after < topic.expiredThrough()
+              || after >= topic.lastPosition()) return new Relay.Follow(topic, Optional.empty());
+          var next =
+              jdbc
+                  .query(
+                      "SELECT "
+                          + PUBLICATION_METADATA
+                          + ", CASE WHEN q.byte_length <= 65536 THEN q.payload::text END AS payload"
+                          + PUBLICATION_SOURCE
+                          + " WHERE p.scope_key=? AND p.topic=? AND p.position>? ORDER BY p.position LIMIT 1",
+                      (row, index) ->
+                          new Relay.Followed(
+                              row.getLong("position"),
+                              row.getString("event_id"),
+                              row.getString("payload") == null
+                                  ? Optional.empty()
+                                  : Optional.of(publication(row, topic))),
+                      RelayScopeCodec.write(key),
+                      key.name(),
+                      after)
+                  .stream()
+                  .findFirst();
+          return new Relay.Follow(topic, next);
+        });
   }
 
   @Override

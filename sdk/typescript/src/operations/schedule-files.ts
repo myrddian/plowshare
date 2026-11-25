@@ -24,6 +24,7 @@ export interface ScheduleDefinition {
     readonly maxTurns: number | null;
     readonly queueCap: number;
   };
+  readonly notifyPersonalBot?: { readonly route: string };
 }
 export interface ScheduleFile {
   readonly name: string;
@@ -114,6 +115,7 @@ export function schedulePayloadProblem(
       'action',
       'target',
       'limits',
+      'notifyPersonalBot',
     ]) ||
     d['version'] !== 1 ||
     !text(d['cron']) ||
@@ -167,6 +169,15 @@ export function schedulePayloadProblem(
       return 'message targets need to or route; a route supplies its project';
   } else if (t['to'] != null || t['route'] != null)
     return 'only message targets take to or route';
+  const notice = d['notifyPersonalBot'];
+  if (
+    notice !== undefined &&
+    (!object(notice, ['route']) ||
+      !identity(notice['route']) ||
+      t['kind'] !== 'mailbox' ||
+      t['project'] != null)
+  )
+    return 'notifyPersonalBot requires a named route and a local Mailbox target';
   if (l != null) {
     if (
       !object(l, ['maxModelCalls', 'maxTurns', 'queueCap']) ||

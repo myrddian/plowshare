@@ -769,6 +769,9 @@ public final class FrameTypes {
   /** Replace the authenticated owner's policy against an expected revision. */
   public static final String APPROVAL_POLICY_SAVE = "approval.policy.save";
 
+  public static final String PERSONAL_SUBSCRIPTION_PREVIEW = "personal.subscription.preview";
+  public static final String PERSONAL_SUBSCRIPTION_ACTIVATE = "personal.subscription.activate";
+
   /** Union projects — spec 2026-09-14-a-project-can-be-a-union. */
   public static final String UNION_STATUS = "union.status";
 

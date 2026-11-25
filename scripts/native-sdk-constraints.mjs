@@ -225,6 +225,10 @@ export function constrain(graph) {
       field(s, 'expectedRevision', {pattern:uuid,minLength:36,maxLength:36});
       if (op === 'application.activate') field(s, 'revision', {pattern:uuid,minLength:36,maxLength:36});
     }
+    if (op === 'personal.subscription.activate') {
+      field(s, 'revision', {pattern:'^[0-9a-f]{64}$',minLength:64,maxLength:64});
+      field(s, 'expectedActiveRevision', {pattern:'^(?:[0-9a-f]{64})?$',minLength:0,maxLength:64,nonblank:false,trimmed:true});
+    }
     if (op === 'application.create' || op === 'application.storage.set') {
       field(s, 'writableAreas', {maxItems:100, uniqueItems:true});
       field(s, 'type', {pattern:'^(MANAGED|DISJOINT)$'});

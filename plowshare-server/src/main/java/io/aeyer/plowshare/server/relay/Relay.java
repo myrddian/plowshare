@@ -68,6 +68,14 @@ public interface Relay {
    */
   Optional<Publication> retained(TopicKey key, String eventId);
 
+  /** Reads one event for an owning domain with its own cursor. Does not register a broker group. */
+  Follow follow(TopicKey topic, UUID generation, long after);
+
+  record Follow(Topic topic, Optional<Followed> next) {}
+
+  /** An oversized body still has a position so its owner can record an explicit disposition. */
+  record Followed(long position, String eventId, Optional<Publication> publication) {}
+
   /** Registers independently; repeating registration returns the existing position unchanged. */
   Subscription subscribe(SubscriptionKey key, Start start);
 

@@ -203,6 +203,8 @@ var operationNames = []string{
 	"orchestration.resume",
 	"orchestration.start",
 	"orchestration.status",
+	"personal.subscription.activate",
+	"personal.subscription.preview",
 	"proc.calls",
 	"proc.inspect",
 	"proc.list",

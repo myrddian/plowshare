@@ -659,6 +659,68 @@ class BoardMessagingTest {
   }
 
   @Test
+  void a_personal_alert_wakes_the_pinned_bot_once_and_only_it_gets_the_mailbox_reference()
+      throws Exception {
+    personalRouting();
+    String project = PersonalSpaces.name("enzo");
+    Home home = Home.of(project);
+    String conversation =
+        fixture.conversations.open(home, Budget.of(20), TurnCap.of(4), "enzo").id();
+    Path root = personalSpaces.workspace(project).orElseThrow();
+    Files.writeString(
+        root.resolve("plowshare"),
+        """
+        {"version":1,"name":"Personal:enzo","routing":{"routeFiles":["routes.json"]}}
+        """);
+    Files.writeString(
+        root.resolve("routes.json"),
+        """
+        {"version":1,"routes":[
+          {"name":"alerts","project":"Personal:enzo","agent":"bot","conversation":"%s"},
+          {"name":"ordinary-agent","project":"Personal:enzo","agent":"reviewer"},
+          {"name":"shared","project":"payments","agent":"bot"}
+        ]}
+        """
+            .formatted(conversation));
+    assertThrows(MessageRefused.class, () -> messages.requirePersonalAlertRoute("enzo", "shared"));
+    assertThrows(
+        MessageRefused.class, () -> messages.requirePersonalAlertRoute("enzo", "ordinary-agent"));
+    messages.requirePersonalAlertRoute("enzo", "alerts");
+    var reference = new MessageService.PersonalAlert("inb_Result", "fir_Schedule");
+    var cause = RelayCausation.root("test-alert");
+    String message = messages.sendPersonalAlert("enzo", "alerts", reference, cause);
+    assertEquals(message, messages.sendPersonalAlert("enzo", "alerts", reference, cause));
+    assertFalse(messages.route(message).orElseThrow().replyExpected());
+    var wake = incomingWake(message);
+    voice.busy = true;
+    assertTrue(messages.busy(wake));
+    voice.busy = false;
+    messages.start(wake, (log, outcome) -> {});
+    assertEquals(1, voice.calls.size());
+    assertEquals(conversation, voice.calls.getFirst().instance().conversation());
+    assertTrue(voice.calls.getFirst().utterance().contains("inbox_alert_read"));
+
+    Transcript log = Mockito.mock(Transcript.class);
+    Mockito.when(log.speaker()).thenReturn(Speaker.message(message));
+    assertEquals(
+        Optional.of(reference),
+        messages.mailboxAlertFor(
+            new RunExtras.Context(agents.get("bot"), conversation, null, log, home, "enzo")));
+    assertTrue(
+        messages
+            .mailboxAlertFor(
+                new RunExtras.Context(
+                    agents.get("bot"), caller.conversationId(), null, log, home, "enzo"))
+            .isEmpty());
+    Mockito.when(log.speaker()).thenReturn(Speaker.person("enzo"));
+    assertTrue(
+        messages
+            .mailboxAlertFor(
+                new RunExtras.Context(agents.get("bot"), conversation, null, log, home, "enzo"))
+            .isEmpty());
+  }
+
+  @Test
   void personal_routes_default_to_any_accessible_project_and_have_account_qualified_addresses()
       throws Exception {
     personalRouting();

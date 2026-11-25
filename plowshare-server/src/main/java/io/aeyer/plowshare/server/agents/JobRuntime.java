@@ -1585,7 +1585,7 @@ public final class JobRuntime {
     // requires, and on a run in no conversation it answers that nothing has
     // been summarised away -- which is what Transcript.NONE means.
     names.add(ResultTools.LIST_NAME);
-    if (messaging != null) names.add(SendMessageTool.NAME);
+    if (messaging != null) names.addAll(Set.of(SendMessageTool.NAME, AgentListTool.NAME));
     if (agents != null) {
       names.add(AgentRunTool.NAME);
     }
@@ -2537,7 +2537,8 @@ public final class JobRuntime {
             home,
             operation,
             watch,
-            message);
+            message,
+            mailboxEnabled(definition, transcript, home, owner, session));
     offered.replaceAll(
         (name, tool) ->
             tool instanceof AgentRunTool delegate
@@ -3138,6 +3139,7 @@ public final class JobRuntime {
     // scheduler has no use for. A decision that throws leaves the run unscheduled, on the
     // extras' precedent just above: a run that cannot be placed still runs.
     Scheduling.Turn turn = turnFor(definition, transcript, sessionId, home, owner, end);
+    boolean mailboxEnabled = mailboxEnabled(definition, transcript, home, owner, sessionId);
     Map<String, AgentTool> offered =
         offeredTo(
             definition,
@@ -3152,7 +3154,8 @@ public final class JobRuntime {
             home,
             operation,
             watch,
-            userPrompt);
+            userPrompt,
+            mailboxEnabled);
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -3313,7 +3316,7 @@ public final class JobRuntime {
     // never rewrites, so a turn that logs one leaves `before()` on the next turn exactly what
     // it is now, and the prefix only ever extends.
     Optional<String> notice =
-        definition.announcesInbox()
+        mailboxEnabled
             ? safely(() -> noticing.noticeFor(definition, sessionId, transcript.conversationId()))
             : Optional.empty();
     notice.ifPresent(text -> history.add(ChatMessage.user(text)));
@@ -5774,7 +5777,9 @@ public final class JobRuntime {
                 home,
                 null,
                 JobWatch.UNWATCHED,
-                null)
+                null,
+                definition.announcesInbox()
+                    || (definition.bot() && noticing.defaultInPersonal(home, account, session)))
             .values()
             .stream()
             .map(AgentTool::schema)
@@ -5791,6 +5796,18 @@ public final class JobRuntime {
       return List.copyOf(priced);
     }
     return schemas;
+  }
+
+  private boolean mailboxEnabled(
+      AgentDefinition definition, Transcript transcript, Home home, String owner, String session) {
+    Speaker speaker = transcript.speaker();
+    return definition.announcesInbox()
+        || (definition.bot()
+            && transcript.origin() == Origin.TURN
+            && speaker != null
+            && speaker.kind() == Speaker.Kind.PERSON
+            && Objects.equals(speaker.name(), owner)
+            && noticing.defaultInPersonal(home, owner, session));
   }
 
   /** Quoted supplied context is data, even when its enclosing turn was posted by the owner. */
@@ -5859,7 +5876,8 @@ public final class JobRuntime {
       Home toolHome,
       OperationAuthority.Admission operation,
       JobWatch watch,
-      String currentTask) {
+      String currentTask,
+      boolean mailboxEnabled) {
     Speaker speaker = transcript.speaker();
     String policyOwner = operation == null ? callerHandle : operation.executor();
     String authenticatedTask =
@@ -6064,6 +6082,24 @@ public final class JobRuntime {
                     transcript,
                     null,
                     callerHandle)));
+        continue;
+      }
+      if (messaging != null && AgentListTool.NAME.equals(name)) {
+        boolean canSend =
+            definition.tools().contains(SendMessageTool.NAME)
+                || extras.tools().stream()
+                    .anyMatch(tool -> SendMessageTool.NAME.equals(tool.schema().name()));
+        offered.put(
+            name,
+            messaging.directory(
+                new RunExtras.Context(
+                    definition,
+                    transcript.conversationId(),
+                    sessionId,
+                    transcript,
+                    toolHome,
+                    callerHandle),
+                canSend));
         continue;
       }
       if (byName.get(name) instanceof ConversationContextTool context) {
@@ -6489,13 +6525,12 @@ public final class JobRuntime {
       offered.putIfAbsent(TodoTools.READ_NAME, new TodoTools.Read(todos, transcript));
       offered.putIfAbsent(TodoTools.WRITE_NAME, new TodoTools.Write(todos, transcript, sessionId));
     }
-    if (definition.announcesInbox()) {
+    if (mailboxEnabled) {
       // Not declared in `tools:` and never could be: the tool is per
       // speaker, built from a session this method already carries, the
       // same shape AgentRunTool's schema takes. putIfAbsent so a
       // definition that also declared some other tool under this name
-      // keeps it -- the inbox tool is additive to what announces-inbox
-      // grants and never displaces a declared one.
+      // keeps it. The per-speaker inbox tool never displaces a declared one.
       noticing
           .inboxToolFor(definition, sessionId)
           .ifPresent(tool -> offered.putIfAbsent(tool.schema().name(), tool));

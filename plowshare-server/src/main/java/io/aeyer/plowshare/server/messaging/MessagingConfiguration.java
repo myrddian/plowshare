@@ -2,8 +2,10 @@ package io.aeyer.plowshare.server.messaging;
 
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
+import io.aeyer.plowshare.server.agents.AgentExposure;
 import io.aeyer.plowshare.server.agents.Budget;
 import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.DefinitionResolver;
 import io.aeyer.plowshare.server.agents.JobStore;
 import io.aeyer.plowshare.server.agents.LogStages;
 import io.aeyer.plowshare.server.agents.Outcome;
@@ -17,10 +19,12 @@ import io.aeyer.plowshare.server.archive.TurnRelaySources;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.events.InboxStore;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.relay.RelayProperties;
 import io.aeyer.plowshare.server.swarm.RunShareProvider;
 import java.time.Instant;
+import java.util.List;
 import java.util.function.Consumer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -42,6 +46,7 @@ public class MessagingConfiguration {
       UnitOfWork work,
       Turn turn,
       Callers callers,
+      DefinitionResolver definitionResolver,
       Dispatcher dispatcher,
       ObjectProvider<InformationJobs> information,
       ObjectProvider<LogStages> logStages,
@@ -238,7 +243,22 @@ public class MessagingConfiguration {
                     ended);
               }
             },
-            (name, project) -> callers.readAgent(name, callers.callerFor(project, null)),
+            new MessageService.Definitions() {
+              @Override
+              public AgentDefinition resolve(String name, String project) {
+                return callers.readAgent(name, callers.callerFor(project, null));
+              }
+
+              @Override
+              public List<String> exported(String account, String project) {
+                // Use the same server registry a definition-name send resolves against.
+                var registry = definitionResolver.forCaller(callers.callerFor(project, null));
+                return registry.exportedNames().stream()
+                    .filter(name -> AgentExposure.availableTo(registry.get(name), account))
+                    .sorted()
+                    .toList();
+              }
+            },
             dispatcher::drain,
             Instant::now,
             turnSources,
@@ -272,8 +292,12 @@ public class MessagingConfiguration {
 
   @Bean
   public MessagingRunExtras messagingRunExtras(
-      MessageService messages, ConversationStore conversations) {
-    return new MessagingRunExtras(messages, conversations);
+      MessageService messages,
+      ConversationStore conversations,
+      ObjectProvider<InboxStore> inbox,
+      ObjectProvider<InformationJobs> information) {
+    return new MessagingRunExtras(
+        messages, conversations, inbox::getIfAvailable, information::getIfAvailable);
   }
 
   @Bean

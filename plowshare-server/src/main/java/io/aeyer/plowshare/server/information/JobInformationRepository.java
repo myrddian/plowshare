@@ -15,6 +15,8 @@ public interface JobInformationRepository {
 
   void inherit(String source, String target);
 
+  void bindSourceProject(String log, long sourceProject);
+
   List<Input> inputs(String job);
 
   boolean readable(UUID revision, String account, InformationContext.Selection selection);

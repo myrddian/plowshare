@@ -74,6 +74,10 @@ public final class ProjectRelayOperations implements RelayOperations {
     if (retained.isPresent()) return retained.get();
     if (request.action() == RelayControl.Action.REMOVE_SUBSCRIPTION
         || request.action() == RelayControl.Action.REMOVE_TOPIC) {
+      if (owner.isPresent()
+          && request.topic().equals("mailbox.item.added")
+          && (request.subscriber() == null || request.subscriber().startsWith("personal-mailbox.")))
+        throw new CallerFault("Manage this binding through Personal subscriptions");
       // Offline/invalid configuration cannot prove inactivity. Never treat a read refusal as empty.
       var configuration = routing.load(access);
       var target =

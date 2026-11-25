@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.events;
 
+import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.Noticing;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -12,11 +14,26 @@ public class InboxNoticing implements Noticing {
   private final InboxStore store;
   private final Inbox inbox;
   private final SpeakerHandles speakers;
+  private final boolean personalMailboxReading;
 
-  public InboxNoticing(InboxStore store, Inbox inbox, SpeakerHandles speakers) {
+  public InboxNoticing(
+      InboxStore store, Inbox inbox, SpeakerHandles speakers, boolean personalMailboxReading) {
     this.store = Objects.requireNonNull(store, "store");
     this.inbox = Objects.requireNonNull(inbox, "inbox");
     this.speakers = Objects.requireNonNull(speakers, "speakers");
+    this.personalMailboxReading = personalMailboxReading;
+  }
+
+  @Override
+  public boolean defaultInPersonal(Home home, String account, String sessionId) {
+    return personalMailboxReading
+        && home != null
+        && !home.isGlobal()
+        && account != null
+        && !account.isBlank()
+        && sessionId != null
+        && home.project().equals(PersonalSpaces.name(account))
+        && speakers.handleOf(sessionId).filter(account::equals).isPresent();
   }
 
   @Override

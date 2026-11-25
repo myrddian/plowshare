@@ -95,6 +95,31 @@ public final class ApplicationInboxes implements ApplicationInbox {
     return result;
   }
 
+  @Override
+  public long subscriptionProject(String account, String project) {
+    return authorized(account, project, ProjectRole.VIEWER).id();
+  }
+
+  @Override
+  public Optional<InboxItem> subscriptionItem(
+      String account, String project, long expectedProject, String item) {
+    if (subscriptionProject(account, project) != expectedProject)
+      throw new CallerFault("The source Application was replaced");
+    var result = store.subscriptionItem(expectedProject, item);
+    members.requireRole(project, account, ProjectRole.VIEWER);
+    return result;
+  }
+
+  @Override
+  public boolean canSeeSubscriptionItem(
+      String account, String project, long expectedProject, String item, String kind) {
+    if (subscriptionProject(account, project) != expectedProject)
+      throw new CallerFault("The source Application was replaced");
+    boolean retained = store.containsSubscriptionItem(expectedProject, item, kind);
+    members.requireRole(project, account, ProjectRole.VIEWER);
+    return retained;
+  }
+
   public Acknowledged read(String account, String project, List<String> items) {
     var destination = authorized(account, project, ProjectRole.MANAGER);
     int marked = store.read(destination.id(), items, clock.get());

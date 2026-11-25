@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.protocol;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 import java.util.Objects;
 
@@ -14,17 +15,37 @@ public record ScheduledWork(
     boolean paused,
     Action action,
     Target target,
-    Limits limits) {
+    Limits limits,
+    @JsonInclude(JsonInclude.Include.NON_NULL) PersonalBotNotice notifyPersonalBot) {
+  public ScheduledWork(
+      int version,
+      String cron,
+      String zone,
+      boolean paused,
+      Action action,
+      Target target,
+      Limits limits) {
+    this(version, cron, zone, paused, action, target, limits, null);
+  }
+
   public ScheduledWork {
     if (version != 1) throw new IllegalArgumentException("Use schedule definition version 1");
     cron = text(cron, "cron", 256);
     zone = text(zone, "zone", 128);
     Objects.requireNonNull(action, "action");
     Objects.requireNonNull(target, "target");
+    if (notifyPersonalBot != null && (!target.kind().equals("mailbox") || target.project() != null))
+      throw new IllegalArgumentException("Personal bot alerts require a local Mailbox target");
     if (limits == null) limits = new Limits(null, null, 1);
     if (target.conversation() != null
         && (limits.maxModelCalls() != null || limits.maxTurns() != null))
       throw new IllegalArgumentException("Conversation schedules use the conversation's limits");
+  }
+
+  public record PersonalBotNotice(String route) {
+    public PersonalBotNotice {
+      route = identity(route, "Personal bot route");
+    }
   }
 
   /** Skills and orchestrations use qualified commands with their ordinary caller grants. */

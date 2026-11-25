@@ -911,5 +911,301 @@
         "additionalFileAccess": false
       }
     }
+  },
+  "personal.subscription.preview": {
+    "code": "OK",
+    "payload": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "prices",
+          "source": {
+            "kind": "mailbox",
+            "event": "item.added",
+            "schedule": {
+              "project": "research",
+              "name": "prices"
+            },
+            "ending": "ANSWERED"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "relay",
+            "project": "research",
+            "topic": "research.completed"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "project-inbox",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "project"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "attention-copy",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "attention"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "job-ending",
+          "source": {
+            "kind": "job",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "orchestration-ending",
+          "source": {
+            "kind": "orchestration",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "board-post",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "message.posted"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "board-resolution",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "resolved"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "finalised-report",
+          "source": {
+            "kind": "information",
+            "project": "research",
+            "event": "report.finalised"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    }
+  },
+  "personal.subscription.activate": {
+    "code": "OK",
+    "payload": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "subscriptions": [
+        {
+          "id": "prices",
+          "source": {
+            "kind": "mailbox",
+            "event": "item.added",
+            "schedule": {
+              "project": "research",
+              "name": "prices"
+            },
+            "ending": "ANSWERED"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "relay",
+            "project": "research",
+            "topic": "research.completed"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "project-inbox",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "project"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "attention-copy",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "attention"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "job-ending",
+          "source": {
+            "kind": "job",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "orchestration-ending",
+          "source": {
+            "kind": "orchestration",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "board-post",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "message.posted"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "board-resolution",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "resolved"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        },
+        {
+          "id": "finalised-report",
+          "source": {
+            "kind": "information",
+            "project": "research",
+            "event": "report.finalised"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": [
+        {
+          "id": "prices",
+          "state": "idle",
+          "item": null,
+          "job": null,
+          "detail": null
+        },
+        {
+          "id": "follow-research",
+          "state": "completed",
+          "item": null,
+          "event": "event_fixture",
+          "job": "job_fixture",
+          "detail": "ANSWERED"
+        }
+      ]
+    }
   }
 }

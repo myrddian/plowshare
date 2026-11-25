@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.protocol.Home;
 import java.util.Optional;
 
 /**
@@ -11,6 +12,11 @@ import java.util.Optional;
 public interface Noticing {
 
   Noticing NONE = (definition, sessionId, conversation) -> Optional.empty();
+
+  /** Whether this account's own Personal home enables Mailbox access for interactive bots. */
+  default boolean defaultInPersonal(Home home, String account, String sessionId) {
+    return false;
+  }
 
   /** The notice for this turn, or empty. Must not throw. */
   Optional<String> noticeFor(AgentDefinition definition, String sessionId, String conversation);

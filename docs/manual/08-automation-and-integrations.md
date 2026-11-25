@@ -44,6 +44,78 @@ complete trigger definition, event emission and lifecycle notification. Applicat
 event names start work through triggers; hook callback keys describe seams in that
 work, rather than additional event subscriptions.
 
+## Notify your Personal bot when a result arrives
+
+Follow [Route alerts to your Personal bot](13-messaging-and-routing.md#route-alerts-to-your-personal-bot)
+to choose which bot and conversation receive alerts. Plowshare queues an alert
+after the result is saved. If the bot is busy, it handles the alert when the
+conversation frees up.
+
+### Enable alerts on a Personal schedule
+
+For a schedule in your own Personal workspace, keep the local Mailbox target.
+Add `notifyPersonalBot` at the top level of the existing schedule definition.
+This fragment shows the two fields together. Keep the schedule's timing,
+action, and other settings.
+
+```json
+{
+  "target": {"kind": "mailbox", "project": null, "conversation": null, "to": null, "route": null},
+  "notifyPersonalBot": {"route": "personal-alerts"}
+}
+```
+
+The result stays in your Mailbox. During the alert turn, the bot can use
+`inbox_alert_read` to open that one scheduled result without marking it read.
+The route is checked when the alert is queued, independently of delivery to the
+Mailbox. Remove `notifyPersonalBot` to stop alerts on future deliveries.
+
+### Follow an existing Application from Personal
+
+Create or update `Resources/subscriptions.json` in Personal and let it sync.
+This example follows eligible items in the `research` Application's shared
+inbox using your existing Viewer access. Add the subscription to the existing
+array if you already have other rules.
+
+```json
+{
+  "version": 1,
+  "subscriptions": [
+    {
+      "id": "research-alerts",
+      "source": {"kind": "application-inbox", "project": "research", "copy": "project"},
+      "handler": {"kind": "message", "route": "personal-alerts"},
+      "paused": false
+    }
+  ]
+}
+```
+
+Use `"copy": "attention"` to follow just the Application attention copies delivered
+to your account. For an ordinary result already delivered to your account Mailbox,
+use the [scheduled Mailbox selector](../personal-space.md#react-to-a-scheduled-mailbox-result)
+with the same message handler. The Application's schedule stays as configured.
+Application inbox alerts carry the item reference. Open the item in its
+Application inbox or your Mailbox using your existing access.
+
+Run `plowshare personal subscription preview` as the Personal owner. Use its
+`revision` and `activeRevision` in the activation command. Use an empty string
+for `expectedActiveRevision` on the first activation.
+
+```sh
+plowshare personal subscription activate '{"revision":"<revision>","expectedActiveRevision":"<activeRevision>"}'
+```
+
+Activation follows future items. Run `plowshare personal subscription preview`
+again to check the active subscription. When its status shows `Queued message`,
+copy the message ID to inspect the bot's handling.
+
+```sh
+plowshare message delivery '{"message":"<message-id>"}'
+```
+
+To pause the reaction, set `paused` to `true` and activate the new revision.
+
 ## Connect MCP tools
 
 Use Desktop **Settings → Client MCP** or TUI `/mcp` for client-hosted MCP

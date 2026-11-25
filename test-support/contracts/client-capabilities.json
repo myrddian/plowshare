@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 297,
+    "registeredRequestFrames": 299,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 291,
-    "headlessCliOneShotFrames": 281,
+    "headlessCliRequestFrames": 293,
+    "headlessCliOneShotFrames": 283,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 297,
+    "typedRequestFrames": 299,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -6262,6 +6262,40 @@
       "legacyMcpTools": []
     },
     {
+      "frame": "personal.subscription.activate",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/PersonalSubscriptionFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "personal.subscription.preview",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/PersonalSubscriptionFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "proc.calls",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ProcFrames.java",
       "typescriptBuilders": [
@@ -8476,6 +8510,7 @@
             "BoardRetried",
             "BoardPosted",
             "BoardClosed",
+            "PersonalSubscriptionView",
             "ApprovalRule",
             "ApprovalPolicy",
             "ApprovalCapabilities",
@@ -8485,6 +8520,8 @@
           "operations": [
             "approval.policy.get",
             "approval.policy.save",
+            "personal.subscription.preview",
+            "personal.subscription.activate",
             "approval.list",
             "approval.answer",
             "approval.revoke",
@@ -9071,6 +9108,8 @@
           "orchestration.resume",
           "orchestration.start",
           "orchestration.status",
+          "personal.subscription.activate",
+          "personal.subscription.preview",
           "proc.calls",
           "proc.inspect",
           "proc.list",
@@ -9160,7 +9199,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 281,
+        "count": 283,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -9172,9 +9211,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 297 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 299 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "291 WS operations: 281 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "293 WS operations: 283 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",

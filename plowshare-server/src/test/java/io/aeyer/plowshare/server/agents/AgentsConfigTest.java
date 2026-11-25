@@ -1000,6 +1000,7 @@ class AgentsConfigTest {
             context ->
                 assertEquals(
                     List.of(
+                        "agent_list",
                         "agent_run",
                         "code_map",
                         "conversation_chat",

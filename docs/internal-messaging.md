@@ -413,6 +413,27 @@ reported during recovery rather than automatically replayed.
 
 ## 8. Agent tool reference
 
+Grant `agent_list` alongside `send_message` in an agent or bot definition to let
+the run discover destinations. `agent_list` defaults to exported definitions in
+the sending project. Use `{"project":"notifications","kind":"instance"}` to list
+existing instances visible to the sending account in another project. `kind`
+accepts `definition` or `instance`. `limit` defaults to 20 (maximum 50). Follow
+`next_offset` with the same project and kind when another page is available.
+
+Each row gives the definition, project, `to` address, `instance_kind` for an
+existing instance, and `messageable`. Use the row's `project` as `to_project`
+when sending. The tool checks the outgoing project route before enumerating
+targets. An ended instance or a full queue reports a refusal code on the row.
+Named routes continue to come from the sender's route files. Listing creates no
+instances, conversations, messages or wakes. The server rechecks routing,
+lifecycle and capacity on send.
+
+`send_message` refusals contain a stable `code` and a human-readable `detail`.
+`agent_list` uses the same routing and instance codes, including `ROUTE_DENIED`,
+`TARGET_UNAVAILABLE`, `INSTANCE_ENDED` and `QUEUE_FULL`. `TARGET_UNAVAILABLE`
+covers destinations that are missing or inaccessible. An unknown named route
+reports `ROUTE_UNKNOWN`. Successful sends still return the delivery receipt.
+
 | Field | Meaning and default |
 | --- | --- |
 | `body` | Required message string |
@@ -515,7 +536,7 @@ Route files.
 | --- | --- |
 | `Both projects must permit this message route` | Both ordinary allowlists, exact names, and the selected manifest; for Personal, check whether the relevant default is disabled |
 | `Cross-project messaging is not permitted` | Project existence, account access and whether either scope is a private client-only DISJOINT project |
-| `This Personal project belongs to another account` | Use the current account's `Personal:<account-name>` identity |
+| `TARGET_UNAVAILABLE` for a Personal destination | Use the current account's `Personal:<account-name>` identity |
 | `No configured route with that name` | Source manifest selection, its `routeFiles`, and the route's exact `name` |
 | Invalid routing manifest identity or version | Use version 1 and the registered project name, or the owned Personal identity |
 | Routing configuration could not be read | File deployment, missing references, readability and JSON syntax |
