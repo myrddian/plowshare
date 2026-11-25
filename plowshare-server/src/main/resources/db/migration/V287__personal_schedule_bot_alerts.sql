@@ -46,6 +46,11 @@ ALTER TABLE personal_mailbox_subscriptions
         AND message_route NOT IN ('.','..') AND num_nonnulls(agent,skill,mode,skill_hash)=0)
     );
 
+-- Alert aliases can address the same conversation. Keep ordinary context isolation independently.
+ALTER TABLE message_external_contexts DROP CONSTRAINT message_external_contexts_recipient_key;
+CREATE UNIQUE INDEX message_external_contexts_ordinary_recipient
+    ON message_external_contexts(recipient) WHERE channel <> 'system:personal-alert';
+
 -- Only internal alert admission writes this capability reference. Ordinary ingress cannot set it.
 ALTER TABLE message_external_tasks
     ADD COLUMN personal_alert_item TEXT,

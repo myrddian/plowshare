@@ -1053,6 +1053,54 @@ class PersonalEventSubscriptionDatabaseTest {
     assertEquals(1, inbox.unread(OWNER));
   }
 
+  @Test
+  void transient_unlinked_start_failure_retries_the_retained_result() throws Exception {
+    activate(false);
+    var report = deliver("Price is 789", 1);
+    assertEquals(1, publish());
+    when(jobs.submitSubscriptionSkill(any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenThrow(new IllegalStateException("Job admission temporarily unavailable"));
+    runtime.process();
+    assertEquals("starting", status(OWNER, "prices").state());
+
+    ageSubscription();
+    recordJobs();
+    runtime.process();
+    assertEquals(1, prompts.size());
+    assertTrue(prompts.getFirst().contains(report.id()));
+  }
+
+  @Test
+  void a_linked_start_without_a_live_worker_becomes_uncertain_and_waits_for_evidence()
+      throws Exception {
+    activate(false);
+    deliver("Price is 789", 1);
+    assertEquals(1, publish());
+    recordJobs();
+    runtime.process();
+    jobLog.started("job_Mailbox", "assistant", Home.of(PERSONAL), Instant.now());
+
+    when(jobs.subscriptionJobActive("job_Mailbox")).thenReturn(true);
+    ageSubscription();
+    runtime.process();
+    assertEquals("running", status(OWNER, "prices").state());
+    when(jobs.subscriptionJobActive("job_Mailbox")).thenReturn(false);
+    ageSubscription();
+    runtime.process();
+    assertEquals("uncertain", status(OWNER, "prices").state());
+    assertEquals("job_Mailbox", status(OWNER, "prices").job());
+
+    assertTrue(jobLog.ended("job_Mailbox", Outcome.Ending.ANSWERED, 1, 1, Instant.now()));
+    runtime.process();
+    assertEquals("completed", status(OWNER, "prices").state());
+    assertEquals(1, prompts.size());
+  }
+
+  private void ageSubscription() {
+    jdbc.update(
+        "UPDATE personal_mailbox_subscriptions SET updated_at=clock_timestamp()-interval '2 minutes'");
+  }
+
   private void recordJobs() {
     doAnswer(
             call -> {

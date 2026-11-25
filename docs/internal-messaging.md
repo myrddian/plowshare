@@ -424,6 +424,9 @@ Each row gives the definition, project, `to` address, `instance_kind` for an
 existing instance, and `messageable`. Use the row's `project` as `to_project`
 when sending. The tool checks the outgoing project route before enumerating
 targets. An ended instance or a full queue reports a refusal code on the row.
+For a definition address, the directory checks the persistent default instance
+and the capacity to open a new one. An exported alias appears as its own `to`
+address and shares its resolved definition's default instance and queue.
 Named routes continue to come from the sender's route files. Listing creates no
 instances, conversations, messages or wakes. The server rechecks routing,
 lifecycle and capacity on send.

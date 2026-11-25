@@ -86,6 +86,9 @@ public interface EventRuns {
       RelayCausation causation,
       SubscriptionSkill subscription);
 
+  /** True while this server owns the live worker for this background subscription job. */
+  boolean subscriptionJobActive(String job);
+
   JobStore.EventRun submitEvent(
       AgentDefinition definition,
       String utterance,

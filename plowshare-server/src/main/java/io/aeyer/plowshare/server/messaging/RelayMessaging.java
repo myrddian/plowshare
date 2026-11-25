@@ -249,22 +249,23 @@ public final class RelayMessaging implements MessageService {
     Address address =
         routing.resolve(
             sender.account(), sender.project(), request.toProject(), request.to(), request.route());
-    return destination(request, sender, address);
+    return destination(request, sender.account(), sender.project(), address);
   }
 
-  private Target destination(SendMessageTool.Request request, Instance sender, Address address) {
+  private Target destination(
+      SendMessageTool.Request request, String account, String source, Address address) {
     String to = address.to(), project = address.project(), lifetime = request.lifetime();
     if (to.startsWith("ins_")) {
       Instance target = instance(to).orElseThrow(RelayMessaging::unavailableInstance);
-      if (!target.account().equals(sender.account())
+      if (!target.account().equals(account)
           || ((request.toProject() != null || request.route() != null)
               && !target.project().equals(project))) {
         throw unavailableInstance();
       }
-      routing.require(sender.account(), sender.project(), target.project());
+      routing.require(account, source, target.project());
       return new Target(target, false);
     }
-    routing.require(sender.account(), sender.project(), project);
+    routing.require(account, source, project);
     AgentDefinition definition;
     try {
       definition = definitions.resolve(to, project);
@@ -276,19 +277,18 @@ public final class RelayMessaging implements MessageService {
         throw new MessageRefused(
             "This route retains its conversation; omit lifetime or use persistent.");
       if (address.conversation() != null)
-        return conversationTarget(sender.account(), project, definition, address.conversation());
-      return retainedRoute(sender, request.route(), project, definition);
+        return conversationTarget(account, project, definition, address.conversation());
+      return retainedRoute(account, source, request.route(), project, definition);
     }
     if ("task".equals(lifetime))
-      return new Target(create(sender.account(), project, definition, lifetime, false, null), true);
-    lock("default:" + sender.account() + ":" + project + ":" + to);
-    return repository.defaults(sender.account(), project, to).stream()
+      return new Target(create(account, project, definition, lifetime, false, null), true);
+    // Aliases share the canonical definition's default instance and admission lock.
+    lock("default:" + account + ":" + project + ":" + definition.name());
+    return repository.defaults(account, project, definition.name()).stream()
         .findFirst()
         .map(i -> new Target(i, false))
         .orElseGet(
-            () ->
-                new Target(
-                    create(sender.account(), project, definition, "persistent", true, null), true));
+            () -> new Target(create(account, project, definition, "persistent", true, null), true));
   }
 
   private Target conversationTarget(
@@ -308,28 +308,31 @@ public final class RelayMessaging implements MessageService {
   }
 
   private Target retainedRoute(
-      Instance sender, String name, String project, AgentDefinition definition) {
-    lock("route:" + sender.account() + ":" + sender.project() + ":" + name);
-    lock("mailbox:" + sender.account());
-    List<String> pinned = repository.retainedBindings(sender.account(), sender.project(), name);
+      String account, String source, String name, String project, AgentDefinition definition) {
+    lock("route:" + account + ":" + source + ":" + name);
+    lock("mailbox:" + account);
+    List<String> pinned = repository.retainedBindings(account, source, name);
     if (!pinned.isEmpty()) {
       Instance instance = instance(pinned.getFirst()).orElseThrow();
       if (!instance.project().equals(project) || !instance.agent().equals(definition.name())) {
         throw new MessageRefused(
             "This retained route is pinned to another destination; use a new route name.");
       }
-      requireRouteConversation(
-          sender.account(), project, definition.name(), instance.conversation());
-      requireRetainedInstance(instance, sender.account(), project);
+      requireRouteConversation(account, project, definition.name(), instance.conversation());
+      requireRetainedInstance(instance, account, project);
       return new Target(instance, false);
     }
-    Instance instance = create(sender.account(), project, definition, "persistent", false, null);
-    repository.bindRoute(sender.account(), sender.project(), name, instance.id());
+    Instance instance = create(account, project, definition, "persistent", false, null);
+    repository.bindRoute(account, source, name, instance.id());
     return new Target(instance, true);
   }
 
   private void requireRouteConversation(String account, String project, String agent, String id) {
     repository.lockConversation(id);
+    checkRouteConversation(account, project, agent, id);
+  }
+
+  private void checkRouteConversation(String account, String project, String agent, String id) {
     var row =
         conversations
             .find(id)
@@ -377,20 +380,20 @@ public final class RelayMessaging implements MessageService {
       String boundConversation) {
     lock("mailbox:" + account);
     Integer count = repository.activeInstances(account, project);
-    if (count >= limits.getInstanceLimit())
-      throw new MessageRefused(
-          Code.INSTANCE_LIMIT, "This project's active messaging instance limit is reached.");
+    if (count >= limits.getInstanceLimit()) throw instanceLimit();
     String conversation =
         boundConversation == null
-            ? conversations
-                .log(Origin.MESSAGE, Home.of(project), definition.name(), null, null, account)
-                .id()
+            ? openMessageLog(account, project, definition.name())
             : boundConversation;
     String id = MemoryIds.mint("ins_", clock.get());
     var created =
         new Instance(id, account, project, definition.name(), conversation, lifetime, true);
     repository.insertInstance(created, isDefault);
     return created;
+  }
+
+  private String openMessageLog(String account, String project, String agent) {
+    return conversations.log(Origin.MESSAGE, Home.of(project), agent, null, null, account).id();
   }
 
   private static void requireScope(Instance instance, String account, String project) {
@@ -401,8 +404,13 @@ public final class RelayMessaging implements MessageService {
 
   /** One external context has an isolated recipient and passive durable return address. */
   public MessageIngress.Task receive(String account, MessageIngress.Request request) {
+    if (PERSONAL_ALERT_CHANNEL.equals(request.channel()))
+      throw new MessageRefused("This messaging channel is reserved for Personal alerts.");
     return receive(account, request, null, null);
   }
+
+  // The colon keeps it outside the public Relay namespace grammar.
+  private static final String PERSONAL_ALERT_CHANNEL = "system:personal-alert";
 
   @Override
   public void requirePersonalAlertRoute(String account, String route) {
@@ -414,15 +422,15 @@ public final class RelayMessaging implements MessageService {
       String account, String route, PersonalAlert reference, RelayCausation cause) {
     Address address = personalAlertAddress(account, route);
     // Stable transport identity across attempts and across the schedule and subscription inputs.
-    String client = "personal-alert-" + stableUuid(route + "\n" + address.to());
+    String client = "personal-alert-" + stableUuid(route);
     var request =
         new MessageIngress.Request(
             address.project(),
-            MessageIngress.LEGACY_CHANNEL,
+            PERSONAL_ALERT_CHANNEL,
             client,
             address.to(),
             stableUuid(reference.item()),
-            stableUuid(account + "\n" + client),
+            null,
             "A result you follow is available. Reference: "
                 + reference.item()
                 + (reference.firing() == null
@@ -476,7 +484,8 @@ public final class RelayMessaging implements MessageService {
       throw new MessageRefused("Choose a route to a bot in your own Personal workspace");
     routing.require(account, personal, personal);
     if (address.conversation() != null)
-      requireRouteConversation(account, personal, address.to(), address.conversation());
+      // Admission rechecks under mailbox then conversation locks. Preview must not invert them.
+      checkRouteConversation(account, personal, address.to(), address.conversation());
     return address;
   }
 
@@ -555,11 +564,12 @@ public final class RelayMessaging implements MessageService {
             if (!Objects.equals(old.requestContext(), request.context())
                 || !old.body().equals(request.body())
                 || !Objects.equals(old.command(), request.command())
-                || !old.agent().equals(request.agent())
+                || (alert == null && !old.agent().equals(request.agent()))
                 || !Boolean.TRUE.equals(old.matches()))
               throw new MessageRefused("This incoming request UUID already names different work.");
             return task(account, request.project(), request.channel(), request.client(), old.id());
           }
+          if (alert != null) return receiveAlert(account, request, scheduled, alert);
           UUID context = request.context();
           Instance sender, recipient;
           var contexts =
@@ -573,28 +583,23 @@ public final class RelayMessaging implements MessageService {
               definition = definitions.resolve(request.agent(), request.project());
             else {
               var address =
-                  alert != null
-                      ? alert.address()
-                      : routing.resolve(
-                          account,
-                          request.project(),
-                          scheduled.project(),
-                          scheduled.to(),
-                          scheduled.route());
+                  routing.resolve(
+                      account,
+                      request.project(),
+                      scheduled.project(),
+                      scheduled.to(),
+                      scheduled.route());
               String targetProject = address.project();
               if (address.to().startsWith("ins_"))
                 targetProject = owned(address.to(), account).project();
               routing.require(account, request.project(), targetProject);
               definition = definitions.resolve(request.agent(), targetProject);
             }
-            sender = create(account, request.project(), definition, "external", false, null);
-            repository.passiveSender(sender.id(), request.client());
-            // Lifecycle may have changed while waiting for the account coordinator.
-            sender = instance(sender.id()).orElseThrow();
+            sender = passiveSender(account, request, definition);
             recipient =
                 scheduled == null
                     ? create(account, request.project(), definition, "persistent", false, null)
-                    : scheduledDestination(sender, request, scheduled, alert);
+                    : destination(ingressTarget(request, scheduled, true), sender).instance();
             if (!recipient.agent().equals(request.agent()))
               throw new MessageRefused("Scheduled action does not match its recipient");
             repository.insertExternalContext(
@@ -605,56 +610,100 @@ public final class RelayMessaging implements MessageService {
             sender = owned(contexts.getFirst().sender(), account);
             recipient = owned(contexts.getFirst().recipient(), account);
             if (scheduled != null) {
-              var current = scheduledDestination(sender, request, scheduled, alert);
+              var current = destination(ingressTarget(request, scheduled, true), sender).instance();
               if (!current.id().equals(recipient.id()))
                 throw new MessageRefused("The schedule route changed its retained destination");
             }
           }
-          requireReadable(sender);
-          requireReadable(recipient);
-          String message =
-              send(
-                  sender,
-                  new SendMessageTool.Request(
-                      recipient.id(),
-                      request.body(),
-                      null,
-                      alert == null,
-                      false,
-                      "persistent",
-                      request.requestId().toString()),
-                  false,
-                  null,
-                  request.causation());
-          UUID id = UUID.randomUUID();
-          repository.insertExternalTask(id, context, account, request, message);
-          if (alert != null && alert.reference().firing() != null)
-            repository.bindMailboxAlert(message, alert.reference());
-          return task(account, request.project(), request.channel(), request.client(), id);
+          return enqueueIngress(account, request, context, sender, recipient, null);
         });
   }
 
-  private Instance scheduledDestination(
-      Instance sender,
+  /** Admission already holds the account lock. A new item follows the current recipient. */
+  private MessageIngress.Task receiveAlert(
+      String account,
       MessageIngress.Request request,
       ScheduledWork.Target scheduled,
       AlertDestination alert) {
-    var target =
-        new SendMessageTool.Request(
-            scheduled.to(),
-            request.body(),
-            null,
-            alert == null,
+    Instance recipient =
+        destination(
+                ingressTarget(request, scheduled, false),
+                account,
+                request.project(),
+                alert.address())
+            .instance();
+    UUID context = stableUuid(account + "\n" + request.client() + "\n" + recipient.id());
+    var prior = repository.externalContext(context, account, request);
+    Instance sender;
+    if (prior.isPresent()) {
+      sender = owned(prior.get().sender(), account);
+    } else {
+      // The passive source does not occupy an active messaging slot.
+      String conversation = openMessageLog(account, request.project(), recipient.agent());
+      sender =
+          new Instance(
+              MemoryIds.mint("ins_", clock.get()),
+              account,
+              request.project(),
+              "external:" + request.client(),
+              conversation,
+              "external",
+              false);
+      repository.insertInstance(sender, false);
+      repository.insertExternalContext(context, account, request, sender.id(), recipient.id());
+    }
+    return enqueueIngress(account, request, context, sender, recipient, alert.reference());
+  }
+
+  private Instance passiveSender(
+      String account, MessageIngress.Request request, AgentDefinition definition) {
+    Instance sender = create(account, request.project(), definition, "external", false, null);
+    repository.passiveSender(sender.id(), request.client());
+    return instance(sender.id()).orElseThrow();
+  }
+
+  private MessageIngress.Task enqueueIngress(
+      String account,
+      MessageIngress.Request request,
+      UUID context,
+      Instance sender,
+      Instance recipient,
+      PersonalAlert alert) {
+    requireReadable(sender);
+    requireReadable(recipient);
+    String message =
+        send(
+            sender,
+            new SendMessageTool.Request(
+                recipient.id(),
+                request.body(),
+                null,
+                alert == null,
+                false,
+                "persistent",
+                request.requestId().toString()),
             false,
-            "persistent",
-            request.requestId().toString(),
             null,
-            scheduled.project(),
-            scheduled.route());
-    return (alert == null
-            ? destination(target, sender)
-            : destination(target, sender, alert.address()))
-        .instance();
+            request.causation());
+    UUID id = UUID.randomUUID();
+    repository.insertExternalTask(id, context, account, request, message);
+    if (alert != null && alert.firing() != null) repository.bindMailboxAlert(message, alert);
+    return task(account, request.project(), request.channel(), request.client(), id);
+  }
+
+  private static SendMessageTool.Request ingressTarget(
+      MessageIngress.Request request, ScheduledWork.Target scheduled, boolean replyExpected) {
+    return new SendMessageTool.Request(
+        scheduled.to(),
+        request.body(),
+        null,
+        replyExpected,
+        false,
+        "persistent",
+        request.requestId().toString(),
+        null,
+        scheduled.project(),
+        scheduled.route());
   }
 
   @Override
@@ -787,7 +836,10 @@ public final class RelayMessaging implements MessageService {
       String project = routing.project(account, home.project(), request.project());
       // The edge is common to every row. Refuse it before looking up definitions or private rows.
       routing.require(account, home.project(), project);
-      sourceBinding(context, account, home).ifPresent(RelayMessaging::requireActiveSender);
+      var sender = sourceBinding(context, account, home);
+      sender.ifPresent(RelayMessaging::requireActiveSender);
+      int sourceCount = sender.isEmpty() ? repository.activeInstances(account, home.project()) : 0;
+      if (sender.isEmpty() && sourceCount >= limits.getInstanceLimit()) throw instanceLimit();
       String address = routing.identify(project);
       if (request.kind() == AgentListTool.Kind.INSTANCE) {
         var page = listingPage(account, project, false, request.offset(), request.limit());
@@ -798,13 +850,26 @@ public final class RelayMessaging implements MessageService {
       // Instance-address syntax is reserved in send_message, including for definition lookup.
       var names =
           definitions.exported(account, project).stream()
-              .filter(name -> !name.startsWith("ins_"))
+              .filter(candidate -> !candidate.to().startsWith("ins_"))
               .toList();
+      var selected = names.stream().skip(request.offset()).limit(request.limit()).toList();
+      var canonical = selected.stream().map(DefinitionAddress::definition).distinct().toList();
+      var defaults = repository.defaultAvailability(account, project, canonical);
+      boolean mayOpen =
+          canonical.stream().allMatch(defaults::containsKey)
+              || (sender.isEmpty() && home.project().equals(project)
+                      ? sourceCount + 1
+                      : repository.activeInstances(account, project))
+                  < limits.getInstanceLimit();
       var items =
-          names.stream()
-              .skip(request.offset())
-              .limit(request.limit())
-              .map(name -> new DirectoryEntry(name, address, null, name, true, null))
+          selected.stream()
+              .map(
+                  candidate -> {
+                    var current = defaults.get(candidate.definition());
+                    Code code = definitionRefusal(current, mayOpen);
+                    return new DirectoryEntry(
+                        candidate.definition(), address, null, candidate.to(), code == null, code);
+                  })
               .toList();
       return MessageToolCodec.directory(
           new DirectoryPage(
@@ -815,12 +880,24 @@ public final class RelayMessaging implements MessageService {
   }
 
   private DirectoryEntry directoryInstance(String project, InstanceView instance) {
-    Code code =
-        !instance.active()
-            ? Code.INSTANCE_ENDED
-            : queueFull(instance.pending()) ? Code.QUEUE_FULL : null;
+    Code code = instanceRefusal(instance.active(), instance.pending());
     return new DirectoryEntry(
         instance.agent(), project, instance.lifetime(), instance.id(), code == null, code);
+  }
+
+  private Code instanceRefusal(boolean active, int pending) {
+    if (!active) return Code.INSTANCE_ENDED;
+    return queueFull(pending) ? Code.QUEUE_FULL : null;
+  }
+
+  private Code definitionRefusal(MessagingRepository.DefaultAvailability current, boolean mayOpen) {
+    if (current != null) return instanceRefusal(current.active(), current.pending());
+    return mayOpen ? null : Code.INSTANCE_LIMIT;
+  }
+
+  private static MessageRefused instanceLimit() {
+    return new MessageRefused(
+        Code.INSTANCE_LIMIT, "This project's active messaging instance limit is reached.");
   }
 
   private boolean queueFull(int pending) {

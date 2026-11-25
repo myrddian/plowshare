@@ -71,7 +71,6 @@ interface PersonalSubscriptionStore {
       String job,
       String detail,
       Instant updatedAt,
-      boolean jobRecorded,
       String jobEnding) {}
 
   /** Joins the same owner lock used by native Mailbox outbox capture. */
@@ -123,6 +122,12 @@ interface PersonalSubscriptionStore {
 
   /** The owning job IDs are reserved before its worker can run. */
   boolean started(Binding binding, String job);
+
+  /** Refresh a live worker's claim without overwriting a concurrent disposition. */
+  void renewRunning(Binding binding);
+
+  /** A stale linked job is inspectable, and must never be launched a second time. */
+  void unconfirmed(Binding binding);
 
   void settle(Binding binding, String state, String detail);
 }

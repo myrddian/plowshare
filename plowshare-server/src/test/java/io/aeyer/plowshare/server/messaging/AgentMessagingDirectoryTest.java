@@ -20,11 +20,14 @@ import io.aeyer.plowshare.server.archive.ConversationRecord;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.events.FiringStore;
+import io.aeyer.plowshare.server.messaging.MessageService.DefinitionAddress;
 import io.aeyer.plowshare.server.messaging.MessageService.Instance;
+import io.aeyer.plowshare.server.messaging.MessagingRepository.DefaultAvailability;
 import io.aeyer.plowshare.server.messaging.MessagingRepository.InstanceListing;
 import io.aeyer.plowshare.server.messaging.MessagingRepository.InstanceState;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,7 +69,11 @@ class AgentMessagingDirectoryTest {
 
   @Test
   void definitionDiscoveryDoesNotCreateInstancesOrProbeIndividualRecipients() throws Exception {
-    when(definitions.exported(ACCOUNT, HOME.project())).thenReturn(List.of("analyst", "reviewer"));
+    when(definitions.exported(ACCOUNT, HOME.project()))
+        .thenReturn(
+            List.of(
+                new DefinitionAddress("analyst", "analyst"),
+                new DefinitionAddress("reviewer", "reviewer")));
     JsonNode page = list("{\"limit\":1}");
     var first = page.path("items").get(0);
     assertEquals("analyst", first.path("definition").asText());
@@ -77,7 +84,33 @@ class AgentMessagingDirectoryTest {
     verify(definitions).exported(ACCOUNT, HOME.project());
     verifyNoMoreInteractions(definitions);
     verify(repository).byConversationAgent(CONVERSATION, "sender");
+    verify(repository).activeInstances(ACCOUNT, HOME.project());
+    verify(repository).defaultAvailability(ACCOUNT, HOME.project(), List.of("analyst"));
     verifyNoMoreInteractions(repository);
+  }
+
+  @Test
+  void definition_discovery_reports_default_queue_and_available_instance_slots() throws Exception {
+    when(definitions.exported(ACCOUNT, HOME.project()))
+        .thenReturn(
+            List.of(
+                new DefinitionAddress("analyst", "analyst"),
+                new DefinitionAddress("analyst", "analyst_alias"),
+                new DefinitionAddress("reviewer", "reviewer")));
+    when(repository.defaultAvailability(ACCOUNT, HOME.project(), List.of("analyst", "reviewer")))
+        .thenReturn(Map.of("analyst", new DefaultAvailability(true, 256)));
+    when(repository.activeInstances(ACCOUNT, HOME.project())).thenReturn(255);
+
+    var items = list("{}").path("items");
+    assertEquals("QUEUE_FULL", items.get(0).path("code").asText());
+    assertEquals("analyst", items.get(1).path("definition").asText());
+    assertEquals("analyst_alias", items.get(1).path("to").asText());
+    assertEquals("QUEUE_FULL", items.get(1).path("code").asText());
+    assertEquals("INSTANCE_LIMIT", items.get(2).path("code").asText());
+    assertFalse(items.get(0).path("messageable").asBoolean());
+    assertFalse(items.get(1).path("messageable").asBoolean());
+    assertFalse(items.get(2).path("messageable").asBoolean());
+    verify(repository).activeInstances(ACCOUNT, HOME.project());
   }
 
   @Test
@@ -113,6 +146,7 @@ class AgentMessagingDirectoryTest {
     assertTrue(items.get(2).path("messageable").asBoolean());
     assertFalse(items.get(1).path("messageable").asBoolean());
     verify(repository).byConversationAgent(CONVERSATION, "sender");
+    verify(repository).activeInstances(ACCOUNT, HOME.project());
     verify(repository).listing(ACCOUNT, HOME.project(), false, 0, 21);
     verifyNoMoreInteractions(repository);
 

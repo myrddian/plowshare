@@ -21,9 +21,11 @@ import io.aeyer.plowshare.server.events.Dispatcher;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.InboxStore;
 import io.aeyer.plowshare.server.information.InformationJobs;
+import io.aeyer.plowshare.server.messaging.MessageService.DefinitionAddress;
 import io.aeyer.plowshare.server.relay.RelayProperties;
 import io.aeyer.plowshare.server.swarm.RunShareProvider;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import org.springframework.beans.factory.ObjectProvider;
@@ -250,13 +252,16 @@ public class MessagingConfiguration {
               }
 
               @Override
-              public List<String> exported(String account, String project) {
+              public List<DefinitionAddress> exported(String account, String project) {
                 // Use the same server registry a definition-name send resolves against.
                 var registry = definitionResolver.forCaller(callers.callerFor(project, null));
-                return registry.exportedNames().stream()
-                    .filter(name -> AgentExposure.availableTo(registry.get(name), account))
-                    .sorted()
-                    .toList();
+                var addresses = new ArrayList<DefinitionAddress>();
+                for (String name : registry.exportedNames()) {
+                  var definition = registry.get(name);
+                  if (AgentExposure.availableTo(definition, account))
+                    addresses.add(new DefinitionAddress(definition.name(), name));
+                }
+                return List.copyOf(addresses);
               }
             },
             dispatcher::drain,

@@ -244,6 +244,12 @@ public interface MessagingRepository {
 
   List<Instance> defaults(String account, String project, String agent);
 
+  record DefaultAvailability(boolean active, int pending) {}
+
+  /** Read the same default instances and pending counts used by a persistent send, in one page. */
+  Map<String, DefaultAvailability> defaultAvailability(
+      String account, String project, List<String> agents);
+
   List<Instance> opening(String account, String project, String requestId);
 
   List<InstanceListing> listing(

@@ -644,6 +644,12 @@ public final class JobStore
         guarded);
   }
 
+  @Override
+  public boolean subscriptionJobActive(String id) {
+    Job job = byId.get(id);
+    return job != null && job.active();
+  }
+
   private EventRun submitEvent(
       AgentDefinition definition,
       String utterance,

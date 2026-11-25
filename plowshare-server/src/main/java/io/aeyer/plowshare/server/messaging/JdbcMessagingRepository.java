@@ -201,14 +201,15 @@ public final class JdbcMessagingRepository implements MessagingRepository {
 
     changed(
         jdbc.update(
-            "INSERT INTO message_instances (id, account, project, agent, conversation, lifetime, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO message_instances (id, account, project, agent, conversation, lifetime, is_default, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             instance.id(),
             instance.account(),
             instance.project(),
             instance.agent(),
             instance.conversation(),
             instance.lifetime(),
-            isDefault));
+            isDefault,
+            instance.active()));
   }
 
   public void passiveSender(String id, String client) {
@@ -809,6 +810,34 @@ public final class JdbcMessagingRepository implements MessagingRepository {
   public List<Instance> defaults(String account, String project, String agent) {
     return instances(
         "account = ? AND project = ? AND agent = ? AND is_default", account, project, agent);
+  }
+
+  @Override
+  public Map<String, DefaultAvailability> defaultAvailability(
+      String account, String project, List<String> agents) {
+    if (agents.size() > 50) throw new IllegalArgumentException("Too many directory definitions");
+    if (agents.isEmpty()) return Map.of();
+    return jdbc
+        .query(
+            """
+            SELECT i.agent,i.active,count(r.message) AS pending
+            FROM message_instances i LEFT JOIN message_routes r
+              ON r.recipient=i.id AND r.handled_at IS NULL
+            WHERE i.account=? AND i.project=? AND i.is_default AND i.agent=ANY(?)
+            GROUP BY i.id,i.agent,i.active
+            """,
+            statement -> {
+              statement.setString(1, account);
+              statement.setString(2, project);
+              statement.setArray(
+                  3, statement.getConnection().createArrayOf("text", agents.toArray()));
+            },
+            (row, index) ->
+                Map.entry(
+                    row.getString("agent"),
+                    new DefaultAvailability(row.getBoolean("active"), row.getInt("pending"))))
+        .stream()
+        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
   public List<Instance> opening(String account, String project, String requestId) {

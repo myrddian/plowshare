@@ -237,10 +237,13 @@ public interface MessageService
     AgentDefinition resolve(String name, String project);
 
     /** The server-side exported candidates visible to this account in the messaging destination. */
-    default List<String> exported(String account, String project) {
+    default List<DefinitionAddress> exported(String account, String project) {
       return List.of();
     }
   }
+
+  /** A sendable public name and the canonical definition that owns its default mailbox. */
+  public record DefinitionAddress(String definition, String to) {}
 
   public record Address(
       String project, String to, String conversation, boolean retainConversation) {

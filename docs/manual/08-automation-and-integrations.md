@@ -67,6 +67,7 @@ action, and other settings.
 
 The result stays in your Mailbox. During the alert turn, the bot can use
 `inbox_alert_read` to open that one scheduled result without marking it read.
+For a result larger than 32 KiB, open the full item in the Mailbox.
 The route is checked when the alert is queued, independently of delivery to the
 Mailbox. Remove `notifyPersonalBot` to stop alerts on future deliveries.
 

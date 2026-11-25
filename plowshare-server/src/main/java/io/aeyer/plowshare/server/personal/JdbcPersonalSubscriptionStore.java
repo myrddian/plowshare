@@ -20,7 +20,7 @@ final class JdbcPersonalSubscriptionStore implements PersonalSubscriptionStore {
         s.relay_project_id,s.relay_topic,s.relay_seen,s.source_type,s.attention_project,
         s.agent,s.skill,s.mode,s.skill_hash,s.message_route,s.enabled_at,s.paused,
         s.state,s.source_event,s.source_position,s.causation,s.attempt,s.claim,s.job,s.detail,
-        s.updated_at,p.personal_owner,j.id IS NOT NULL AS job_recorded,j.ending AS job_ending
+        s.updated_at,p.personal_owner,j.ending AS job_ending
       FROM personal_mailbox_subscriptions s JOIN projects p ON p.id=s.project_id
       LEFT JOIN jobs j ON j.id=s.job
       """;
@@ -86,7 +86,7 @@ final class JdbcPersonalSubscriptionStore implements PersonalSubscriptionStore {
         BINDINGS
             + """
          WHERE (s.project_id,s.name)>(?,?) AND NOT s.paused
-           AND s.state NOT IN ('blocked','uncertain')
+           AND (s.state NOT IN ('blocked','uncertain') OR (s.state='uncertain' AND j.ending IS NOT NULL))
          ORDER BY s.project_id,s.name LIMIT ?
         """,
         this::row,
@@ -297,6 +297,37 @@ final class JdbcPersonalSubscriptionStore implements PersonalSubscriptionStore {
   }
 
   @Override
+  public void renewRunning(Binding binding) {
+    jdbc.update(
+        """
+        UPDATE personal_mailbox_subscriptions SET updated_at=clock_timestamp()
+        WHERE project_id=? AND name=? AND consumer=? AND claim=? AND state='running' AND updated_at=?
+        """,
+        binding.key().project(),
+        binding.key().name(),
+        binding.consumer(),
+        binding.claim(),
+        Timestamp.from(binding.updatedAt()));
+  }
+
+  @Override
+  public void unconfirmed(Binding binding) {
+    jdbc.update(
+        """
+        UPDATE personal_mailbox_subscriptions s
+        SET state='uncertain',detail='The linked job has no confirmed ending. Inspect it before rearming.',
+            updated_at=clock_timestamp()
+        WHERE s.project_id=? AND s.name=? AND s.consumer=? AND s.claim=? AND s.state='running'
+          AND s.updated_at=? AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id=s.job AND j.ending IS NOT NULL)
+        """,
+        binding.key().project(),
+        binding.key().name(),
+        binding.consumer(),
+        binding.claim(),
+        Timestamp.from(binding.updatedAt()));
+  }
+
+  @Override
   public void settle(Binding binding, String state, String detail) {
     jdbc.update(
         """
@@ -346,7 +377,6 @@ final class JdbcPersonalSubscriptionStore implements PersonalSubscriptionStore {
         row.getString("job"),
         row.getString("detail"),
         row.getTimestamp("updated_at").toInstant(),
-        row.getBoolean("job_recorded"),
         row.getString("job_ending"));
   }
 }

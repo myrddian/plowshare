@@ -71,6 +71,7 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
   private static final int MAX_INPUT_BYTES = 32_768;
   private static final int SCAN_LIMIT = 32;
   private static final Duration START_RECOVERY = Duration.ofMinutes(1);
+  private static final Duration RUNNING_REFRESH = Duration.ofSeconds(15);
   private static final Logger LOG = LoggerFactory.getLogger(PersonalSubscriptionRuntime.class);
   private static final ObjectMapper JSON =
       JsonMapper.builder()
@@ -632,14 +633,12 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
       }
       return;
     }
-    if (binding.state().equals("running")) {
-      if (binding.jobEnding() != null) settle(binding, "completed", binding.jobEnding());
-      else if (!binding.jobRecorded()
-          && binding.updatedAt().plus(START_RECOVERY).isBefore(Instant.now()))
-        settle(
-            binding,
-            "uncertain",
-            "The linked job has no durable receipt. Inspect it before rearming.");
+    if (binding.state().equals("running") || binding.state().equals("uncertain")) {
+      if (binding.jobEnding() != null) {
+        settle(binding, "completed", binding.jobEnding());
+      } else if (binding.state().equals("running")) {
+        refreshRunning(binding);
+      }
       return;
     }
     if (binding.spec().relayTopic() == null && !mailboxReadable(binding)) return;
@@ -651,6 +650,18 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
       return;
     }
     if (pending != null) start(binding, pending);
+  }
+
+  private void refreshRunning(Binding binding) {
+    Instant now = Instant.now();
+    if (binding.updatedAt().plus(RUNNING_REFRESH).isAfter(now)) return;
+    transaction(
+        () -> {
+          if (jobs.subscriptionJobActive(binding.job())) store.renewRunning(binding);
+          else if (binding.updatedAt().plus(START_RECOVERY).isBefore(now))
+            store.unconfirmed(binding);
+          return null;
+        });
   }
 
   private Pending admit(Binding snapshot) {
@@ -934,11 +945,7 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
               }));
     } catch (CallerFault | NotFoundFault denied) {
       settle(starting, "source-unavailable", "The source or handler is no longer available.");
-    } catch (RuntimeException failure) {
-      // A reserved job ID remains authoritative if the exception followed the start boundary.
-      settle(starting, "uncertain", "The handler start could not be confirmed.");
-      throw failure;
-    }
+    } // A failed unlinked start can be reclaimed. Linked jobs are reconciled without replay.
   }
 
   private MessageService messaging() {
