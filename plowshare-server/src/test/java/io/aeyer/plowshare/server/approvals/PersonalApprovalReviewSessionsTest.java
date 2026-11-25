@@ -135,7 +135,7 @@ class PersonalApprovalReviewSessionsTest {
 
   @Test
   void a_saved_schedule_supplies_intent_for_an_exact_personal_mirror_edit() {
-    String instruction = "Update the scheduled brief in /personal/Out.";
+    String instruction = "Update /personal/Out/scheduled-brief.md.";
     var session = scheduledSession("sam", instruction);
     var edit = personalEdit("sam", "mirror", false, "new finding");
     var consent = new ApprovalReviews.Consent(true, false, false);
@@ -177,6 +177,22 @@ class PersonalApprovalReviewSessionsTest {
         session.review(personalEdit("sam", "mirror", true, "note"), consent).action());
   }
 
+  @Test
+  void scheduled_edit_evidence_stays_under_the_personal_output_directory() {
+    var session = scheduledSession("sam", "Update /personal/Out/scheduled-brief.md.");
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    for (String path :
+        List.of(
+            "/personal/Resources/draft.md",
+            "/personal/Outside/draft.md",
+            "/personal/Out",
+            "/personal/Out/../Resources/draft.md")) {
+      var edit = personalEdit("sam", "mirror", path, false, "new text");
+      assertEquals(ApprovalReviews.Action.ASK_HUMAN, session.review(edit, consent).action());
+      assertTrue(securityEvidence.get().contains("\"scheduledTask\":null"));
+    }
+  }
+
   private OperationApprovalReview scheduledSession(String owner, String instruction) {
     var jobs = mock(EventRuns.class);
     var task = new AtomicReference<ScheduledTask>();
@@ -209,6 +225,11 @@ class PersonalApprovalReviewSessionsTest {
   private static OperationApprovalReview.Request personalEdit(
       String owner, String provider, boolean protectedPath, String input) {
     String path = protectedPath ? "/personal/security.md" : "/personal/Out/scheduled-brief.md";
+    return personalEdit(owner, provider, path, protectedPath, input);
+  }
+
+  private static OperationApprovalReview.Request personalEdit(
+      String owner, String provider, String path, boolean protectedPath, String input) {
     return new OperationApprovalReview.Request(
         "project",
         provider,

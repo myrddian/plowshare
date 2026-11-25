@@ -7,10 +7,10 @@ import java.util.Objects;
  * Immutable operation evidence captured before review. The provider identity is the actual machine
  * and provider generation, not merely "local". User intent must come from an authenticated user
  * entry, never from a requesting model's justification. A separately identified scheduled task can
- * supply intent for an ordinary edit in the owner's Personal mirror. The input digest binds stdin
- * or a file edit. The ownerPersonalRead flag is evidence that the provider verified the target is
- * inside the owner's Personal workspace. Standing read intent must come from a separately matched
- * policy rule. The securityFileMutation flag records a configuration path identified by the router.
+ * supply intent for an ordinary edit under Out in the owner's Personal mirror. The input digest
+ * binds stdin or a file edit. The ownerPersonalRead flag records that the provider verified the
+ * target is inside the owner's Personal workspace. Standing read intent comes from a matched policy
+ * rule. The securityFileMutation flag records a configuration path identified by the router.
  */
 public record ApprovalIntent(
     String owner,

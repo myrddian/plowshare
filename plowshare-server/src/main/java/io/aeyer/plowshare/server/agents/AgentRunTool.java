@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.agents;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.ToolArguments.BadArguments;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.images.ImageRefusedException;
@@ -211,11 +212,10 @@ public final class AgentRunTool implements AgentTool {
    */
   private final AgentDelegates agents;
 
-  private io.aeyer.plowshare.server.access.OperationAuthority.Admission operation;
+  private OperationAuthority.Admission operation;
 
   /** This tool is per-run; descendants keep the parent's fixed scope/action/grant envelope. */
-  AgentRunTool underOperation(
-      io.aeyer.plowshare.server.access.OperationAuthority.Admission operation) {
+  AgentRunTool underOperation(OperationAuthority.Admission operation) {
     this.operation = operation;
     return this;
   }
@@ -640,6 +640,23 @@ public final class AgentRunTool implements AgentTool {
     return this;
   }
 
+  /** Passes the server-minted instruction along the checked execution lineage. */
+  private void inheritScheduledOutputTask(
+      Transcript child, OperationAuthority.Admission childOperation) {
+    var scheduled = transcript.scheduledTask();
+    if (scheduled != null
+        && scheduled.personalFileReview()
+        && operation != null
+        && childOperation != null
+        && scheduled.owner().equals(operation.executor())
+        && scheduled.owner().equals(childOperation.executor())
+        && operation.home().equals(childOperation.home())
+        && operation.scope().equals(childOperation.scope())) {
+      // The child's task text and supplied context cannot act as schedule authorization.
+      child.prepareScheduledTask(scheduled);
+    }
+  }
+
   /** Runs a harness-mandated child through the same checked, logged delegation path. */
   String runDeclared(String wanted, String task, Home home) {
     Objects.requireNonNull(wanted, "wanted");
@@ -887,6 +904,7 @@ public final class AgentRunTool implements AgentTool {
           new Outcome(Outcome.Ending.ANSWERED, retrying.completedAnswer().orElseThrow(), 0, 0, ""));
     }
     if (prepareChild != null && !restoringChild) prepareChild.accept(child);
+    inheritScheduledOutputTask(child, childOperation);
     // The record's delegation lines (spec 2026-09-28 §2), on the caller's conversation: the
     // record follows the caller's run, and the child's own lines are its conversation's.
     // child.conversationId() names this specific delegation's own conversation (spec
