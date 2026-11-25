@@ -98,6 +98,75 @@ class ResearchJsonRecoveryTest {
   }
 
   @Test
+  void truncated_fenced_reply_exposes_only_complete_fields() throws Exception {
+    var result =
+        recover(
+            "Here is the review:\n```json\n{\"verdict\":\"accepted\",\"assessment\":\"Facts\nGap");
+    assertTrue(result.path("pass").isNull());
+    assertFalse(result.has("value"));
+    var partial = result.path("truncation");
+    assertEquals(JSON.readTree("{\"verdict\":\"accepted\"}"), partial.path("value"));
+    assertEquals("assessment", partial.path("incompleteField").asText());
+    assertFalse(partial.path("onlyMissingClose").asBoolean());
+  }
+
+  @Test
+  void only_a_missing_root_delimiter_is_distinguished_from_an_incomplete_member() throws Exception {
+    var result = recover("{\"verdict\":\"accepted\",\"notes\":[\"Verified\"]");
+    var partial = result.path("truncation");
+    assertTrue(partial.path("onlyMissingClose").asBoolean(), result.toString());
+    assertEquals(
+        JSON.readTree("{\"verdict\":\"accepted\",\"notes\":[\"Verified\"]}"),
+        partial.path("value"));
+    for (String raw :
+        new String[] {
+          "{\"verdict\":\"accepted\",",
+          "{\"verdict\":\"accepted\",\"asse",
+          "{\"verdict\":\"accepted\",\"assessment\":",
+          "{\"verdict\":\"accepted\",\"assessment\":[\"open\"",
+          "{\"verdict\":\"accepted\",\"count\":12",
+          "{\"verdict\":\"accepted\",\"flag\":tru"
+        }) {
+      partial = recover(raw).path("truncation");
+      assertTrue(partial.isObject(), raw);
+      assertFalse(partial.path("onlyMissingClose").asBoolean(), raw);
+      assertEquals(JSON.readTree("{\"verdict\":\"accepted\"}"), partial.path("value"), raw);
+    }
+  }
+
+  @Test
+  void a_large_truncated_array_preserves_complete_items_within_the_parser_input_limit() {
+    String text = "a".repeat(33000);
+    var result = recover("[\"" + text + "\",{\"nested\":\"incomplete");
+    assertEquals(1, result.path("attempts").size());
+    assertEquals(1, result.path("truncation").path("value").size());
+    assertEquals(text, result.path("truncation").path("value").get(0).asText());
+  }
+
+  @Test
+  void whitespace_terminates_the_last_number_in_a_truncated_container() {
+    var partial = recover("{\"count\":12 \n").path("truncation");
+    assertEquals(12, partial.path("value").path("count").asInt());
+    assertTrue(partial.path("onlyMissingClose").asBoolean());
+  }
+
+  @Test
+  void ambiguous_and_other_malformed_prefixes_are_not_reported_as_truncated_json() {
+    for (String raw :
+        new String[] {
+          "{\"a\":1,\"a\":2,\"remaining\":\"unterminated",
+          "{\"a\":1,\"broken\":wat,\"remaining\":\"unterminated",
+          "{\"a\":1,\"broken\":wat",
+          "{\"a\":1] ",
+          "<tool_call> {\"verdict\":\"accepted\""
+        }) {
+      var result = recover(raw);
+      assertFalse(result.has("truncation"), raw);
+      assertFalse(result.has("value"), raw);
+    }
+  }
+
+  @Test
   void oversized_malformed_output_does_not_enter_recovery_passes() {
     var result = recover("{broken JSON " + "x".repeat(32768));
     assertTrue(result.path("pass").isNull());

@@ -29,7 +29,7 @@ public final class ModelOutputRecoveryCodec {
 
   private ModelOutputRecoveryCodec() {}
 
-  record Decoded(Map<String, String> fields, List<Issue> issues, String pass) {
+  record Decoded(Map<String, String> fields, List<Issue> issues, String pass, boolean truncated) {
     Decoded {
       fields = Map.copyOf(fields);
       issues = List.copyOf(issues);
@@ -43,12 +43,16 @@ public final class ModelOutputRecoveryCodec {
             .anyMatch(
                 attempt -> attempt.error() != null && attempt.error().contains("Duplicate field")))
       return new Decoded(
-          Map.of(), List.of(new Issue(Problem.CONTENT, "ambiguous_fields", 0, 0)), "none");
+          Map.of(), List.of(new Issue(Problem.CONTENT, "ambiguous_fields", 0, 0)), "none", false);
+    if (result.truncation().isPresent())
+      return new Decoded(
+          Map.of(), List.of(new Issue(Problem.FORMAT, "truncation", 0, 0)), "none", true);
     if (!result.recovered())
-      return new Decoded(Map.of(), List.of(new Issue(Problem.FORMAT, "response", 0, 0)), "none");
+      return new Decoded(
+          Map.of(), List.of(new Issue(Problem.FORMAT, "response", 0, 0)), "none", false);
     if (!result.value().isObject())
       return new Decoded(
-          Map.of(), List.of(new Issue(Problem.SHAPE, "response", 0, 0)), result.pass());
+          Map.of(), List.of(new Issue(Problem.SHAPE, "response", 0, 0)), result.pass(), false);
     var fields = new LinkedHashMap<String, String>();
     var issues = new ArrayList<Issue>();
     result
@@ -68,7 +72,7 @@ public final class ModelOutputRecoveryCodec {
                         0,
                         0));
             });
-    return new Decoded(fields, issues, result.pass());
+    return new Decoded(fields, issues, result.pass(), false);
   }
 
   /** Only authored policy/checkpoint JSON is read strictly; model text uses LlmJson separately. */
@@ -144,6 +148,7 @@ public final class ModelOutputRecoveryCodec {
   /** Syntax success is not semantic acceptance; legacy workflows retain their own shape checks. */
   public static Diagnostic parsingDiagnostic(String raw, LlmJson.Recovery parsed) {
     String hash = StandardModelOutputRecovery.hash(raw);
+    boolean truncated = parsed.truncation().isPresent();
     return new Diagnostic(
         ModelOutputRecovery.VERSION,
         "json-syntax",
@@ -152,10 +157,14 @@ public final class ModelOutputRecoveryCodec {
         hash,
         hash,
         parsed.recovered() ? parsed.pass() : "none",
-        parsed.recovered() ? List.of() : List.of(new Issue(Problem.FORMAT, "response", 0, 0)),
+        parsed.recovered()
+            ? List.of()
+            : List.of(new Issue(Problem.FORMAT, truncated ? "truncation" : "response", 0, 0)),
         parsed.recovered()
             ? "Model JSON parsed; domain validation remains with the caller"
-            : "Local JSON recovery exhausted; original response remains retained");
+            : truncated
+                ? "Model JSON ended early; original response remains retained"
+                : "Local JSON recovery exhausted; original response remains retained");
   }
 
   static String contractJson(Contract contract) {

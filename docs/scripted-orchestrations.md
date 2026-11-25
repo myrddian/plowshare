@@ -322,6 +322,17 @@ exactly as you would strict JSON. Use strict parsing for service/request payload
 this utility is for model-emitted text, not tool failure messages. See the
 [research recovery contract](scripted-research.md#bounded-output-repair-and-context-cost).
 
+When a JSON object or array ends unexpectedly, a failed parse can also return
+`truncation: {value, incompleteField, onlyMissingClose}`. The nested `value`
+holds only complete top-level fields or items, and `incompleteField` names the
+unfinished top-level field when available. An incomplete nested value is omitted
+as a whole. `onlyMissingClose` indicates that input ended after a complete value
+with no portion of another member or item. A script with an exact schema can
+validate every required field and use that value when only the outer delimiter
+is missing. When required content is missing, keep the original receipt for
+review. The helper detects unexpected JSON EOF from the text, independently of
+the inference provider's stop reason.
+
 The shipped research worker has no tools/callees/scopes and at most one turn/model call.
 Author, editor, Blue, Red and Yellow are separate calls to that bounded worker
 with different task instructions. They are not guaranteed independent models.
@@ -340,7 +351,8 @@ script state and return its `command` unchanged; it is a normal journaled
 back into the helper. There is at most one model attempt. Summaries return only
 the overlong fields; code preserves and merges all other fields. A review result
 must ask the operator or retain a disclosed gap, not complete an invalid stage.
-Host failures are not model-repair candidates.
+Host failures and truncated JSON do not dispatch a model repair. The original
+reply remains retained for review.
 
 The worker uses its configured model binding, shared root allowance, cancellation
 and inference deadlines. It must have exactly one model turn and no tools,

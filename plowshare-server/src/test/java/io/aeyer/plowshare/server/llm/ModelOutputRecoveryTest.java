@@ -102,6 +102,15 @@ class ModelOutputRecoveryTest {
   }
 
   @Test
+  void truncated_content_requires_review_without_dispatching_a_repair_worker() {
+    Plan result = inspect("{\"name\":\"Fixture\",\"notes\":\"Unconfirmed");
+    assertEquals(Action.NEEDS_REVIEW, result.action());
+    assertTrue(result.value().isEmpty());
+    assertTrue(result.task().isEmpty());
+    assertEquals("truncation", result.diagnostic().issues().getFirst().field());
+  }
+
+  @Test
   void refusals_content_and_oversize_responses_never_trigger_model_repairs() {
     for (String raw :
         new String[] {

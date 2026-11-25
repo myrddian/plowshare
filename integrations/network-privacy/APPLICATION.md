@@ -175,8 +175,11 @@ Investigation uses `orchestrations/investigate_network.js`. Plowshare journals i
 commands and state; code passes the complete analyst response and retained source
 text to the reviewer and assembles the draft from the actual review. Agents supply
 judgments within the shared allowance. Missing assessments, unavailable evidence
-and invalid tool results stop work explicitly. The collector remains an external
-Python integration.
+and invalid tool results stop work explicitly. If reviewer JSON has all three
+required fields and ends before the outer brace, the script validates those
+fields and retains the draft. A cut-off review with missing content stops before
+the report write, with the original responses retained in the journal. The
+collector remains an external Python integration.
 
 Per-device privacy assessment uses `orchestrations/assess_network_device.js`.
 The collector starts it for one device with a retained dossier revision
