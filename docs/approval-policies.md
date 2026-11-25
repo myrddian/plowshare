@@ -32,6 +32,14 @@ eligibility or the selected bot. An exact account `ASK_HUMAN` rule requires a
 human decision after SECURITY clears. Standing Personal read intent supplies
 intent only, while account `MAY_APPROVE` rules and history supply eligibility.
 
+On a scheduled agent turn, the saved instruction from an account-owned trigger
+or a server-side Personal schedule can supply intent for an ordinary
+`file_edit` in the same owner's Personal mirror. The instruction must ask for
+the affected file or report to be written or updated. SECURITY evaluates the
+exact edit against that instruction, and the same consent rules still apply.
+The scheduler passes the saved instruction separately from event data. Edits
+to security configuration still require an explicit current user request.
+
 ## Deployment policy files
 
 Set `security.md` at the root of `plowshare.data.dir` to replace the shipped rule

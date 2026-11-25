@@ -103,7 +103,8 @@ class ModelApprovalReviewersTest {
             null,
             "{\"path\":\"/fixture/security.md\"}",
             false,
-            true);
+            true,
+            null);
 
     when(inference.consult(any(), anyString(), anyString(), any()))
         .thenAnswer(

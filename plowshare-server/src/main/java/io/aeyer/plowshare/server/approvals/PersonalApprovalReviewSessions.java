@@ -6,6 +6,7 @@ import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
+import io.aeyer.plowshare.server.union.MirrorProvider;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -303,6 +304,24 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       // A supplied task that exceeds the evidence limit may contain restrictions. Treat it as
       // unavailable evidence even for a read ordinarily covered by standing intent.
       if (taskTooLong || (task != null && task.isBlank())) task = null;
+      boolean ownerPersonal =
+          request.personalWorkspace().filter(w -> w.owner().equals(context.owner())).isPresent();
+      var schedule = context.scheduledTask();
+      // The mirror can verify the canonical target. A remote provider attests only to the
+      // named path, which cannot rule out an alias to a protected or restricted file.
+      String scheduledTask =
+          context.authenticatedTask() == null
+                  && request.kind() == ApprovalPolicy.Kind.FILE_WRITE
+                  && !request.securityFileMutation()
+                  && MirrorProvider.NAME.equals(request.provider())
+                  && ownerPersonal
+                  && schedule != null
+                  && schedule.personalFileReview()
+                  && schedule.owner().equals(context.owner())
+              ? schedule.instruction()
+              : null;
+      if (scheduledTask != null && (scheduledTask.isBlank() || scheduledTask.length() > 16000))
+        scheduledTask = null;
       return new ApprovalIntent(
           context.owner(),
           context.conversation(),
@@ -317,12 +336,9 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
           task,
           null,
           request.stdin() == null || request.stdin().length() > 16000 ? null : request.stdin(),
-          !taskTooLong
-              && request
-                  .personalWorkspace()
-                  .filter(workspace -> workspace.owner().equals(context.owner()))
-                  .isPresent(),
-          request.securityFileMutation());
+          !taskTooLong && ownerPersonal && request.kind() == ApprovalPolicy.Kind.FILE_READ,
+          request.securityFileMutation(),
+          scheduledTask);
     }
 
     private Target target(Request request) {

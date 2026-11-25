@@ -50,9 +50,11 @@ public interface OperationApprovalReview {
       paths = List.copyOf(paths);
       argv = List.copyOf(argv);
       Objects.requireNonNull(personalWorkspace);
-      if (personalWorkspace.isPresent() && kind != ApprovalPolicy.Kind.FILE_READ)
+      if (personalWorkspace.isPresent()
+          && kind != ApprovalPolicy.Kind.FILE_READ
+          && kind != ApprovalPolicy.Kind.FILE_WRITE)
         throw new IllegalArgumentException(
-            "Personal workspace review evidence applies only to file reads");
+            "Personal workspace review evidence applies only to file reads and edits");
       if (securityFileMutation
           && (kind == ApprovalPolicy.Kind.COMMAND || kind == ApprovalPolicy.Kind.FILE_READ))
         throw new IllegalArgumentException("Security file mutation requires a direct file change");

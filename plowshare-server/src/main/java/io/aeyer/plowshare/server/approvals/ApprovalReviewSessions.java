@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.approvals;
 
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.util.Optional;
 import java.util.function.BiConsumer;
@@ -13,6 +14,7 @@ public interface ApprovalReviewSessions {
       String owner,
       String conversation,
       String authenticatedTask,
+      ScheduledTask scheduledTask,
       OperationAuthority.Admission operation,
       Budget budget,
       UsageAttribution usage,
