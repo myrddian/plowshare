@@ -84,7 +84,8 @@ public interface ScheduleDefinitionStore {
           pausedOverride,
           rawDefinition.action(),
           rawDefinition.target(),
-          rawDefinition.limits());
+          rawDefinition.limits(),
+          rawDefinition.notifyPersonalBot());
     }
 
     public ScheduledWork.File effective() {

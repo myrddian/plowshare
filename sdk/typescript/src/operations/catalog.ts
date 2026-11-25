@@ -586,6 +586,8 @@ export const CLI_OPERATIONS = {
   'approval list': 'approval.list',
   'approval policy get': 'approval.policy.get',
   'approval policy save': 'approval.policy.save',
+  'personal subscription preview': 'personal.subscription.preview',
+  'personal subscription activate': 'personal.subscription.activate',
   'approval answer': 'approval.answer',
   'approval revoke': 'approval.revoke',
   'message instances': 'message.instances',

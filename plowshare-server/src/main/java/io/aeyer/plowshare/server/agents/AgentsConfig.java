@@ -66,7 +66,9 @@ import io.aeyer.plowshare.server.llm.dispatch.LlmDispatcher;
 import io.aeyer.plowshare.server.llm.dispatch.LlmException;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
+import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
 import io.aeyer.plowshare.server.messaging.MessageService;
+import io.aeyer.plowshare.server.messaging.MessageToolCodec;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
@@ -996,9 +998,19 @@ public class AgentsConfig {
             return new SendMessageTool(
                 (request, home, owner) -> {
                   var available = messaging.getIfAvailable();
-                  if (available == null) return "Messaging is unavailable on this server.";
+                  if (available == null)
+                    return MessageToolCodec.refusal(
+                        Code.MESSAGING_UNAVAILABLE, "Messaging is unavailable on this server.");
                   return available.send(context, request, home, owner);
                 });
+          }
+
+          @Override
+          public AgentListTool directory(RunExtras.Context context, boolean canSend) {
+            var available = messaging.getIfAvailable();
+            return available == null
+                ? Messaging.super.directory(context, canSend)
+                : available.directory(context, canSend);
           }
 
           public AgentTool protect(

@@ -26,6 +26,7 @@ public class EventsProperties {
 
   private boolean tickerEnabled = true;
   private boolean recoverAtBoot = true;
+  private boolean personalMailboxReading;
   private Duration tickInterval = Duration.ofSeconds(15);
   public static final Duration DEFAULT_QUESTION_ALERT_RETRY = Duration.ofSeconds(30);
   private Duration questionAlertRetryInterval = DEFAULT_QUESTION_ALERT_RETRY;
@@ -59,6 +60,14 @@ public class EventsProperties {
 
   public void setRecoverAtBoot(boolean recoverAtBoot) {
     this.recoverAtBoot = recoverAtBoot;
+  }
+
+  public boolean isPersonalMailboxReading() {
+    return personalMailboxReading;
+  }
+
+  public void setPersonalMailboxReading(boolean personalMailboxReading) {
+    this.personalMailboxReading = personalMailboxReading;
   }
 
   public Duration getTickInterval() {

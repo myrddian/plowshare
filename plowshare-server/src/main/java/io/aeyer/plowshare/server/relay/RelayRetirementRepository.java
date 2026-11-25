@@ -9,4 +9,7 @@ public interface RelayRetirementRepository {
    * successful retirement. A restored owner must register through its normal binding transaction.
    */
   boolean retireOwned(Relay.SubscriptionKey owner);
+
+  /** Removes a Personal Mailbox cursor under its owning subscription lock. */
+  void retireMailboxCursor(Relay.SubscriptionKey owner);
 }

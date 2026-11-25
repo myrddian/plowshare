@@ -134,12 +134,17 @@ public class EventsConfig {
    */
   @Bean
   public InboxNoticing inboxNoticing(
-      InboxStore store, Inbox inbox, ObjectProvider<SpeakerHandles> speakers, JobRuntime runtime) {
+      InboxStore store,
+      Inbox inbox,
+      ObjectProvider<SpeakerHandles> speakers,
+      JobRuntime runtime,
+      EventsProperties properties) {
     InboxNoticing noticing =
         new InboxNoticing(
             store,
             inbox,
-            session -> speakers.getIfAvailable(() -> SpeakerHandles.NONE).handleOf(session));
+            session -> speakers.getIfAvailable(() -> SpeakerHandles.NONE).handleOf(session),
+            properties.isPersonalMailboxReading());
     runtime.useNoticing(noticing);
     return noticing;
   }

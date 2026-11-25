@@ -20,6 +20,21 @@ public interface InboxStore {
   InboxItem deliver(
       String handle, String firing, String conversation, String ending, String answer, Instant at);
 
+  /**
+   * Reads one exact account-owned scheduled result under current visibility, without acknowledging
+   * it.
+   */
+  Optional<InboxItem> scheduledResult(String handle, String id, String firing);
+
+  /** Current visibility of an exact scheduled result, without reading its content or marking it. */
+  boolean canSeeScheduledResult(String handle, String id, String firing);
+
+  /** Exact recipient-owned Application copy, independently of the original's read state. */
+  Optional<InboxItem> attentionResult(String handle, long application, String id, String source);
+
+  boolean canSeeAttentionResult(
+      String handle, long application, String id, String source, String kind);
+
   InboxItem notice(String handle, String kind, String text, Instant at);
 
   InboxItem notice(String handle, String kind, String text, String about, Instant at);

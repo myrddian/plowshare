@@ -39,6 +39,7 @@ import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -570,6 +571,7 @@ public final class JobStore
         speaker,
         ended,
         causation,
+        null,
         null);
   }
 
@@ -596,7 +598,56 @@ public final class JobStore
         speaker,
         ended,
         null,
-        scheduled);
+        scheduled,
+        null);
+  }
+
+  @Override
+  public EventRun submitSubscriptionSkill(
+      AgentDefinition definition,
+      String utterance,
+      Home home,
+      TurnCap cap,
+      String owner,
+      Speaker speaker,
+      RelayCausation causation,
+      SubscriptionSkill subscription) {
+    Objects.requireNonNull(causation, "Personal subscription skill causation");
+    Objects.requireNonNull(subscription, "Personal subscription skill evidence");
+    if (informationJobs == null)
+      throw new IllegalStateException(
+          "Personal subscription skills require durable information lineage");
+    subscription.requireSource().run();
+    var guarded =
+        new SubscriptionSkill(
+            subscription.source(),
+            subscription.skill(),
+            subscription.skillHash(),
+            () -> {
+              subscription.requireSource().run();
+              if (subscription.source() instanceof LogSource log)
+                informationJobs.requireLog(log.log(), owner);
+            },
+            subscription.started());
+    return submitEvent(
+        definition,
+        utterance,
+        home,
+        null,
+        null,
+        cap,
+        owner,
+        speaker,
+        (conversation, outcome) -> {},
+        causation,
+        null,
+        guarded);
+  }
+
+  @Override
+  public boolean subscriptionJobActive(String id) {
+    Job job = byId.get(id);
+    return job != null && job.active();
   }
 
   private EventRun submitEvent(
@@ -610,7 +661,8 @@ public final class JobStore
       Speaker speaker,
       BiConsumer<String, Outcome> ended,
       RelayCausation causation,
-      ScheduledTask scheduled) {
+      ScheduledTask scheduled,
+      SubscriptionSkill subscription) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(home, "home");
     Objects.requireNonNull(ended, "ended");
@@ -624,6 +676,26 @@ public final class JobStore
             : logs.logFor(Origin.EVENT, home, definition, session, budget, speaker, callerHandle);
     if (scheduled != null && log != Transcript.NONE) log.prepareScheduledTask(scheduled);
     String conversation = log.conversationId();
+    if (subscription != null) {
+      if (conversation == null || informationJobs == null)
+        throw new IllegalStateException(
+            "Personal subscription skills require durable information lineage");
+      switch (subscription.source()) {
+        case LogSource source -> {
+          informationJobs.inherit(source.log(), conversation, callerHandle);
+          if (source.projectId() != null)
+            informationJobs.bindSourceProject(conversation, source.projectId(), callerHandle);
+        }
+        case ProjectSource source ->
+            informationJobs.bindSourceProject(conversation, source.projectId(), callerHandle);
+        case RevisionSource source -> {
+          informationJobs.bind(conversation, source.context(), List.of(source.revision()));
+          informationJobs.bindSourceProject(conversation, source.projectId(), callerHandle);
+        }
+        case PersonalSource
+                ignored -> {} // The attention copy is already an account-owned publication.
+      }
+    }
     String id =
         submit(
             definition,
@@ -650,7 +722,9 @@ public final class JobStore
             List.of(),
             callerHandle,
             true,
-            causation);
+            causation,
+            null,
+            subscription);
     return new EventRun(id, conversation);
   }
 
@@ -920,6 +994,40 @@ public final class JobStore
       boolean incoming,
       RelayCausation causation,
       RunAdmission admission) {
+    return submit(
+        definition,
+        userPrompt,
+        home,
+        sessionId,
+        budget,
+        transcript,
+        origin,
+        ended,
+        cap,
+        images,
+        callerHandle,
+        incoming,
+        causation,
+        admission,
+        null);
+  }
+
+  private String submit(
+      AgentDefinition definition,
+      String userPrompt,
+      Home home,
+      String sessionId,
+      Budget budget,
+      Transcript transcript,
+      Origin origin,
+      Consumer<Outcome> ended,
+      TurnCap cap,
+      List<Content.Image> images,
+      String callerHandle,
+      boolean incoming,
+      RelayCausation causation,
+      RunAdmission admission,
+      SubscriptionSkill subscription) {
     Objects.requireNonNull(definition, "definition");
     Objects.requireNonNull(images, "images");
     Objects.requireNonNull(budget, "budget");
@@ -1002,34 +1110,39 @@ public final class JobStore
         ended,
         (watch, cancelled) -> {
           JobRuntime runner = admission == null ? runtime : runtime.forAdmittedTurn(admission);
-          return operation == null
-              ? runner.run(
-                  definition,
-                  userPrompt,
-                  home,
-                  budget,
-                  cancelled,
-                  sessionId,
-                  watch,
-                  transcript,
-                  under,
-                  images,
-                  callerHandle,
-                  incoming)
-              : runner.runOperation(
-                  definition,
-                  userPrompt,
-                  home,
-                  budget,
-                  cancelled,
-                  sessionId,
-                  watch,
-                  transcript,
-                  under,
-                  images,
-                  callerHandle,
-                  incoming,
-                  operation);
+          Supplier<Outcome> run =
+              () ->
+                  operation == null
+                      ? runner.run(
+                          definition,
+                          userPrompt,
+                          home,
+                          budget,
+                          cancelled,
+                          sessionId,
+                          watch,
+                          transcript,
+                          under,
+                          images,
+                          callerHandle,
+                          incoming)
+                      : runner.runOperation(
+                          definition,
+                          userPrompt,
+                          home,
+                          budget,
+                          cancelled,
+                          sessionId,
+                          watch,
+                          transcript,
+                          under,
+                          images,
+                          callerHandle,
+                          incoming,
+                          operation);
+          return subscription == null
+              ? run.get()
+              : BoundCommands.withSubscriptionSkill(conversation, subscription, run);
         },
         id -> {
           if (operation != null) operations.started(operation, id);
@@ -1038,6 +1151,7 @@ public final class JobStore
             admission.started().accept(id);
           }
           transcript.startedAs(id);
+          if (subscription != null) subscription.started().accept(id);
         },
         effectiveCausation,
         callerHandle == null

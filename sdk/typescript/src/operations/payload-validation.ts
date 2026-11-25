@@ -28,6 +28,17 @@ export function problem(
   type: Operation,
   payload: Record<string, unknown>,
 ): string | undefined {
+  if (type === 'personal.subscription.activate') {
+    const revision = payload['revision'];
+    const expected = payload['expectedActiveRevision'];
+    if (
+      typeof revision !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(revision) ||
+      typeof expected !== 'string' ||
+      (expected !== '' && !/^[0-9a-f]{64}$/.test(expected))
+    )
+      return 'Supply the draft and active revisions returned by Personal subscription preview';
+  }
   if (
     type === 'approval.policy.save' &&
     !exactApprovalPolicy(payload['policy'])
@@ -961,6 +972,11 @@ export const SHAPES: Record<
   'project.member.remove': [['project', 'handle'], []],
   'approval.policy.get': [[], []],
   'approval.policy.save': [['policy'], []],
+  'personal.subscription.preview': [[], []],
+  'personal.subscription.activate': [
+    ['revision', 'expectedActiveRevision'],
+    [],
+  ],
   'approval.list': [[], ['conversation', 'project', 'mine']],
   'approval.answer': [
     ['id', 'decision'],
@@ -1149,6 +1165,11 @@ export function commandProblem(
   )
     return 'Invalid retained invocation ID';
   if (type === 'approval.policy.get' || type === 'approval.policy.save')
+    return problem(type, body);
+  if (
+    type === 'personal.subscription.preview' ||
+    type === 'personal.subscription.activate'
+  )
     return problem(type, body);
   if (type.startsWith('proc.')) return procProblem(type, body);
   if (type === 'artifact.admission.status' || type === 'tool.invocation.read')

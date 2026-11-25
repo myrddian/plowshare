@@ -7,6 +7,7 @@ import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectRecord;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -54,16 +55,24 @@ public final class ProjectMessageRouting implements MessageService.Routing {
   @Override
   public MessageService.Address resolve(
       String account, String source, String project, String to, String route) {
-    if (route == null)
-      return new MessageService.Address(
-          PersonalSpaces.resolveAddress(project == null ? source : project, account), to);
+    if (route == null) return new MessageService.Address(project(account, source, project), to);
     MessageService.Address address = policy(source).routes().get(route);
-    if (address == null) throw new MessageRefused("No configured route with that name.");
+    if (address == null)
+      throw new MessageRefused(Code.ROUTE_UNKNOWN, "No configured route with that name.");
     return new MessageService.Address(
-        PersonalSpaces.resolveAddress(address.project(), account),
+        project(account, source, address.project()),
         address.to(),
         address.conversation(),
         address.retainConversation());
+  }
+
+  @Override
+  public String project(String account, String source, String destination) {
+    try {
+      return PersonalSpaces.resolveAddress(destination == null ? source : destination, account);
+    } catch (CallerFault unavailable) {
+      throw new MessageRefused(Code.TARGET_UNAVAILABLE, "No accessible message destination.");
+    }
   }
 
   @Override
@@ -74,7 +83,8 @@ public final class ProjectMessageRouting implements MessageService.Routing {
   @Override
   public void require(String account, String source, String destination) {
     if (!members.mayWork(source, account))
-      throw new CallerFault("This account needs CONTRIBUTOR access to send project messages");
+      throw new MessageRefused(
+          Code.ROUTE_DENIED, "This account needs CONTRIBUTOR access to send project messages");
     // ADR 0042, list (c). Messaging is a narrowing of the existing Relay and Application scoping
     // and not a forwarding surface: a child cannot message anything its container cannot, and
     // there is no path here by which a request is re-proved against containment and then
@@ -88,6 +98,7 @@ public final class ProjectMessageRouting implements MessageService.Routing {
     // ahead of the route policy, so the refusal names containment rather than an absent route.
     if (ContainedProjects.name(source) || ContainedProjects.name(destination))
       throw new MessageRefused(
+          Code.ROUTE_DENIED,
           "A contained Application's project is not a messaging endpoint; every edge in or out"
               + " belongs to its container.");
     if (source.equals(destination)) return;
@@ -95,16 +106,15 @@ public final class ProjectMessageRouting implements MessageService.Routing {
     var destinationOwner = projects.personalOwner(destination);
     if (sourceOwner.filter(owner -> !owner.equals(account)).isPresent()
         || destinationOwner.filter(owner -> !owner.equals(account)).isPresent()) {
-      throw new MessageRefused("This Personal project belongs to another account.");
+      throw new MessageRefused(Code.TARGET_UNAVAILABLE, "No accessible message destination.");
     }
     // Private attachments never become server-addressable projects, even with routing metadata.
     if (ClientProjects.privateProject(source)
         || ClientProjects.privateProject(destination)
         || projects.id(source) == null
         || projects.id(destination) == null
-        || !members.mayWork(source, account)
         || !members.mayWork(destination, account)) {
-      throw new MessageRefused("Cross-project messaging is not permitted.");
+      throw new MessageRefused(Code.ROUTE_DENIED, "Cross-project messaging is not permitted.");
     }
     boolean sendDefault = sourceOwner.isPresent() && settings.getPersonal().isSendToAnyProject();
     boolean receiveDefault =
@@ -114,7 +124,7 @@ public final class ProjectMessageRouting implements MessageService.Routing {
     } else if (sendDefault || receiveDefault) return;
     if (!allows(policy(source).sendTo(), destination)
         || !allows(policy(destination).acceptFrom(), source)) {
-      throw new MessageRefused("Both projects must permit this message route.");
+      throw new MessageRefused(Code.ROUTE_DENIED, "Both projects must permit this message route.");
     }
   }
 

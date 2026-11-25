@@ -4,6 +4,8 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
+import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
+import io.aeyer.plowshare.server.messaging.MessageToolCodec;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -163,7 +165,7 @@ public final class SendMessageTool implements AgentTool {
             "Optional handling deadline, including approval waits, in seconds. Expiry cancels handling and supplies an expected terminal reply."));
     return ToolSchema.from(
         NAME,
-        "Send a message to an agent or bot instance in this project or an explicitly permitted destination project. Sending durably queues a wake and returns a receipt; it does not wait for an answer. Incoming messages include an ID and return address. Reply with reply_to. A final reply satisfies an expected response; progress does not. Only the harness supplies sender identity and scope.",
+        "Send a message to an agent or bot instance in this project or an explicitly permitted destination project. Sending durably queues a wake and returns a receipt; it does not wait for an answer. Incoming messages include an ID and return address. Reply with reply_to. A final reply satisfies an expected response; progress does not. Use agent_list when offered to discover destinations. A refusal has a code and detail. Only the harness supplies sender identity and scope.",
         ToolArguments.object(properties, List.of("body")));
   }
 
@@ -188,7 +190,8 @@ public final class SendMessageTool implements AgentTool {
           || args.has("return_address")
           || args.has("project")
           || args.has("home")) {
-        return "The harness supplies sender identity, return address and project; omit those fields.";
+        throw new ToolArguments.BadArguments(
+            "The harness supplies sender identity, return address and project; omit those fields.");
       }
       var fields = args.fieldNames();
       while (fields.hasNext()) {
@@ -203,7 +206,8 @@ public final class SendMessageTool implements AgentTool {
                 "timeout_seconds",
                 "to_project",
                 "route")
-            .contains(field)) return "send_message does not accept that field.";
+            .contains(field))
+          throw new ToolArguments.BadArguments("send_message does not accept that field.");
       }
       String body = ToolArguments.requireText(args, "body", NAME, "the message");
       String to =
@@ -234,13 +238,15 @@ public final class SendMessageTool implements AgentTool {
               "route",
               v -> new ToolArguments.BadArguments("route must be a configured route name"));
       if (to == null && reply == null && route == null)
-        return "send_message needs to, route or reply_to.";
+        throw new ToolArguments.BadArguments("send_message needs to, route or reply_to.");
       if (route != null && (to != null || toProject != null || reply != null))
-        return "A named route supplies its destination; omit to, to_project and reply_to.";
+        throw new ToolArguments.BadArguments(
+            "A named route supplies its destination; omit to, to_project and reply_to.");
       if (reply != null && toProject != null)
-        return "A reply uses its existing return address; omit to_project.";
+        throw new ToolArguments.BadArguments(
+            "A reply uses its existing return address; omit to_project.");
       if (lifetime != null && !List.of("persistent", "task").contains(lifetime))
-        return "lifetime must be persistent or task.";
+        throw new ToolArguments.BadArguments("lifetime must be persistent or task.");
       for (String flag : List.of("reply_expected", "final")) {
         if (args.has(flag) && !args.get(flag).isBoolean()) return flag + " must be true or false.";
       }
@@ -256,11 +262,14 @@ public final class SendMessageTool implements AgentTool {
               "final",
               reply != null,
               v -> new ToolArguments.BadArguments("final must be true or false"));
-      if (last && reply == null) return "final is only meaningful with reply_to.";
+      if (last && reply == null)
+        throw new ToolArguments.BadArguments("final is only meaningful with reply_to.");
       if (reply != null && lifetime != null)
-        return "A reply uses its existing return address; omit lifetime.";
+        throw new ToolArguments.BadArguments(
+            "A reply uses its existing return address; omit lifetime.");
       if (to != null && to.startsWith("ins_") && lifetime != null)
-        return "An instance address already has a lifetime; omit lifetime.";
+        throw new ToolArguments.BadArguments(
+            "An instance address already has a lifetime; omit lifetime.");
       Long timeout = null;
       if (args.has("timeout_seconds")) {
         var value = args.get("timeout_seconds");
@@ -268,7 +277,8 @@ public final class SendMessageTool implements AgentTool {
             || !value.canConvertToLong()
             || value.asLong() < 1
             || value.asLong() > 604800) {
-          return "timeout_seconds must be an integer from 1 to 604800.";
+          throw new ToolArguments.BadArguments(
+              "timeout_seconds must be an integer from 1 to 604800.");
         }
         timeout = value.asLong();
       }
@@ -287,7 +297,7 @@ public final class SendMessageTool implements AgentTool {
           home,
           owner);
     } catch (ToolArguments.BadArguments bad) {
-      return bad.getMessage();
+      return MessageToolCodec.refusal(Code.INVALID_ARGUMENT, bad.getMessage());
     }
   }
 }

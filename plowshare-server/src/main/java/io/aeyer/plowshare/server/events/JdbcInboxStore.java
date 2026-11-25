@@ -126,18 +126,117 @@ public class JdbcInboxStore implements InboxStore {
 
   public InboxItem deliver(
       String handle, String firing, String conversation, String ending, String answer, Instant at) {
-    return jdbc.queryForObject(
-        "INSERT INTO user_inbox (id, handle, firing, conversation,"
-            + " ending, answer, arrived_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING "
-            + COLUMNS,
-        JdbcInboxStore::row,
-        MemoryIds.mint(PREFIX, at),
+    var inserted =
+        jdbc.query(
+            "INSERT INTO user_inbox (id, handle, firing, conversation, ending, answer, arrived_at, scheduled_delivery)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, EXISTS(SELECT 1 FROM firings WHERE id=? AND schedule IS NOT NULL))"
+                + " ON CONFLICT(handle,firing) WHERE scheduled_delivery DO NOTHING RETURNING "
+                + COLUMNS,
+            JdbcInboxStore::row,
+            MemoryIds.mint(PREFIX, at),
+            handle,
+            firing,
+            conversation,
+            ending,
+            answer,
+            Timestamp.from(at),
+            firing);
+    if (!inserted.isEmpty()) return inserted.getFirst();
+    var retained =
+        jdbc.queryForObject(
+            "SELECT "
+                + COLUMNS
+                + " FROM user_inbox WHERE handle=? AND firing=? AND scheduled_delivery",
+            JdbcInboxStore::row,
+            handle,
+            firing);
+    if (retained == null
+        || !java.util.Objects.equals(conversation, retained.conversation())
+        || !ending.equals(retained.ending())
+        || !answer.equals(retained.answer()))
+      throw new IllegalStateException(
+          "Scheduled Mailbox delivery conflicts with the retained result");
+    return retained;
+  }
+
+  @Override
+  public boolean canSeeScheduledResult(String handle, String id, String firing) {
+    return visible(
         handle,
-        firing,
-        conversation,
-        ending,
-        answer,
-        Timestamp.from(at));
+        facts -> {
+          var args = new ArrayList<Object>(List.of(handle, id, firing));
+          String filter = visibilitySql(handle, facts, args);
+          return Boolean.TRUE.equals(
+              jdbc.queryForObject(
+                  "SELECT EXISTS(SELECT 1 FROM user_inbox WHERE handle=? AND id=? AND firing=?"
+                      + " AND scheduled_delivery AND application_project_id IS NULL AND settled_at IS NULL"
+                      + filter
+                      + ")",
+                  Boolean.class,
+                  args.toArray()));
+        });
+  }
+
+  @Override
+  public Optional<InboxItem> scheduledResult(String handle, String id, String firing) {
+    return visible(
+        handle,
+        facts -> {
+          var args = new ArrayList<Object>();
+          args.add(handle);
+          args.add(id);
+          args.add(firing);
+          String filter = visibilitySql(handle, facts, args);
+          return jdbc
+              .query(
+                  "SELECT "
+                      + COLUMNS
+                      + " FROM user_inbox WHERE handle=? AND id=? AND firing=?"
+                      + " AND scheduled_delivery AND application_project_id IS NULL AND settled_at IS NULL"
+                      + " AND octet_length(answer)<=32768"
+                      + filter,
+                  JdbcInboxStore::row,
+                  args.toArray())
+              .stream()
+              .findFirst();
+        });
+  }
+
+  @Override
+  public boolean canSeeAttentionResult(
+      String handle, long application, String id, String source, String kind) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+        SELECT EXISTS(SELECT 1 FROM user_inbox WHERE handle=? AND id=? AND kind=?
+          AND attention_copy_project=? AND attention_copy_of=? AND application_project_id IS NULL
+          AND conversation IS NULL AND settled_at IS NULL AND about IS NULL)
+        """,
+            Boolean.class,
+            handle,
+            id,
+            kind,
+            application,
+            source));
+  }
+
+  @Override
+  public Optional<InboxItem> attentionResult(
+      String handle, long application, String id, String source) {
+    return jdbc
+        .query(
+            "SELECT "
+                + COLUMNS
+                + " FROM user_inbox WHERE handle=? AND id=?"
+                + " AND attention_copy_project=? AND attention_copy_of=? AND application_project_id IS NULL"
+                + " AND conversation IS NULL AND settled_at IS NULL AND about IS NULL AND octet_length(answer)<=32768",
+            JdbcInboxStore::row,
+            handle,
+            id,
+            application,
+            source)
+        .stream()
+        .findFirst();
   }
 
   public InboxItem notice(String handle, String kind, String text, Instant at) {

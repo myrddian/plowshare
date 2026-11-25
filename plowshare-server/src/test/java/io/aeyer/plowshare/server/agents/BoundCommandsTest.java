@@ -256,6 +256,25 @@ class BoundCommandsTest {
   }
 
   @Test
+  void mailbox_skill_refuses_a_changed_source_and_releases_the_worker_pin() {
+    var mailbox =
+        new EventRuns.SubscriptionSkill(
+            new EventRuns.LogSource("cnv_source"), "review", "different-hash", () -> {}, job -> {});
+    var refusal = new AtomicReference<String>();
+    BoundCommands.withSubscriptionSkill(
+        "parent",
+        mailbox,
+        () -> {
+          refusal.set(prepare(true, "/skill:review --mode=NEW exact result").refusal());
+          return mock(Outcome.class);
+        });
+    assertTrue(refusal.get().contains("subscription skill changed"));
+    assertNull(stored.get());
+    assertNull(prepare(true, "/skill:review exact result").refusal());
+    assertEquals("exact result", stored.get().arguments());
+  }
+
+  @Test
   void portable_skills_default_to_direct_and_accept_no_arguments() {
     offer("");
     when(runtime.dispatch(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))

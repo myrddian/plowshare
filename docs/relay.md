@@ -84,6 +84,7 @@ claiming to order transactions that have not committed.
 | Topics | Scope and references |
 | --- | --- |
 | `job.started`, `job.ended` | Owning project, or system for global jobs. Subject is the job ID, context is the persisted agent definition, state is submitted or the actual ending. |
+| `application.inbox.item.added`, `mailbox.application.item.added` | Application project and exact Personal recipient respectively. Subject is the selected item, state is its kind, context is the Application project ID. A personal copy's related ID identifies the original item. |
 | `approval.requested`, `approval.resolved` | Owning project. Subject is the approval ID; context is its conversation; related is the requesting job. State preserves the decision and subsequent grant lifecycle. |
 | `orchestration.started`, `.resumed`, `.ended`, `.question.asked`, `.question.answered`, `.child.completed` | Conductor project, or system for a global conductor. Subject is the orchestration; context is the conductor conversation; related is its parent or question/answer ID. |
 | `board.opened`, `.message.posted`, `.resolved`, `.closed` | Public Board topics in their project. References identify the topic, message, root, parent or resolution; the original text stays on Board. |
@@ -509,6 +510,26 @@ and removal of inactive empty metadata.
 
 Scheduling's compatibility subscriber continues to drain automatically through
 its owning ticker, independently of these project bindings.
+
+## Personal subscriptions
+
+An account with Viewer access can follow an existing project `TEXT` or `EMPTY`
+topic and run a configured skill in Personal. Activation pins the project ID,
+topic generation and current head. Personal stores its cursor and admitted work
+under the account owner. The publisher's topic, groups and Application
+configuration are independent. Source read authority still applies to queued
+work and retained Personal transcript reads. [Personal configuration](personal-space.md#follow-an-existing-project-relay-topic)
+
+Built-in selectors also follow Application inbox results, personal attention
+copies, job endings and orchestration endings. The worker follows server
+publication references and resolves each record through its owning read checks.
+The selected inbox item supplies its published text. Lifecycle endings supply
+metadata. [Built-in selectors](personal-space.md#follow-application-inbox-results-and-workflow-endings)
+
+Personal can also follow public Board posts and resolutions, and explicit
+information report finalisations. The Board selector resolves the owning
+message. The information selector derives its topic through Information and
+checks access to the referenced revision before starting a skill. [Board and information selectors](personal-space.md#follow-board-posts-resolutions-and-finalised-reports)
 
 ## Inspection and clients
 

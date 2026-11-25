@@ -24,42 +24,51 @@ const asked = (type: AdministrativeOperation): Request =>
     ? request(type, {
         policy: { revision: 0, mode: 'MANUAL', bot: null, rules: [] },
       })
-    : type === 'orchestration.repair'
-      ? request(type, {
-          id: 'o',
-          requestId: '00000000-0000-4000-8000-000000000001',
-          checkpoint: {
-            sequence: 30,
-            sourceHash: 'sha256:' + 'a'.repeat(64),
-            replacementHash: 'sha256:' + 'b'.repeat(64),
-          },
-        })
-      : ({
-          type,
-          payload:
-            type === 'orchestration.status' ||
-            type === 'orchestration.answer' ||
-            type === 'orchestration.cancel' ||
-            type === 'orchestration.resume'
-              ? { id: 'o' }
-              : type === 'approval.answer' || type === 'approval.revoke'
-                ? { id: 'a', decision: 'once' }
-                : {},
-        } as Request);
+    : type === 'personal.subscription.activate'
+      ? request(type, { revision: 'a'.repeat(64), expectedActiveRevision: '' })
+      : type === 'orchestration.repair'
+        ? request(type, {
+            id: 'o',
+            requestId: '00000000-0000-4000-8000-000000000001',
+            checkpoint: {
+              sequence: 30,
+              sourceHash: 'sha256:' + 'a'.repeat(64),
+              replacementHash: 'sha256:' + 'b'.repeat(64),
+            },
+          })
+        : ({
+            type,
+            payload:
+              type === 'orchestration.status' ||
+              type === 'orchestration.answer' ||
+              type === 'orchestration.cancel' ||
+              type === 'orchestration.resume'
+                ? { id: 'o' }
+                : type === 'approval.answer' || type === 'approval.revoke'
+                  ? { id: 'a', decision: 'once' }
+                  : {},
+          } as Request);
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !isList(value);
 
 // Remove one contract field at a time, including nested rows. Model-authored JSON stays open.
-function missingFields(value: unknown): unknown[] {
+function missingFields(
+  value: unknown,
+  allowOlderPersonalStatus: boolean,
+): unknown[] {
   if (isList(value))
     return value.flatMap((row, index) =>
-      missingFields(row).map((changed) =>
+      missingFields(row, allowOlderPersonalStatus).map((changed) =>
         value.map((each, n) => (n === index ? changed : each)),
       ),
     );
   if (!object(value)) return [];
   return Object.keys(value)
-    .filter((key) => key !== 'future')
+    .filter(
+      (key) =>
+        key !== 'future' &&
+        !(allowOlderPersonalStatus && key === 'event' && 'state' in value),
+    )
     .flatMap((key) => {
       const without = { ...value };
       delete without[key];
@@ -67,10 +76,12 @@ function missingFields(value: unknown): unknown[] {
         without,
         ...(key === 'structure'
           ? []
-          : missingFields(value[key]).map((changed) => ({
-              ...value,
-              [key]: changed,
-            }))),
+          : missingFields(value[key], allowOlderPersonalStatus).map(
+              (changed) => ({
+                ...value,
+                [key]: changed,
+              }),
+            )),
       ];
     });
 }
@@ -148,7 +159,10 @@ describe('complete administrative WS replies', () => {
         { ...original, code: 'CREATED' },
         { ...original, code: 'ACCEPTED' },
         { ...original, payload: { unread: 0, applied: 0, future: true } },
-        ...missingFields(original.payload).map((payload) => ({
+        ...missingFields(
+          original.payload,
+          type.startsWith('personal.subscription.'),
+        ).map((payload) => ({
           ...original,
           payload,
         })),
@@ -467,6 +481,16 @@ describe('complete administrative WS replies', () => {
       ],
       ['InboxPage', 'server/ws/InboxListHandler', 'Page', []],
       ['InboxMarked', 'server/ws/InboxReadHandler', 'Marked', []],
+      [
+        'PersonalSubscriptionView',
+        'server/personal/PersonalEventSubscriptions',
+        'View',
+        [],
+        {
+          Entry: 'PersonalSubscriptionEntry',
+          Status: 'PersonalSubscriptionStatus',
+        },
+      ],
       [
         'TodoView',
         'server/ws/TodoView',

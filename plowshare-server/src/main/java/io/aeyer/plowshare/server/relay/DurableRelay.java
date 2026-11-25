@@ -108,6 +108,13 @@ public final class DurableRelay implements Relay {
   }
 
   @Override
+  public Follow follow(TopicKey topic, UUID generation, long after) {
+    if (after < 0) throw new IllegalArgumentException("Invalid Relay position");
+    return repository.follow(
+        Objects.requireNonNull(topic), Objects.requireNonNull(generation), after);
+  }
+
+  @Override
   public Read read(SubscriptionKey key, int limit) {
     RelayValues.limit(limit, 1000);
     return repository.read(Objects.requireNonNull(key, "key"), limit);

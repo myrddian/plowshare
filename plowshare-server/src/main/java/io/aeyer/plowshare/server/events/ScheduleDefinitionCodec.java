@@ -50,6 +50,8 @@ public final class ScheduleDefinitionCodec {
         var limits = definition.get("limits");
         if (limits != null && !limits.isNull() && !limits.has("queueCap"))
           throw new IllegalArgumentException("limits require queueCap");
+        if (definition.has("notifyPersonalBot") && definition.get("notifyPersonalBot").isNull())
+          throw new IllegalArgumentException("notifyPersonalBot requires a named route");
       }
       return JSON.treeToValue(parsed, type);
     } catch (java.io.IOException | IllegalArgumentException invalid) {

@@ -265,7 +265,8 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
                 paused,
                 old.action(),
                 old.target(),
-                old.limits()),
+                old.limits(),
+                old.notifyPersonalBot()),
             true));
     return true;
   }

@@ -17,6 +17,7 @@ public interface ScopedTools {
         Set.of(
             ResultTools.READ_NAME,
             ResultTools.LIST_NAME,
+            AgentListTool.NAME,
             AgentRunTool.NAME,
             SkillRuntime.RUN,
             SkillRuntime.READ,

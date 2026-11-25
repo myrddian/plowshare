@@ -1,6 +1,462 @@
 [
   {
     "boundary": "input",
+    "operation": "personal.subscription.preview",
+    "value": {},
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "project": "another-personal"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": ""
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "incorrect",
+      "expectedActiveRevision": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": "incorrect"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expectedActiveRevision": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "expectedActiveRevision": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "\n",
+      "expectedActiveRevision": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": "\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": null,
+      "expectedActiveRevision": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedActiveRevision": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "subscriptions": [],
+      "active": [
+        {
+          "id": "prices",
+          "state": "completed",
+          "item": "inb_fixture",
+          "job": "job_fixture",
+          "detail": "ANSWERED"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.activate",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [],
+      "active": [
+        {
+          "id": "prices",
+          "state": false,
+          "item": "inb_fixture",
+          "job": "job_fixture",
+          "detail": "ANSWERED"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "relay",
+            "project": "research",
+            "topic": "research.completed"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": [
+        {
+          "id": "prices",
+          "state": "completed",
+          "item": null,
+          "job": "job_fixture",
+          "detail": "ANSWERED",
+          "event": "event_fixture"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "relay",
+            "topic": "research.completed"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": [
+        {
+          "id": "prices",
+          "state": "completed",
+          "item": null,
+          "job": "job_fixture",
+          "detail": "ANSWERED",
+          "event": "event_fixture"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "project"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "attention"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "job",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "orchestration",
+            "project": "research",
+            "event": "ended"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "message.posted"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "board",
+            "project": "research",
+            "event": "resolved"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "information",
+            "project": "research",
+            "event": "report.finalised"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "personal.subscription.preview",
+    "value": {
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "activeRevision": "",
+      "subscriptions": [
+        {
+          "id": "follow-research",
+          "source": {
+            "kind": "application-inbox",
+            "project": "research",
+            "copy": "both"
+          },
+          "handler": {
+            "kind": "skill",
+            "agent": "assistant",
+            "name": "track"
+          },
+          "paused": false
+        }
+      ],
+      "active": []
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "conversation.open.ex",
     "value": {
       "project": "fixture",

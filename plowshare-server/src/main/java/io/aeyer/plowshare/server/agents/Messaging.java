@@ -1,10 +1,19 @@
 package io.aeyer.plowshare.server.agents;
 
 import io.aeyer.plowshare.server.approvals.RunApproval;
+import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
+import io.aeyer.plowshare.server.messaging.MessageToolCodec;
 
 /** Per-run messaging binding and protection of private participant history. */
 public interface Messaging {
   SendMessageTool tool(RunExtras.Context context);
+
+  /** Read destinations with the same source context as a new send. */
+  default AgentListTool directory(RunExtras.Context context, boolean canSend) {
+    return new AgentListTool(
+        (request, home) ->
+            MessageToolCodec.refusal(Code.MESSAGING_UNAVAILABLE, "Messaging is unavailable."));
+  }
 
   /** True when this message transport owns and durably queued the approval continuation. */
   default boolean continueApproved(RunApproval approval, String utterance) {

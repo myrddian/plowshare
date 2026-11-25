@@ -166,6 +166,11 @@ public interface MessagingRepository {
 
   Optional<String> externalCommand(String message);
 
+  void bindMailboxAlert(String message, MessageService.PersonalAlert alert);
+
+  Optional<MessageService.PersonalAlert> mailboxAlert(
+      String message, String account, String project, String conversation, String agent);
+
   void lockRequest(String message);
 
   Optional<String> finalReply(String message);
@@ -238,6 +243,12 @@ public interface MessagingRepository {
   List<Instance> transport(String conversation);
 
   List<Instance> defaults(String account, String project, String agent);
+
+  record DefaultAvailability(boolean active, int pending) {}
+
+  /** Read the same default instances and pending counts used by a persistent send, in one page. */
+  Map<String, DefaultAvailability> defaultAvailability(
+      String account, String project, List<String> agents);
 
   List<Instance> opening(String account, String project, String requestId);
 

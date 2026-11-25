@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -81,6 +82,34 @@ public final class RelayInformationEvents implements InformationEvents {
     this.consumption = Objects.requireNonNull(consumption, "consumption");
     this.projects = Objects.requireNonNull(projects, "projects");
     this.clock = Objects.requireNonNull(clock, "clock");
+  }
+
+  /** Internal coordinates for a project information subscription. */
+  public static Relay.TopicKey subscriptionTopic(long projectId) {
+    var scope = new Relay.ProjectScope(projectId);
+    return new Relay.TopicKey(scope, InformationTopics.of(scope));
+  }
+
+  public static boolean ownsTopic(Relay.TopicKey topic) {
+    return topic.scope() instanceof Relay.ProjectScope project
+        && subscriptionTopic(project.projectId()).equals(topic);
+  }
+
+  /** The published revision and processing generation. The consumer still checks access. */
+  public record Finalisation(UUID revision, long generation) {}
+
+  /** Uses the same owned namespace and codec as information.events, without its reader cursor. */
+  public static Optional<Finalisation> subscriptionFinalisation(Relay.Publication publication) {
+    if (!ownsTopic(publication.topic()) || !issuedHere(publication.event().publisher()))
+      return Optional.empty();
+    if (!(publication.event().payload() instanceof RelayPayload.Text message))
+      throw new IllegalArgumentException("Information event topic carries a non-message payload");
+    var notice = InformationEventCodec.read(message.text());
+    // Explicit finalisation is a separate operator action. Processing events do not establish
+    // independent effect ancestry and must not start automated feedback chains.
+    if (!"report".equals(notice.stage()) || !"finalised".equals(notice.action()))
+      return Optional.empty();
+    return Optional.of(new Finalisation(UUID.fromString(notice.revision()), notice.generation()));
   }
 
   @Override

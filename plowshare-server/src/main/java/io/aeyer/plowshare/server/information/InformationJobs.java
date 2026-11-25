@@ -52,6 +52,12 @@ public final class InformationJobs implements InformationLogAccess {
     requireLog(target, account);
   }
 
+  /** Binds the current project-read requirement before a Personal log can store Relay input. */
+  public void bindSourceProject(String log, long sourceProject, String account) {
+    repository.bindSourceProject(log, sourceProject);
+    requireLog(log, account);
+  }
+
   public boolean allowed(String job, String account) {
     return listing(account).allowed(job);
   }

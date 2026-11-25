@@ -672,6 +672,8 @@ plowshare:
     # how it ended.
     heartbeat: ${PLOWSHARE_JOB_HEARTBEAT:20s}
   events:
+    # Offer the account Mailbox to bots in authenticated chats in the owner's Personal workspace.
+    personal-mailbox-reading: ${PLOWSHARE_EVENTS_PERSONAL_MAILBOX_READING:true}
     # Whether this server fires schedules by itself. On by default: Plowshare is a
     # remote harness, and a schedule that needs an operator's cron to wake it is not
     # one. The test classpath turns it off (src/test/resources/config).

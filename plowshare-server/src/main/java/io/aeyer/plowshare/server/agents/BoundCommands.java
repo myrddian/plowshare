@@ -10,12 +10,37 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * Explicit commands are pinned and dispatched by the harness, independently of model tool
  * selection.
  */
 public final class BoundCommands {
+  private record SkillPin(String conversation, String skill, String hash, Runnable requireSource) {}
+
+  // A job worker owns one initial, pinned command. Delegated turns use their own conversation and
+  // do not inherit this selection. The scope always closes before the worker returns.
+  private static final ThreadLocal<SkillPin> SKILL_PIN = new ThreadLocal<>();
+
+  static Outcome withSubscriptionSkill(
+      String conversation, EventRuns.SubscriptionSkill subscription, Supplier<Outcome> run) {
+    if (SKILL_PIN.get() != null)
+      throw new IllegalStateException("A Personal subscription skill is already bound");
+    subscription.requireSource().run();
+    SKILL_PIN.set(
+        new SkillPin(
+            conversation,
+            subscription.skill(),
+            subscription.skillHash(),
+            subscription.requireSource()));
+    try {
+      return run.get();
+    } finally {
+      SKILL_PIN.remove();
+    }
+  }
+
   private static final ObjectMapper JSON = new ObjectMapper();
   private final CommandInvocations invocations;
   private final SkillResolver skills;
@@ -285,6 +310,14 @@ public final class BoundCommands {
     String refusal = null;
     try {
       Parsed parsed = incoming ? parse(text) : null;
+      SkillPin pin = SKILL_PIN.get();
+      if (pin != null && !pin.conversation().equals(transcript.conversationId())) pin = null;
+      if (pin != null) {
+        pin.requireSource().run();
+        if (parsed == null || !parsed.command().equals("/skill:" + pin.skill()))
+          throw new IllegalArgumentException(
+              "The pinned Personal subscription skill command changed");
+      }
       if (parsed != null) {
         if (account == null
             || transcript.conversationId() == null
@@ -308,6 +341,9 @@ public final class BoundCommands {
                     () ->
                         new IllegalArgumentException(
                             "That command is unknown, unavailable or not granted. Nothing ran."));
+        if (pin != null && (!command.kind().equals("skill") || !command.hash().equals(pin.hash())))
+          throw new IllegalArgumentException(
+              "The Personal subscription skill changed after activation");
         String mode = parsed.mode() == null ? command.mode() : parsed.mode();
         if (command.kind().equals("skill")) {
           // The user explicitly selected this skill. Portable packages run in the current agent

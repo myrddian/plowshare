@@ -157,6 +157,175 @@ through their normal Plowshare mechanisms. Additional tools or skills may suppor
 the workflows where needed, using the same grants and execution infrastructure.
 Instructions guide behaviour; they do not grant capabilities.
 
+### Read your Mailbox in Personal chat
+
+Bots in your authenticated Personal chat can tell you when new Mailbox items
+have arrived. Ask the bot to check your Mailbox. The `inbox_read` tool reads up
+to 20 ordinary unread items and marks them read. Approval alerts stay unread.
+The notice itself leaves items unread.
+
+Operators can disable the Personal default with
+`plowshare.events.personal-mailbox-reading: false` in server configuration.
+Bot definitions can still opt in explicitly with `announces-inbox: true`.
+
+### React to a scheduled Mailbox result
+
+Create `Resources/subscriptions.json` in Personal and let it sync to the server.
+An active subscription can start a skill when an existing schedule puts a result
+in your account Mailbox. Set the source to the schedule's project and name. Use
+your `Personal:<account>` routing identity for a Personal schedule. The handler
+names an exported Personal agent and a skill granted to that agent.
+
+```json
+{
+  "version": 1,
+  "subscriptions": [
+    {
+      "id": "track-tool-prices",
+      "source": {
+        "kind": "mailbox",
+        "event": "item.added",
+        "schedule": {"project": "research", "name": "tool-price-research"},
+        "ending": "ANSWERED"
+      },
+      "handler": {"kind": "skill", "agent": "assistant", "name": "update-price-tracker"},
+      "paused": false
+    }
+  ]
+}
+```
+
+Run `personal subscription preview` as the owner. Review `subscriptions` and
+copy the returned `revision` and `activeRevision` into the activation command.
+An empty `activeRevision` means this is the first activation.
+
+```sh
+plowshare personal subscription preview
+plowshare personal subscription activate '{"revision":"<revision>","expectedActiveRevision":"<activeRevision>"}'
+```
+
+The first activation follows future results. Each Personal workspace can
+configure up to eight subscriptions. Activation of the same ID preserves its
+Relay position. To pause, change `paused` and activate that revision. To
+remove a subscription, delete its entry and activate the updated file. To clear
+all subscriptions, activate an empty `subscriptions` array. Preview the active
+revision after an unconfirmed response before making another change.
+
+The skill receives the exact item ID, schedule, ending and report as JSON
+arguments in a background Personal job. It can treat the report as source
+evidence and update files using its normal grants. The Mailbox item remains
+available with its existing read state. Personal processing records the job in
+the subscription's status. A report that exceeds the bound skill input limit
+stays in the Mailbox and the subscription reports it as unavailable to the
+handler.
+
+The source is an ordinary schedule result delivered to your account Mailbox.
+
+An interrupted start with an unlinked job ID can resume from its existing
+delivery. A linked but unconfirmed job remains inspectable and requires review
+before rearming. After a retention gap, activate a new subscription ID to start
+from the current position. If a skill changes, preview and activate a revision
+again so it can use the new skill hash.
+
+### Notify a bot from a Personal reaction
+
+Use the Mailbox, Application project inbox, or Personal attention copy as the
+source and put this handler on the subscription:
+
+```json
+{"kind": "message", "route": "personal-alerts"}
+```
+
+The [named route](internal-messaging.md#keep-a-routes-conversation) must point to
+a bot in your own Personal workspace. Preview and activate the change as usual.
+The status records the queued message reference. A busy bot handles the alert
+when its conversation frees up. For a scheduled Mailbox result, the alert
+permits a read of the exact item without marking it read. Application inbox
+alerts carry a result reference and keep the Application's usual access rules.
+
+### Follow an existing project Relay topic
+
+Add a `relay` source to the same `Resources/subscriptions.json` file and activate
+it in Personal. The source project or Application must already publish to the
+topic. Viewer access to the source is sufficient. The configured agent and
+skill run under your existing Personal grants.
+
+```json
+{
+  "version": 1,
+  "subscriptions": [
+    {
+      "id": "follow-research",
+      "source": {"kind": "relay", "project": "research", "topic": "research.completed"},
+      "handler": {"kind": "skill", "agent": "assistant", "name": "update-price-tracker"},
+      "paused": false
+    }
+  ]
+}
+```
+
+Choose an existing `TEXT` or `EMPTY` topic. The skill receives a
+`relay.publication` JSON argument with the source project, topic, event ID,
+position, publisher, occurrence time and text. An `EMPTY` event has a null text
+field. The first activation starts at the current head. Personal keeps its own
+cursor, so different owners and existing Application consumers can all follow
+the same publication independently.
+
+Read access is checked when admitting a publication, when starting the skill
+and when inspecting its retained log. Pausing keeps the cursor. If retention
+passes that cursor, or the source topic is recreated, use a new subscription ID
+to start at the current head. A publication already admitted before it expires
+can still start while the source topic and read access are current. The status
+shows the last event reference while you can read its source. A publication
+above the skill input limit gets a `source-unavailable` disposition.
+
+### Follow Application inbox results and workflow endings
+
+Use the same subscription file, handler and activation commands. Select one of
+these sources in the entry's `source` field.
+
+| Source | Selector | Access at dispatch |
+| --- | --- | --- |
+| Application inbox result | `{"kind":"application-inbox","project":"research","copy":"project"}` | Current Application Viewer access. |
+| Personal attention copy | `{"kind":"application-inbox","project":"research","copy":"attention"}` | Ownership of the exact copy delivered to your Mailbox. Viewer access identifies the Application at activation. |
+| Job ending | `{"kind":"job","project":"research","event":"ended"}` | Current project access and permission to read the job and its source log. |
+| Orchestration ending | `{"kind":"orchestration","project":"research","event":"ended"}` | Current project and log access for the account that started the orchestration. |
+
+The Application's item and its attention copy each have their own item ID. Use
+two subscription IDs if you want a skill run for each. Copies follow the
+Application's existing attention routing. Ordinary inbox results pass their
+published report as evidence and preserve the original read state. Approvals
+and questions follow their existing human decision flow.
+
+Job and orchestration endings pass metadata including the owning record ID,
+definition, state and end time. The project and source log's read restrictions
+apply to the resulting Personal log. If a source record has been removed or an
+orchestration ending has been superseded, the subscription records that source
+as unavailable. These selectors follow work in ordinary projects.
+
+### Follow Board posts, resolutions, and finalised reports
+
+Add a subscription to the same Personal file and activate it as the owner.
+
+| Source | Selector | Skill input |
+| --- | --- | --- |
+| Board post | `{"kind":"board","project":"research","event":"message.posted"}` | The exact public Board message and its topic ID. This also includes resolution messages posted to the Board. |
+| Board resolution | `{"kind":"board","project":"research","event":"resolved"}` | The resolution message identified by the Board topic. |
+| Finalised information report | `{"kind":"information","project":"research","event":"report.finalised"}` | The exact revision ID, processing generation and occurrence time from an explicit report finalisation. |
+
+Board subscriptions require current project Viewer access. A Board message's
+published text is evidence, with project read authority retained on the
+Personal log. Following both Board events can run a skill twice for the same
+resolution, once for each transition.
+
+Use the typed information selector for the project's information feed. The
+report revision must be readable in that exact project selection when the
+skill starts. The Personal log retains the revision as an input and respects
+later access changes. A skill can retrieve the report by its revision ID using
+its usual information-read grants.
+
+### Personal and project instructions
+
 Account-wide instructions in `Resources/AGENTS.md` are inherited by other projects.
 Guidance there must distinguish managing Personal from working in another project;
 assistant-specific rules can also use the existing bot-scoped instruction files.

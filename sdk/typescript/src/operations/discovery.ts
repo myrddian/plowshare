@@ -9,6 +9,7 @@ import { OPERATION_SCHEMAS } from './operation-schemas.ts';
 /** Explicit mutation classification shared by help and recovery. No operation is replayed. */
 const MUTATIONS = new Set<string>([
   'approval.policy.save',
+  'personal.subscription.activate',
   'tool.scope.connect',
   'tool.scope.disconnect',
   'tool.scope.host.save',

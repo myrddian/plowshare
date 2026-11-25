@@ -30,6 +30,9 @@ public interface RelayRepository {
   /** Coherent read of a retained scoped event; absence is inconclusive after log retention. */
   Optional<Relay.Publication> retained(Relay.TopicKey key, String eventId);
 
+  /** Fences the pinned topic generation through the caller's owning cursor transaction. */
+  Relay.Follow follow(Relay.TopicKey topic, UUID generation, long after);
+
   /** Atomically registers an explicit baseline, without resetting an existing subscription. */
   Relay.Subscription subscribe(Relay.SubscriptionKey key, Relay.Start start, Instant now);
 

@@ -18,6 +18,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,7 +39,11 @@ import io.aeyer.plowshare.server.archive.ArchiveQueryCancelledException;
 import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ConversationSearch;
 import io.aeyer.plowshare.server.archive.EntryStore;
+import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.PassageIndex;
+import io.aeyer.plowshare.server.events.Inbox;
+import io.aeyer.plowshare.server.events.InboxNoticing;
+import io.aeyer.plowshare.server.events.InboxStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.files.FileMutationObservation;
@@ -82,6 +87,7 @@ import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import io.aeyer.plowshare.server.llm.dispatch.ToolChoice;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.llm.tokens.RatioTokenizer;
+import io.aeyer.plowshare.server.personal.PersonalSpaces;
 import io.aeyer.plowshare.server.reads.ReadFailedException;
 import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import io.aeyer.plowshare.server.security.ChatFiltering;
@@ -641,6 +647,11 @@ class JobRuntimeTest {
    */
   private static AgentDefinition announcing(String name) throws Exception {
     AgentDefinition plain = agent(name);
+    return withMailboxFlags(plain, plain.bot(), true);
+  }
+
+  private static AgentDefinition withMailboxFlags(
+      AgentDefinition plain, boolean bot, boolean announcesInbox) {
     return new AgentDefinition(
         plain.name(),
         plain.description(),
@@ -656,8 +667,8 @@ class JobRuntimeTest {
         plain.exported(),
         plain.delegable(),
         plain.vision(),
-        plain.bot(),
-        true);
+        bot,
+        announcesInbox);
   }
 
   /**
@@ -2560,6 +2571,61 @@ class JobRuntimeTest {
 
   // --- announces-inbox and the notice --------------------------------------------
 
+  @Test
+  void personal_chat_offers_mailbox_reading_to_bots() throws Exception {
+    var transport = new Scripted().thenAlways(() -> answer("done"));
+    var runtime = runtimeOver(transport);
+    var store = mock(InboxStore.class);
+    var inbox = mock(Inbox.class);
+    runtime.useNoticing(
+        new InboxNoticing(
+            store,
+            inbox,
+            session -> "session".equals(session) ? Optional.of("alice") : Optional.empty(),
+            true));
+    when(store.unreadSinceLastTurn("alice", "cnv_talk")).thenReturn(1);
+
+    var agent = withMailboxFlags(agent("echo"), false, false);
+    var bot = withMailboxFlags(agent, true, false);
+    var personal = Home.of(PersonalSpaces.name("alice"));
+    var project = Home.of("shared");
+    record Scenario(
+        AgentDefinition definition, Home home, Origin origin, Speaker speaker, boolean offered) {}
+    var alice = Speaker.person("alice");
+    for (var scenario :
+        List.of(
+            new Scenario(bot, personal, Origin.TURN, alice, true),
+            new Scenario(bot, project, Origin.TURN, alice, false),
+            new Scenario(agent, personal, Origin.TURN, alice, false),
+            new Scenario(bot, personal, Origin.EVENT, alice, false),
+            new Scenario(bot, personal, Origin.TURN, Speaker.harness(), false))) {
+      var log = spy(new Recorded(List.of(), "cnv_talk").speaking(scenario.speaker()));
+      doReturn(scenario.origin()).when(log).origin();
+      runtime.run(
+          scenario.definition(),
+          "hello",
+          scenario.home(),
+          generous(),
+          () -> false,
+          "session",
+          JobWatch.UNWATCHED,
+          log,
+          TurnCap.from(scenario.definition()),
+          List.of(),
+          "alice",
+          true);
+
+      assertEquals(
+          scenario.offered(),
+          transport.calls().getLast().tools().stream()
+              .anyMatch(tool -> tool.name().equals("inbox_read")));
+      assertEquals(
+          scenario.offered(),
+          log.entriesWithoutAllowanceAdvice().stream().anyMatch(e -> e.kind() == EntryKind.NOTICE));
+    }
+    verify(inbox, never()).unreadForAgent(any(), anyInt(), anyInt());
+  }
+
   /**
    * A notice is {@code EntryKind.NOTICE}, which projects {@code USER} and not {@code SYSTEM} — see
    * that enum constant for the measurement. Folding it into the agent's own system message instead
@@ -3718,6 +3784,39 @@ class JobRuntimeTest {
     assertEquals(
         List.of("probe_read"),
         transport.calls().get(0).tools().stream().map(ToolSchema::name).toList());
+  }
+
+  @Test
+  void messaging_directory_is_a_declared_tool_bound_to_the_run_home() throws Exception {
+    Scripted transport =
+        new Scripted()
+            .then(() -> asking("", call("directory", "agent_list", "{}")))
+            .then(() -> answer("done"));
+    JobRuntime runtime = runtimeOver(transport);
+    Home home = Home.of("directory-project");
+    runtime.useMessaging(
+        new Messaging() {
+          @Override
+          public SendMessageTool tool(RunExtras.Context context) {
+            return new SendMessageTool((request, runHome) -> "send");
+          }
+
+          @Override
+          public AgentListTool directory(RunExtras.Context context, boolean canSend) {
+            assertTrue(canSend);
+            assertEquals(home, context.home());
+            return new AgentListTool((request, runHome) -> "directory page");
+          }
+        });
+
+    assertTrue(runtime.knownTools().contains(AgentListTool.NAME));
+    var definition = agent("echo").withTools(List.of(AgentListTool.NAME, SendMessageTool.NAME));
+    var result = runtime.run(definition, "Find a recipient", home, generous(), null);
+
+    assertEquals(Ending.ANSWERED, result.ending());
+    assertTrue(
+        transport.conversation(1).stream()
+            .anyMatch(message -> "directory page".equals(message.content())));
   }
 
   @Test

@@ -345,9 +345,66 @@ export interface BoardClosed {
   readonly topic: BoardTopic;
   readonly message: BoardMessage;
 }
+export interface PersonalSubscriptionView {
+  readonly revision: string;
+  readonly activeRevision: string;
+  readonly subscriptions: readonly PersonalSubscriptionEntry[];
+  readonly active: readonly PersonalSubscriptionStatus[];
+}
+
+type PersonalSubscriptionEntry = {
+  readonly id: string;
+  readonly source:
+    | {
+        readonly kind: 'mailbox';
+        readonly event: 'item.added';
+        readonly schedule: { readonly project: string; readonly name: string };
+        readonly ending: string;
+      }
+    | {
+        readonly kind: 'relay';
+        readonly project: string;
+        readonly topic: string;
+      }
+    | {
+        readonly kind: 'application-inbox';
+        readonly project: string;
+        readonly copy: 'project' | 'attention';
+      }
+    | {
+        readonly kind: 'job' | 'orchestration';
+        readonly project: string;
+        readonly event: 'ended';
+      }
+    | {
+        readonly kind: 'board';
+        readonly project: string;
+        readonly event: 'message.posted' | 'resolved';
+      }
+    | {
+        readonly kind: 'information';
+        readonly project: string;
+        readonly event: 'report.finalised';
+      };
+  readonly handler:
+    | { readonly kind: 'skill'; readonly agent: string; readonly name: string }
+    | { readonly kind: 'message'; readonly route: string };
+  readonly paused: boolean;
+};
+type PersonalSubscriptionStatus = {
+  readonly id: string;
+  readonly state: string;
+  readonly item: string | null;
+  readonly event?: string | null;
+  readonly job: string | null;
+  readonly detail: string | null;
+};
+
 export interface AdministrativeReplies {
   'approval.policy.get': ApprovalPolicyView;
   'approval.policy.save': ApprovalPolicyView;
+  'personal.subscription.preview': PersonalSubscriptionView;
+  'personal.subscription.activate': PersonalSubscriptionView;
   'approval.list': ApprovalListed;
   'approval.answer': ApprovalAnswered;
   'approval.revoke': ApprovalRevoked;
@@ -595,6 +652,8 @@ const scheduleDefinition = record({
     maxTurns: nullable(count),
     queueCap: count,
   }),
+  notifyPersonalBot: (value) =>
+    value === undefined || record({ route: named })(value),
 });
 const scheduleFile = record({
   name: named,
@@ -662,6 +721,68 @@ const firing = record({
   finishedAt: nullable(named),
   topic: nullable(named),
 });
+const personalSubscription = record({
+  revision: (value) =>
+    typeof value === 'string' && /^[0-9a-f]{64}$/.test(value),
+  activeRevision: (value) =>
+    typeof value === 'string' && (value === '' || /^[0-9a-f]{64}$/.test(value)),
+  subscriptions: list(
+    record({
+      id: named,
+      source: (value) =>
+        record({
+          kind: (kind) => kind === 'mailbox',
+          event: (event) => event === 'item.added',
+          schedule: record({ project: named, name: named }),
+          ending: named,
+        })(value) ||
+        record({
+          kind: (kind) => kind === 'relay',
+          project: named,
+          topic: named,
+        })(value) ||
+        record({
+          kind: (kind) => kind === 'application-inbox',
+          project: named,
+          copy: (copy) => copy === 'project' || copy === 'attention',
+        })(value) ||
+        record({
+          kind: (kind) => kind === 'job' || kind === 'orchestration',
+          project: named,
+          event: (event) => event === 'ended',
+        })(value) ||
+        record({
+          kind: (kind) => kind === 'board',
+          project: named,
+          event: (event) => event === 'message.posted' || event === 'resolved',
+        })(value) ||
+        record({
+          kind: (kind) => kind === 'information',
+          project: named,
+          event: (event) => event === 'report.finalised',
+        })(value),
+      handler: (value) =>
+        record({
+          kind: (kind) => kind === 'skill',
+          agent: named,
+          name: named,
+        })(value) ||
+        record({ kind: (kind) => kind === 'message', route: named })(value),
+      paused: bool,
+    }),
+  ),
+  active: list(
+    record({
+      id: named,
+      state: named,
+      item: nullable(named),
+      event: (value) => value === undefined || nullable(named)(value),
+      job: nullable(named),
+      detail: nullable(text),
+    }),
+  ),
+});
+
 const readers = {
   'approval.policy.get': record({
     policy: isApprovalPolicy,
@@ -671,6 +792,8 @@ const readers = {
     policy: isApprovalPolicy,
     capabilities: isApprovalCapabilities,
   }),
+  'personal.subscription.preview': personalSubscription,
+  'personal.subscription.activate': personalSubscription,
   'approval.list': record({ approvals: list(approval) }),
   'approval.answer': record({
     id: named,

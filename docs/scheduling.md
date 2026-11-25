@@ -206,6 +206,31 @@ Targets reuse ordinary authority rules:
 Grants, membership and destinations are validated on each scan and before starting.
 A schedule does not expand tools or bypass an approval because it is unattended.
 
+### Notify a Personal bot after delivery
+
+In a schedule you own in Personal, keep the local Mailbox target and add
+`notifyPersonalBot` at the top level of the definition:
+
+```json
+{
+  "target": {"kind": "mailbox", "project": null, "conversation": null, "to": null, "route": null},
+  "notifyPersonalBot": {"route": "personal-alerts"}
+}
+```
+
+Configure that [named route](internal-messaging.md#keep-a-routes-conversation)
+in Personal to an eligible Personal bot. Set its `conversation` to wake an
+existing conversation. Messaging queues the alert if the bot is busy. The
+schedule still delivers its result to the Mailbox. The bot can use
+`inbox_alert_read` in the alert turn to open that exact result and preserve
+its unread state. If the item is unavailable or too large for the tool, it
+remains inspectable through the Mailbox subject to the usual access checks.
+The alert route is checked when the notification is queued, independently of
+delivery of the schedule result.
+
+For an Application schedule, select the published result in a
+[Personal reaction](personal-space.md#notify-a-bot-from-a-personal-reaction).
+
 ## Application inbox ownership
 
 An Application owns its background results in its inspectable project inbox,

@@ -37,6 +37,7 @@ public final class JdbcLogTreeFactRepository implements LogTreeFactRepository {
        ARRAY(SELECT DISTINCT parent.log FROM snapshot_cache_log_parents(b.log) parent(log)
         ORDER BY 1) AS parents,
        EXISTS(SELECT 1 FROM information_quarantined_payloads q WHERE q.payload_id=b.log) AS quarantined,
+       EXISTS(SELECT 1 FROM information_relay_log_inputs r WHERE r.log_id=b.log) AS relay_source,
        ARRAY(SELECT i.revision_id FROM information_job_inputs i WHERE i.job_id=b.log
         ORDER BY i.revision_id LIMIT ?) AS revisions,
        ARRAY(SELECT i.scope FROM information_job_inputs i WHERE i.job_id=b.log
@@ -83,6 +84,11 @@ public final class JdbcLogTreeFactRepository implements LogTreeFactRepository {
         (RowCallbackHandler)
             row -> {
               if (oversized[0]) return;
+              // Project-source dependencies use the authoritative account-specific SQL predicate.
+              if (row.getBoolean("relay_source")) {
+                oversized[0] = true;
+                return;
+              }
               String log = Objects.requireNonNull(row.getString("log"), "Tree log");
               var parents = texts(row.getArray("parents"));
               var revisions = row.getArray("revisions");

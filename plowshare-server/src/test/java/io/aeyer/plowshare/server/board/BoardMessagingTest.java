@@ -254,6 +254,29 @@ class BoardMessagingTest {
         "request");
   }
 
+  @Test
+  void definition_availability_counts_queued_messages_for_the_selected_default() throws Exception {
+    Path reviewer = definitions.resolve("reviewer.md");
+    Files.writeString(
+        reviewer,
+        Files.readString(reviewer)
+            .replace("name: reviewer\n", "name: reviewer\nalias: review_alias\n"));
+    agents = AgentRegistry.of(definitions, Set.of("send_message"));
+    var direct = request(false);
+    var alias =
+        send(
+            caller,
+            "{\"to\":\"review_alias\",\"body\":\"Review this too\",\"reply_expected\":false}",
+            "alias-request");
+    assertEquals(direct.path("to").asText(), alias.path("to").asText());
+    var repository = new JdbcMessagingRepository(fixture.jdbc);
+    var page = repository.defaultAvailability("enzo", "payments", List.of("reviewer", "bot"));
+    assertTrue(page.get("reviewer").active());
+    assertEquals(2, page.get("reviewer").pending());
+    assertFalse(page.containsKey("bot"));
+    assertTrue(repository.defaultAvailability("bob", "payments", List.of("reviewer")).isEmpty());
+  }
+
   private RunExtras.Context recipient(JsonNode receipt) {
     var instance = messages.instance(receipt.path("to").asText()).orElseThrow();
     return context(instance.agent(), instance.conversation());
@@ -656,6 +679,95 @@ class BoardMessagingTest {
     messages.useRouting(
         new ProjectMessageRouting(
             routeProjects, new JdbcProjectMembers(fixture.jdbc), personalSettings, personalSpaces));
+  }
+
+  @Test
+  void a_personal_alert_wakes_the_pinned_bot_once_and_only_it_gets_the_mailbox_reference()
+      throws Exception {
+    personalRouting();
+    personalSettings.setInstanceLimit(1);
+    messages.useLimits(personalSettings);
+    String project = PersonalSpaces.name("enzo");
+    Home home = Home.of(project);
+    String conversation =
+        fixture.conversations.open(home, Budget.of(20), TurnCap.of(4), "enzo").id();
+    Path root = personalSpaces.workspace(project).orElseThrow();
+    Files.writeString(
+        root.resolve("plowshare"),
+        """
+        {"version":1,"name":"Personal:enzo","routing":{"routeFiles":["routes.json"]}}
+        """);
+    Files.writeString(
+        root.resolve("routes.json"),
+        """
+        {"version":1,"routes":[
+          {"name":"alerts","project":"Personal:enzo","agent":"bot","conversation":"%s"},
+          {"name":"also-alerts","project":"Personal:enzo","agent":"bot","conversation":"%s"},
+          {"name":"ordinary-agent","project":"Personal:enzo","agent":"reviewer"},
+          {"name":"shared","project":"payments","agent":"bot"}
+        ]}
+        """
+            .formatted(conversation, conversation));
+    assertThrows(MessageRefused.class, () -> messages.requirePersonalAlertRoute("enzo", "shared"));
+    assertThrows(
+        MessageRefused.class, () -> messages.requirePersonalAlertRoute("enzo", "ordinary-agent"));
+    messages.requirePersonalAlertRoute("enzo", "alerts");
+    var reference = new MessageService.PersonalAlert("inb_Result", "fir_Schedule");
+    var cause = RelayCausation.root("test-alert");
+    String message = messages.sendPersonalAlert("enzo", "alerts", reference, cause);
+    assertEquals(message, messages.sendPersonalAlert("enzo", "alerts", reference, cause));
+    String other = messages.sendPersonalAlert("enzo", "also-alerts", reference, cause);
+    assertNotEquals(message, other);
+    assertEquals(
+        messages.route(message).orElseThrow().recipient(),
+        messages.route(other).orElseThrow().recipient());
+    assertEquals(1, new JdbcMessagingRepository(fixture.jdbc).activeInstances("enzo", project));
+    assertFalse(messages.route(message).orElseThrow().replyExpected());
+    var wake = incomingWake(message);
+    voice.busy = true;
+    assertTrue(messages.busy(wake));
+    voice.busy = false;
+    messages.start(wake, (log, outcome) -> {});
+    assertEquals(1, voice.calls.size());
+    assertEquals(conversation, voice.calls.getFirst().instance().conversation());
+    assertTrue(voice.calls.getFirst().utterance().contains("inbox_alert_read"));
+
+    Transcript log = Mockito.mock(Transcript.class);
+    Mockito.when(log.speaker()).thenReturn(Speaker.message(message));
+    assertEquals(
+        Optional.of(reference),
+        messages.mailboxAlertFor(
+            new RunExtras.Context(agents.get("bot"), conversation, null, log, home, "enzo")));
+    assertTrue(
+        messages
+            .mailboxAlertFor(
+                new RunExtras.Context(
+                    agents.get("bot"), caller.conversationId(), null, log, home, "enzo"))
+            .isEmpty());
+    Mockito.when(log.speaker()).thenReturn(Speaker.person("enzo"));
+    assertTrue(
+        messages
+            .mailboxAlertFor(
+                new RunExtras.Context(agents.get("bot"), conversation, null, log, home, "enzo"))
+            .isEmpty());
+
+    personalSettings.setInstanceLimit(2);
+    String replacement =
+        fixture.conversations.open(home, Budget.of(20), TurnCap.of(4), "enzo").id();
+    Path routes = root.resolve("routes.json");
+    Files.writeString(routes, Files.readString(routes).replace(conversation, replacement));
+    assertEquals(message, messages.sendPersonalAlert("enzo", "alerts", reference, cause));
+    var newReference = new MessageService.PersonalAlert("inb_Next", "fir_Next");
+    String next = messages.sendPersonalAlert("enzo", "alerts", newReference, cause);
+    assertNotEquals(message, next);
+    var nextWake = incomingWake(next);
+    messages.start(nextWake, (id, outcome) -> {});
+    assertEquals(replacement, voice.calls.getLast().instance().conversation());
+    Mockito.when(log.speaker()).thenReturn(Speaker.message(next));
+    assertEquals(
+        Optional.of(newReference),
+        messages.mailboxAlertFor(
+            new RunExtras.Context(agents.get("bot"), replacement, null, log, home, "enzo")));
   }
 
   @Test
