@@ -22,6 +22,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.FileAccess;
 import io.aeyer.plowshare.protocol.Home;
@@ -119,6 +122,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
+import org.slf4j.LoggerFactory;
 
 /**
  * The runtime, against fixture agents and a scripted transport. No model and no socket: every
@@ -1816,17 +1820,39 @@ class JobRuntimeTest {
           throw new ReasoningStoppedException(
               transport.samples.getLast().reasoning().orElseThrow(), "repetition");
         });
-    Outcome outcome =
-        runtimeOver(transport)
-            .run(
-                agent("reader").sampling(reasoningSampling()),
-                "review",
-                Home.global(),
-                generous(),
-                null);
-    assertEquals(Ending.UNAVAILABLE, outcome.ending());
-    assertEquals(2, outcome.modelCalls());
-    assertEquals(2, transport.calls().size());
+    JobWatch watch = new JobWatch("job_0000000001", null, JobEvents.NONE).forDelegation();
+    Recorded transcript = new Recorded(List.of(), "cnv_0000000002");
+    Logger logger = (Logger) LoggerFactory.getLogger(JobRuntime.class);
+    var captured = new ListAppender<ILoggingEvent>();
+    captured.start();
+    logger.addAppender(captured);
+    try {
+      Outcome outcome =
+          runtimeOver(transport)
+              .run(
+                  agent("reader").sampling(reasoningSampling()),
+                  "review",
+                  Home.global(),
+                  generous(),
+                  () -> false,
+                  null,
+                  watch,
+                  transcript);
+      assertEquals(Ending.UNAVAILABLE, outcome.ending());
+      assertEquals(2, outcome.modelCalls());
+      assertEquals(2, transport.calls().size());
+
+      String expected = "Model reasoning stopped job=job_0000000001 conversation=cnv_0000000002";
+      assertEquals(
+          List.of(expected, expected),
+          captured.list.stream()
+              .map(ILoggingEvent::getFormattedMessage)
+              .filter(message -> message.startsWith("Model reasoning stopped"))
+              .toList());
+    } finally {
+      logger.detachAppender(captured);
+      captured.stop();
+    }
   }
 
   @Test

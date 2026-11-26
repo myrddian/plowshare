@@ -4094,6 +4094,11 @@ public final class JobRuntime {
               modelCalls,
               "");
         } catch (ReasoningStoppedException stalled) {
+          // The aggregate reporter samples across jobs; retain a locator for every stopped stream.
+          log.warn(
+              "Model reasoning stopped job={} conversation={}",
+              watch.jobId(),
+              transcript.conversationId());
           failures.report(FailureReporter.Source.RUNTIME, stalled);
           recordFailedModelOutput(transcript, timed, owner, "reasoning limit exceeded");
           ReasoningPolicy policy = stalled.policy();
