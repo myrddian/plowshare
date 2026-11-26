@@ -529,6 +529,11 @@ observation logged immediately and at most one diagnostic per
 Every observation still increments its counter. This sampling applies to the new
 reporter; existing subsystem logs retain their own behavior.
 
+Every reasoning stop in the agent runtime also emits a `Model reasoning stopped`
+warning with `job` and `conversation` fields, including stops followed by recovery.
+For delegated calls, these identify the owning job and the delegate's conversation.
+An absent ID is logged as `null`. These IDs are log fields only.
+
 The bundled Grafana dashboard includes failure, ERROR-log, failed-inference and
 unavailable/session-gone job panels. `logback_events_total{level="error"}` alone
 cannot expose handled exceptions that never produce an ERROR log. Failure diagnostics
