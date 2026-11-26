@@ -17,7 +17,9 @@ import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -1358,6 +1360,49 @@ public final class Turn {
         admission);
   }
 
+  /** Uses the ordinary conversation slot while retaining the goal's separate admission. */
+  public Optional<String> speakGoal(
+      String conversation,
+      AgentDefinition definition,
+      String opening,
+      UUID allowance,
+      RunAdmission admission,
+      Runnable requireStart) {
+    var goal = Objects.requireNonNull(admission.goal());
+    if (!conversation.equals(goal.conversation()))
+      throw new IllegalArgumentException("Goal turn must use its retained conversation");
+    GoalTurn.requireAgent(definition);
+    try {
+      return Optional.of(
+          speak(
+              conversation,
+              definition,
+              opening,
+              null,
+              null,
+              null,
+              outcome -> admission.ended().run(),
+              record -> {
+                requireSpeakable(record);
+                if (record.budget() == null
+                    || !record.budget().capped()
+                    || !allowance.equals(record.budget().identity())
+                    || record.turnCap() != null && !record.turnCap().capped())
+                  throw new Refused("Goal requires its original finite conversation limits");
+                admission.check().run();
+                requireStart.run();
+              },
+              false,
+              goal.speaker(),
+              null,
+              admission));
+    } catch (GoalConversationOccupied busy) {
+      return Optional.empty();
+    }
+  }
+
+  private static final class GoalConversationOccupied extends RuntimeException {}
+
   private String speak(
       String conversation,
       AgentDefinition definition,
@@ -1478,6 +1523,7 @@ public final class Turn {
     // Claimed before the budget is read, not after: two utterances arriving
     // together must not both get past a check on the same row.
     if (!claimExecution(id, definition.name(), !execution.equals(id))) {
+      if (admission != null && admission.goal() != null) throw new GoalConversationOccupied();
       throw new Refused(
           "conversation "
               + id
@@ -1592,7 +1638,10 @@ public final class Turn {
                     + "; "
                     + budget.spent()
                     + " calls remain accounted for."));
-      if (admission != null) transcript.confine(admission.check(), admission.subject());
+      if (admission != null) {
+        transcript.confine(admission.check(), admission.subject());
+        if (admission.goal() != null) transcript.goal(admission.goal());
+      }
       Consumer<Outcome> ended =
           outcome -> {
             try {

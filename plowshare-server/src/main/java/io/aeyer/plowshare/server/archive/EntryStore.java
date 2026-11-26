@@ -499,6 +499,12 @@ public final class EntryStore implements ConversationSearchRepository {
           + " AND role IS NOT NULL"
           + " AND ordinal <= ?"
           + " AND (superseded_by IS NULL OR superseded_by > ?)"
+          // A goal activation got one fresh opening; reconstruct the same history on readback.
+          + " AND NOT COALESCE(kind = 'utterance' AND speaker = 'harness' AND ordinal < ?"
+          + " AND speaker_name = (SELECT opener.speaker_name FROM entries opener"
+          + " WHERE opener.conversation_id = ? AND opener.ordinal = ?"
+          + " AND opener.kind = 'utterance' AND opener.speaker = 'harness'"
+          + " AND opener.speaker_name LIKE 'goal %'), FALSE)"
           + IN_CONVERSATION_ORDER;
 
   /*
@@ -2537,23 +2543,34 @@ public final class EntryStore implements ConversationSearchRepository {
    * @throws ValidationException if the conversation id cannot be named
    */
   public List<EntryRecord> thatProjectFor(String conversationId) {
+    return thatProjectFor(conversationId, null);
+  }
+
+  /** Earlier openings from this exact harness goal are replaced by its fresh opening. */
+  public List<EntryRecord> thatProjectFor(String conversationId, Speaker goal) {
     requireInformation(conversationId);
     String conversation = ConversationStore.named(conversationId);
+    String exclusion =
+        goal == null
+            ? ""
+            : " AND NOT COALESCE(kind = 'utterance' AND speaker = 'harness' AND speaker_name = ?,"
+                + " FALSE)";
+    String query =
+        "SELECT "
+            + COLUMNS
+            + DIRECT_ANSWER_COLUMN
+            + " FROM entries WHERE conversation_id = ? AND ((TRUE "
+            + THAT_PROJECT
+            + exclusion
+            + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
+            + IN_CONVERSATION_ORDER;
+    String diagnostics = WebReleaseAudit.PREFIX + "%";
     return ArchiveUnavailableException.translating(
         "read what a conversation projects",
         () ->
-            jdbc.query(
-                "SELECT "
-                    + COLUMNS
-                    + DIRECT_ANSWER_COLUMN
-                    + " FROM entries WHERE conversation_id = ?"
-                    + " AND ((TRUE "
-                    + THAT_PROJECT
-                    + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
-                    + IN_CONVERSATION_ORDER,
-                PROJECTION_MAPPER,
-                conversation,
-                WebReleaseAudit.PREFIX + "%"));
+            goal == null
+                ? jdbc.query(query, PROJECTION_MAPPER, conversation, diagnostics)
+                : jdbc.query(query, PROJECTION_MAPPER, conversation, goal.name(), diagnostics));
   }
 
   /** A scripted orchestration's authenticated opening, independent of later harness messages. */
@@ -2676,7 +2693,14 @@ public final class EntryStore implements ConversationSearchRepository {
                     + " this conversation had.");
           }
           return jdbc.query(
-              THAT_PROJECTED_AT, PROJECTION_MAPPER, conversation, assembled, assembled);
+              THAT_PROJECTED_AT,
+              PROJECTION_MAPPER,
+              conversation,
+              assembled,
+              assembled,
+              assembled,
+              conversation,
+              assembled);
         });
   }
 

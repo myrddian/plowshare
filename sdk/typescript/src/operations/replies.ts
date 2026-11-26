@@ -51,6 +51,43 @@ export interface ActingTurnReceipt {
   readonly job: string | null;
 }
 
+export interface ConversationGoalStatus {
+  readonly goal: string;
+  readonly conversation: string;
+  readonly agent: string;
+  readonly objective: string;
+  readonly criteria: string | null;
+  readonly state:
+    | 'READY'
+    | 'RUNNING'
+    | 'PAUSING'
+    | 'PAUSED'
+    | 'BLOCKED'
+    | 'STOPPING'
+    | 'COMPLETE'
+    | 'CANCELLED';
+  readonly version: number;
+  readonly activations: number;
+  readonly maxActivations: number;
+  readonly lastJob: string | null;
+  readonly lastTurn: number | null;
+  readonly reason:
+    | 'OPERATOR_PAUSED'
+    | 'ACTIVATION_LIMIT'
+    | 'MODEL_ALLOWANCE'
+    | 'NO_PROGRESS'
+    | 'TURN_FAILED'
+    | 'AUTHORITY_OR_SOURCE_CHANGED'
+    | 'INELIGIBLE_CONVERSATION'
+    | 'AGENT_BLOCKED'
+    | 'UNCONFIRMED_TURN'
+    | 'STOP_REQUESTED'
+    | null;
+  readonly detail: string | null;
+  readonly modelCallsSpent: number | null;
+  readonly modelCallLimit: number | null;
+}
+
 export interface Replies
   extends
     ProcReplies,
@@ -103,6 +140,11 @@ export interface Replies
   // and not with the conversation family's OK replies. Its own shape, not a StartedJob: the handle
   // is in `job` and the identity the caller correlates on is `child`.
   'application.child.run': ContainedApplicationRunning;
+  'conversation.goal.start': ConversationGoalStatus;
+  'conversation.goal.get': ConversationGoalStatus;
+  'conversation.goal.pause': ConversationGoalStatus;
+  'conversation.goal.resume': ConversationGoalStatus;
+  'conversation.goal.cancel': ConversationGoalStatus;
   'conversation.resume': ObservedStartedJob;
   'document.ask': ObservedStartedJob;
   'job.status': ObservedJob;

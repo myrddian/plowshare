@@ -397,6 +397,8 @@ public final class JobRuntime {
   private String admittedSubject;
 
   private RunAuthority retainedResources;
+  private GoalTurn goalTurn;
+  private boolean goalExecution;
 
   /**
    * A per-admission view of the existing runtime. Standard grants, hooks and file fences remain;
@@ -408,6 +410,9 @@ public final class JobRuntime {
     retained.admittedAuthority = admission.check();
     retained.admittedSubject = admission.subject();
     retained.retainedResources = admission.authority();
+    retained.goalTurn = admission.goal();
+    retained.goalExecution = admission.goal() != null;
+    if (retained.goalExecution) retained.budgetRequests = BudgetRequests.NONE;
     return retained;
   }
 
@@ -432,7 +437,8 @@ public final class JobRuntime {
               Home home, String session, String account, String name) {
             authority.require(home, List.of());
             var found = delegates.find(home, session, account, name);
-            found.ifPresent(RetainedAgent::require);
+            if (goalExecution) found.ifPresent(GoalTurn::requireAgent);
+            else found.ifPresent(RetainedAgent::require);
             return found;
           }
         };
@@ -452,6 +458,7 @@ public final class JobRuntime {
     retained.admittedAuthority = admittedAuthority;
     retained.admittedSubject = admittedSubject;
     retained.retainedResources = authority;
+    retained.goalExecution = goalExecution;
     retained.operations = operations;
     retained.inferenceCalls = inferenceCalls;
     retained.failures = failures;
@@ -2053,8 +2060,11 @@ public final class JobRuntime {
           callerHandle,
           incoming,
           operation);
-    RetainedAgent.require(definition);
+    if (goalExecution) GoalTurn.requireAgent(definition);
+    else RetainedAgent.require(definition);
     JobRuntime bound = retainedCopy(retainedResources);
+    if (goalTurn != null && goalTurn.conversation().equals(transcript.conversationId()))
+      bound.goalTurn = goalTurn;
     // Each child pins its own definition while retaining every ancestor's checks. No mutable
     // current-agent/current-account state is shared between parent and child loops.
     bound.admittedAuthority =
@@ -4757,6 +4767,8 @@ public final class JobRuntime {
             List<HookRecord> toolRecords = new ArrayList<>();
             String fenced =
                 tool == null ? null : extras.fence().refusal(wanted.name(), wanted.arguments());
+            if (goalTurn != null && GoalTurn.UPDATE.equals(wanted.name()) && asked.size() != 1)
+              fenced = "Call goal_update by itself after all required work has settled.";
             if (fenced == null && tool != null && skills != null) {
               fenced = skills.refusal(transcript.conversationId(), wanted.name());
             }
@@ -4985,7 +4997,10 @@ public final class JobRuntime {
                   // checked exactly once, on what is executed.
                   if (confined)
                     retainedResources.require(
-                        home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+                        home,
+                        goalTurn != null && GoalTurn.UPDATE.equals(wanted.name())
+                            ? List.of()
+                            : RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
                   admittedAuthority.run();
                   if (operation != null) operations.require(operation);
                   if (operation != null) {
@@ -5073,7 +5088,10 @@ public final class JobRuntime {
                     if (operation != null) operations.require(operation);
                     if (confined)
                       retainedResources.require(
-                          home, RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
+                          home,
+                          goalTurn != null && GoalTurn.UPDATE.equals(wanted.name())
+                              ? List.of()
+                              : RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
                   } catch (CallerFault withdrawn) {
                     authorityWithdrawn = true;
                   }
@@ -6585,6 +6603,8 @@ public final class JobRuntime {
                 return decision;
               }));
     }
+    if (goalTurn != null && extras.end() != null)
+      offered.put(GoalTurn.UPDATE, goalTurn.tool(extras.end()));
     reads.offered(offered.keySet());
     return offered;
   }

@@ -16,6 +16,13 @@ import type { FileStoreReference } from '../binding/filestores.ts';
 /** WS request shapes. Optional fields retain the server's defaults. */
 type Tier = { readonly project?: string | null };
 type Conversation = { readonly conversation: string };
+type GoalRequest = Conversation & { readonly requestId: string };
+type GoalControl = GoalRequest & {
+  readonly goal: string;
+  readonly version: number;
+};
+type GoalLimit = { readonly maxActivations?: number | null };
+
 type Page = { readonly offset?: number; readonly limit?: number };
 type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
@@ -76,6 +83,18 @@ export interface ExtendedPayloads
   'conversation.resume': Conversation &
     Turns &
     Budget & { readonly agent?: string; readonly session?: string | null };
+  'conversation.goal.start': GoalRequest &
+    GoalLimit & {
+      readonly agent: string;
+      readonly objective: string;
+      readonly criteria?: string | null;
+    };
+  'conversation.goal.get': Conversation & {
+    readonly requestId?: string | null;
+  };
+  'conversation.goal.pause': GoalControl;
+  'conversation.goal.resume': GoalControl & GoalLimit;
+  'conversation.goal.cancel': GoalControl;
   'agent.list': Tier;
   'agent.define': Tier & {
     readonly name: string;
@@ -502,6 +521,11 @@ export const CLI_OPERATIONS = {
   'conversation context': 'conversation.context',
   'conversation projection': 'conversation.projection',
   'conversation resume': 'conversation.resume',
+  'conversation goal start': 'conversation.goal.start',
+  'conversation goal get': 'conversation.goal.get',
+  'conversation goal pause': 'conversation.goal.pause',
+  'conversation goal resume': 'conversation.goal.resume',
+  'conversation goal cancel': 'conversation.goal.cancel',
   'agent list': 'agent.list',
   'agent define': 'agent.define',
   'agent run': 'agent.run',

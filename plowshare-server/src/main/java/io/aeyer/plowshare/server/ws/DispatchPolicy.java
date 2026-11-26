@@ -155,7 +155,12 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "todos.read",
           "conversation.projection",
           "conversation.compactions",
-          "conversation.resume");
+          "conversation.resume",
+          "conversation.goal.start",
+          "conversation.goal.get",
+          "conversation.goal.pause",
+          "conversation.goal.resume",
+          "conversation.goal.cancel");
   private static final Set<String> SCHEDULES =
       Set.of(
           "schedule.define",

@@ -158,6 +158,7 @@ public class ProjectAuthorization {
           "conversation.search",
           "conversation.follow",
           "conversation.turns",
+          "conversation.goal.get",
           "conversation.compactions",
           "conversation.chat",
           "conversation.trajectory",

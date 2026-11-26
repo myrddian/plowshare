@@ -960,7 +960,8 @@ public final class JobStore
       Consumer<Outcome> ended,
       TurnCap cap,
       RunAdmission admission) {
-    RetainedAgent.requireRoot(definition);
+    if (admission.goal() == null) RetainedAgent.requireRoot(definition);
+    else GoalTurn.requireAgent(definition);
     admission.check().run();
     return submit(
         definition,
@@ -1089,17 +1090,20 @@ public final class JobStore
     // way Transcript.Spoken refuses a conversation id with no turn ordinal.
     Origin conversationOrigin = conversation == null ? null : origin;
     var operation =
-        operations == null
-            ? null
-            : Objects.requireNonNull(
-                OperationExecution.admit(
-                    operations,
-                    callerHandle,
-                    home,
-                    definition,
-                    conversation,
-                    conversationOrigin,
-                    budget));
+        admission != null && admission.goal() != null
+            ? operations.derive(
+                admission.goal().authority(), OperationExecution.actions(definition))
+            : operations == null
+                ? null
+                : Objects.requireNonNull(
+                    OperationExecution.admit(
+                        operations,
+                        callerHandle,
+                        home,
+                        definition,
+                        conversation,
+                        conversationOrigin,
+                        budget));
     return start(
         definition.name(),
         home,

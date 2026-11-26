@@ -821,6 +821,23 @@ export const SHAPES: Record<
     ['conversation'],
     ['agent', 'session', 'maxTurns', 'noTurnCap', 'maxModelCalls'],
   ],
+  'conversation.goal.start': [
+    ['conversation', 'requestId', 'agent', 'objective'],
+    ['criteria', 'maxActivations'],
+  ],
+  'conversation.goal.get': [['conversation'], ['requestId']],
+  'conversation.goal.pause': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    [],
+  ],
+  'conversation.goal.resume': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    ['maxActivations'],
+  ],
+  'conversation.goal.cancel': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    [],
+  ],
   'agent.list': [[], ['project']],
   'agent.define': [
     ['name', 'text'],
@@ -1164,6 +1181,8 @@ export function commandProblem(
       !/^[A-Za-z0-9_-]{1,128}$/u.test(body['invocationId']))
   )
     return 'Invalid retained invocation ID';
+  if (type.startsWith('conversation.goal.'))
+    return goalPayloadProblem(type, body, required);
   if (type === 'approval.policy.get' || type === 'approval.policy.save')
     return problem(type, body);
   if (
@@ -1858,4 +1877,60 @@ function pricingProblem(body: Record<string, unknown>): string | undefined {
       previous = tier.fromInputTokens;
     }
   }
+}
+
+function goalPayloadProblem(
+  type: ExtendedOperation,
+  body: Record<string, unknown>,
+  required: readonly string[],
+): string | undefined {
+  for (const key of required)
+    if (body[key] == null) return `Supply ${key} for ${type}`;
+  const conversation = body['conversation'];
+  const locator = (value: unknown) =>
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    !/\p{Cc}/u.test(value);
+  if (!locator(conversation)) return 'Supply an exact conversation identifier';
+  for (const key of ['goal', 'requestId']) {
+    const value = body[key];
+    if (
+      value != null &&
+      (typeof value !== 'string' ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value) ||
+        value === '00000000-0000-0000-0000-000000000000')
+    )
+      return `${key} must be a nonzero UUID`;
+  }
+  for (const key of ['version', 'maxActivations']) {
+    const value = body[key];
+    if (
+      value != null &&
+      (typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > (key === 'version' ? 2147483647 : 1000))
+    )
+      return `${key} must be a positive integer within its supported range`;
+  }
+  if (type === 'conversation.goal.start') {
+    if (!locator(body['agent'])) return 'Supply an exact agent identifier';
+    for (const [key, limit] of Object.entries({
+      objective: 16000,
+      criteria: 8000,
+    })) {
+      const value = body[key];
+      if (
+        value != null &&
+        (typeof value !== 'string' ||
+          !value.trim() ||
+          value.length > limit ||
+          value.includes(String.fromCharCode(0)))
+      )
+        return `${key} must be nonblank text of at most ${limit} characters`;
+    }
+  }
+  return undefined;
 }

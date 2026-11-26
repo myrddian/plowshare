@@ -6,6 +6,12 @@ import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.access.AuthorityIds.AccountId;
+import io.aeyer.plowshare.server.access.AuthorityIds.ScopeId;
+import io.aeyer.plowshare.server.access.GrantRecipient;
+import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.access.OperationAuthority.Admission;
+import io.aeyer.plowshare.server.access.OperationAuthority.Support;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.hooks.Hooks;
@@ -116,6 +122,86 @@ class AdmittedTurnTest {
       assertEquals("answer", outcome.text());
       assertEquals(1, budget.spent());
       assertFalse(turns.isSpeaking("cnv_ABC123"));
+    }
+  }
+
+  @Test
+  void goal_intrinsic_is_offered_on_the_retained_root_and_ends_the_turn_explicitly()
+      throws Exception {
+    fixture();
+    var operations = mock(OperationAuthority.class);
+    var account = new AccountId(UUID.randomUUID());
+    var retained =
+        new Admission(
+            UUID.randomUUID(),
+            "alice",
+            account,
+            new ScopeId(UUID.randomUUID()),
+            home,
+            GrantRecipient.account(account),
+            OperationExecution.actions(definition).stream()
+                .map(action -> new Support(action, UUID.randomUUID()))
+                .toList());
+    when(operations.derive(eq(retained), any())).thenReturn(retained);
+    when(dispatcher.stream(any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              ChatRequest request = call.getArgument(0);
+              assertNotNull(admittedJob.get(), "claim precedes inference");
+              assertTrue(
+                  request.tools().stream().anyMatch(tool -> tool.name().equals("goal_update")));
+              return new Completion(
+                  null,
+                  "tool_calls",
+                  TokenUsage.UNKNOWN,
+                  List.of(
+                      new ToolCall(
+                          "finished",
+                          "goal_update",
+                          """
+{"state":"COMPLETE","explanation":"Verified the report","evidence":["report:1"]}
+""")));
+            });
+    var decision = new AtomicReference<GoalTurn.Decision>();
+    var goal =
+        new GoalTurn(
+            UUID.randomUUID(),
+            "cnv_ABC123",
+            retained,
+            (id, ordinal, outcome, proposal, failed, writer) -> {
+              assertEquals(admittedJob.get(), id);
+              assertFalse(failed);
+              assertTrue(outcome.requested());
+              writer.run();
+              decision.set(proposal);
+            });
+    doAnswer(
+            call -> {
+              goal.commit(admittedJob.get(), 1, call.getArgument(1), () -> {});
+              return null;
+            })
+        .when(transcript)
+        .closed(anyString(), any());
+    var admitted = admission();
+    var goalAdmission =
+        new RunAdmission(
+            admitted.check(),
+            admitted.started(),
+            admitted.ended(),
+            admitted.subject(),
+            admitted.authority(),
+            goal);
+    try (var jobs = new JobStore(operations, new JobRuntime(operations, dispatcher, List.of()))) {
+      var turns = new Turn(jobs, conversations, history, compaction);
+      String id =
+          turns
+              .speakGoal(
+                  "cnv_ABC123", definition, "Goal task", budget.identity(), goalAdmission, () -> {})
+              .orElseThrow();
+      awaitCompletion(jobs, id);
+      assertEquals(GoalTurn.DecisionType.COMPLETE, decision.get().state());
+      assertEquals("Verified the report", jobs.get(id).outcome().orElseThrow().text());
+      assertEquals(1, budget.spent());
     }
   }
 

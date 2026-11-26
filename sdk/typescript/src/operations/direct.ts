@@ -221,6 +221,20 @@ export const JOB_SUBMISSIONS: readonly Operation[] = [
   'document.ask',
 ];
 
+const GOAL_OPERATIONS = [
+  'conversation.goal.start',
+  'conversation.goal.get',
+  'conversation.goal.pause',
+  'conversation.goal.resume',
+  'conversation.goal.cancel',
+] as const satisfies readonly Operation[];
+
+function isGoalRequest(
+  request: Request,
+): request is Extract<Request, { type: (typeof GOAL_OPERATIONS)[number] }> {
+  return GOAL_OPERATIONS.some((operation) => operation === request.type);
+}
+
 export const VALIDATED_OPERATIONS: readonly Operation[] = [
   'proc.list',
   'proc.inspect',
@@ -235,6 +249,7 @@ export const VALIDATED_OPERATIONS: readonly Operation[] = [
   ...RETRIEVAL_OPERATIONS,
   ...ADMINISTRATIVE_OPERATIONS,
   ...CONVERSATION_OPERATIONS,
+  ...GOAL_OPERATIONS,
   ...INSPECTION_OPERATIONS,
   ...JOB_SUBMISSIONS,
   'job.status',
@@ -312,6 +327,7 @@ export async function dispatch(
     'conversation.list',
     'conversation.latest',
     'orchestration.start',
+    ...GOAL_OPERATIONS,
   ].includes(asked.type)
     ? decodeRequest(asked.type, asked.payload)
     : asked;
@@ -325,6 +341,25 @@ export async function dispatch(
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
+  if (isGoalRequest(asked)) {
+    if (outcome.code !== 'OK')
+      return {
+        kind: ['CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)
+          ? 'invalid-response'
+          : 'refused',
+        outcome,
+      };
+    try {
+      const status = decodeReply(asked.type, outcome.payload);
+      const matches =
+        status.conversation === asked.payload.conversation &&
+        (!('goal' in asked.payload) ||
+          status.goal === asked.payload.goal.toLowerCase());
+      return { kind: matches ? 'completed' : 'invalid-response', outcome };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
   if (asked.type === 'conversation.open.ex' && outcome.code !== 'OK')
     return {
       kind: ['CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)

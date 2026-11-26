@@ -34,6 +34,7 @@
 - [Authority substrate and explicit scopes](decisions/0030-authority-substrate-and-explicit-scopes.md) (settled policy and implementation boundaries)
 - [Global knowledge read contract](global-knowledge-read-contract.md) (implemented read boundaries and selector cutover)
 - [Standalone allowances and execution recovery](standalone-allowance-and-recovery-plan.md) (standalone Budget storage, policy preservation, swarm/operator recovery and cutover verification)
+- [Goal Agents](conversation-goals-design.md) (bot handoff, ad hoc work, and standing schedule or Relay wakes)
 - [Post–slice 18 follow-up TODOs](post-slice-18-follow-up-todos.md) (deferred account-delegated runtime capabilities and Desktop Global administration)
 - [Platform gaps TODO](platform-gaps-todo.md) (November 2026 review: WebSocket transport, REST retirement, REST/SSE proxy, A2A rewrite, orchestration, knowledge and benchmarks)
 - [Global scope migration map](global-scope-migration-map.md) (source mapping and proposed migration)

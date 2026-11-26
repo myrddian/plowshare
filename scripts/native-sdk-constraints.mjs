@@ -172,6 +172,14 @@ export function constrain(graph) {
         );
       if (k === 'requestId') add(v, { pattern: uuid });
     }
+    if (op.startsWith('conversation.goal.')) {
+      for (const key of ['goal', 'requestId'])
+        field(s, key, { pattern: uuid, disallowPrefixes: ['00000000-0000-0000-0000-000000000000'] });
+      field(s, 'version', integer(1));
+      field(s, 'maxActivations', integer(1, 1000));
+      field(s, 'objective', { ...text(16000, 1), nonblank: true });
+      field(s, 'criteria', { ...text(8000, 1), nonblank: true });
+    }
     // Operation-specific bounds follow generic defaults so narrower identities stay narrow.
     if (op === 'inbox.publish') {
       field(s, 'text', {...text(131072, 1), nonblank:true});
@@ -447,6 +455,14 @@ export function constrain(graph) {
     field(externalView,key,integer(0,9007199254740991));
   graph.$defs.nativeConversationOpenExResult = externalView;
   graph.results['conversation.open.ex'] = {$ref:'#/$defs/nativeConversationOpenExResult'};
+  const goalStatus = resolve(graph, graph.results['conversation.goal.get']);
+  field(goalStatus, 'goal', canonicalUuid);
+  field(goalStatus, 'version', integer(1));
+  field(goalStatus, 'maxActivations', integer(1, 1000));
+  field(goalStatus, 'activations', integer(0, 1000));
+  field(goalStatus, 'lastTurn', integer(1));
+  field(goalStatus, 'modelCallsSpent', integer(0));
+  field(goalStatus, 'modelCallLimit', integer(0));
   for(const operation of ['acting.turn.start','acting.turn.receipt']) {
     const turnReceipt=resolve(graph,graph.results[operation]);
     field(turnReceipt,'requestId',canonicalUuid);
