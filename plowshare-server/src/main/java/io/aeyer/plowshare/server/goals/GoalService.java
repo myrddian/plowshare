@@ -655,7 +655,12 @@ final class GoalService implements ConversationGoals {
         available == 0
             ? Budget.restored(canonical.identity(), 0, 0)
             : Budget.goalWindow(canonical.identity(), available, canonical::tryClaim);
-    return new Prepared(prepared.conversation(), prepared.agent(), prepared.authority(), budget);
+    return new Prepared(
+        prepared.conversation(),
+        prepared.agent(),
+        prepared.authority(),
+        budget,
+        prepared.callingConversation());
   }
 
   private static Disposition disposition(

@@ -152,6 +152,9 @@ interface GoalAgentStore {
   /** Finish the cycle while keeping its persistent Goal and wake bindings. */
   void park(UUID goal);
 
+  /** With the Goal row locked, close a parked Goal after its final binding or input is gone. */
+  Optional<Integer> finishUnbound(UUID goal);
+
   /** Extends the active window without replacing its identity or spending baseline. */
   void extendCycle(UUID goal, int calls);
 

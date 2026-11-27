@@ -370,9 +370,11 @@ final class DedicatedGoalAgents implements GoalAgents, GoalHandoffs, GoalMessage
             throw new NotFoundFault("Goal Agent listener is unavailable");
           if (!inbox.recordUnlisten(account, request))
             return inbox.unlistenReceipt(account, request).orElseThrow();
-          var updated = goals.change(goal, afterDisarm(goal)).orElseThrow();
-          return new Unlistened(
-              request.goal(), request.binding(), updated.version(), request.requestId());
+          int version =
+              inbox
+                  .finishUnbound(request.goal())
+                  .orElseGet(() -> goals.change(goal, goal.progress()).orElseThrow().version());
+          return new Unlistened(request.goal(), request.binding(), version, request.requestId());
         });
   }
 
@@ -532,23 +534,10 @@ final class DedicatedGoalAgents implements GoalAgents, GoalHandoffs, GoalMessage
           var current = goals.lock(id).filter(found -> found.version() == goal.version());
           if (current.isPresent()) {
             inbox.disposeUnclaimed(id, input.sequence(), disposition);
-            var next = afterDisarm(current.get());
-            if (next != current.get().progress()) goals.change(current.get(), next).orElseThrow();
+            inbox.finishUnbound(id);
           }
           return null;
         });
-  }
-
-  private Progress afterDisarm(Goal goal) {
-    var progress = goal.progress();
-    var id = goal.binding().id();
-    // A parked goal still owes already committed direct steering a cycle.
-    if (goal.cycle() != null
-        || progress.state() != State.IDLE && progress.state() != State.PAUSED
-        || inbox.standing(id)
-        || inbox.directPending(id)) return progress;
-    inbox.end(id);
-    return progress.move(State.COMPLETE, null, progress.detail(), null, progress.limit());
   }
 
   static final class ClaimDeferred extends RuntimeException {}

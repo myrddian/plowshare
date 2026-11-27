@@ -669,24 +669,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
           """,
           goal.id(),
           schedule);
-      jdbc.update(
-          """
-          WITH closed AS (
-            UPDATE conversation_goals g SET state='COMPLETE',reason=NULL,version=version+1
-            WHERE g.id=? AND g.state IN ('IDLE','PAUSED') AND g.cycle IS NULL
-              AND NOT EXISTS (SELECT 1 FROM goal_schedule_bindings b WHERE b.goal=g.id)
-              AND NOT EXISTS (
-                SELECT 1 FROM goal_agent_listeners l WHERE l.goal=g.id AND l.removed_at IS NULL)
-              AND NOT EXISTS (
-                SELECT 1 FROM goal_agent_inputs i WHERE i.goal=g.id AND NOT i.settled
-                  AND i.claimed_job IS NULL AND i.message IS NOT NULL AND i.schedule_firing IS NULL)
-            RETURNING id
-          )
-          UPDATE goal_agent_inputs i SET settled=TRUE,disposition='GOAL_ENDED'
-          FROM closed g WHERE i.goal=g.id AND NOT i.settled AND i.claimed_job IS NULL
-            AND i.message IS NOT NULL
-          """,
-          goal.id());
+      jdbc.queryForObject("SELECT goal_finish_unbound_parked(?)", Integer.class, goal.id());
     }
   }
 

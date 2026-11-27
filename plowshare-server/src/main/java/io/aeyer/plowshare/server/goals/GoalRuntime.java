@@ -31,6 +31,7 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
 import io.aeyer.plowshare.server.goals.GoalRepository.Binding;
+import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.messaging.MessageService.InstanceView;
 import java.util.EnumSet;
@@ -49,6 +50,7 @@ final class GoalRuntime implements GoalExecution {
   private final SuspendedRunCalls approvals;
   private final AllowanceRepository allowances;
   private final MessageService messages;
+  private final InformationJobs information;
 
   GoalRuntime(
       ConversationStore conversations,
@@ -60,7 +62,8 @@ final class GoalRuntime implements GoalExecution {
       JobStore jobs,
       SuspendedRunCalls approvals,
       AllowanceRepository allowances,
-      MessageService messages) {
+      MessageService messages,
+      InformationJobs information) {
     this.conversations = conversations;
     this.definitions = definitions;
     this.authority = authority;
@@ -71,6 +74,7 @@ final class GoalRuntime implements GoalExecution {
     this.approvals = approvals;
     this.allowances = allowances;
     this.messages = messages;
+    this.information = information;
   }
 
   @Override
@@ -100,7 +104,8 @@ final class GoalRuntime implements GoalExecution {
     var scope = eligibleDedicated(conversation, instance.agent());
     var definition = resolve(conversation.id(), instance.agent(), true);
     var prepared =
-        allocate(conversation, definition, authority.admit(executor, scope, actions(definition)));
+        allocate(
+            conversation, definition, authority.admit(executor, scope, actions(definition)), null);
     require(prepared);
     return prepared;
   }
@@ -197,9 +202,12 @@ final class GoalRuntime implements GoalExecution {
         || !conversation.home().equals(caller.admission().home())) throw unavailableTarget();
     // Check live lineage in the transaction that commits the inbox and its launch receipt.
     var derived = authority.derive(caller.admission(), actions(target));
+    // The objective can carry the caller's retained inputs. Pin those selections in the new
+    // log in the same transaction as the launch, including when no native message is sent.
+    information.inherit(caller.conversation(), conversation.id(), derived.executor());
     // Messaging keeps its own conversation shape. The goal row records the caller and its
     // independent allowance while the authority repository retains the exact parent edge.
-    var prepared = allocate(conversation, target, derived);
+    var prepared = allocate(conversation, target, derived, caller.conversation());
     require(prepared);
     return prepared;
   }
@@ -213,11 +221,12 @@ final class GoalRuntime implements GoalExecution {
   private Prepared allocate(
       ConversationRecord conversation,
       AgentDefinition definition,
-      OperationAuthority.Admission admission) {
+      OperationAuthority.Admission admission,
+      String callingConversation) {
     var budget = allowances.bind(Budget.of(definition.maxModelCalls()));
     if (!budget.capped())
       throw new CallerFault("Goal Agent requires a finite model-call allowance");
-    return new Prepared(conversation, definition, admission, budget);
+    return new Prepared(conversation, definition, admission, budget, callingConversation);
   }
 
   @Override
@@ -240,7 +249,8 @@ final class GoalRuntime implements GoalExecution {
     if (!fingerprint(definition).equals(binding.fingerprint()))
       throw new CallerFault("Goal agent definition changed");
     if (binding.callingAgent() != null) requireHandoff(binding, admission, definition);
-    var prepared = new Prepared(conversation, definition, admission, budget);
+    var prepared =
+        new Prepared(conversation, definition, admission, budget, binding.callingConversation());
     require(prepared);
     return prepared;
   }
@@ -259,10 +269,17 @@ final class GoalRuntime implements GoalExecution {
   @Override
   public void require(Prepared prepared) {
     var conversation = prepared.conversation();
+    // Apply the same source-log fence to restored handoffs and each active effect. This also
+    // covers older handoffs that have a retained caller but predate input inheritance.
+    var target = new Resource(Kind.CONVERSATION, conversation.id());
+    var caller = prepared.callingConversation();
+    if (caller != null) information.requireLog(caller, prepared.authority().executor());
     authority.requireTargets(
         prepared.authority(),
         conversation.home(),
-        List.of(new Resource(Kind.CONVERSATION, conversation.id())));
+        caller == null
+            ? List.of(target)
+            : List.of(target, new Resource(Kind.CONVERSATION, caller)));
   }
 
   @Override

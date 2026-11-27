@@ -15,9 +15,21 @@ import java.util.Optional;
 /** The existing turn and authority owners, viewed through the goal scheduler's narrow port. */
 interface GoalExecution {
   record Prepared(
-      ConversationRecord conversation, AgentDefinition agent, Admission authority, Budget budget) {
+      ConversationRecord conversation,
+      AgentDefinition agent,
+      Admission authority,
+      Budget budget,
+      String callingConversation) {
     Prepared(ConversationRecord conversation, AgentDefinition agent, Admission authority) {
       this(conversation, agent, authority, conversation.budget());
+    }
+
+    Prepared(
+        ConversationRecord conversation,
+        AgentDefinition agent,
+        Admission authority,
+        Budget budget) {
+      this(conversation, agent, authority, budget, null);
     }
   }
 

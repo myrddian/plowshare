@@ -52,7 +52,8 @@ class GoalConfiguration {
       JobStore jobs,
       SuspendedRunCalls approvals,
       AllowanceRepository allowances,
-      MessageService messages) {
+      MessageService messages,
+      InformationJobs information) {
     return new GoalRuntime(
         conversations,
         definitions,
@@ -63,7 +64,8 @@ class GoalConfiguration {
         jobs,
         approvals,
         allowances,
-        messages);
+        messages,
+        information);
   }
 
   /** Goal admission can touch storage and definition files. Keep it off the socket scheduler. */

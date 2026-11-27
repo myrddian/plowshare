@@ -296,6 +296,10 @@ export function createGoalAgents(options: {
       const control = button(`goal-${action}`, controls[action]);
       control.disabled = writing || intent !== undefined;
       control.addEventListener('click', () => {
+        if (action !== 'resume') {
+          background(change(status, action, {}));
+          return;
+        }
         if (!activationLimit.reportValidity() || !modelLimit.reportValidity())
           return;
         const limits = {

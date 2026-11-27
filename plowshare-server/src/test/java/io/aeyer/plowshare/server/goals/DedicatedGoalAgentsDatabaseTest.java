@@ -95,6 +95,7 @@ import io.aeyer.plowshare.server.goals.ConversationGoals.Action;
 import io.aeyer.plowshare.server.goals.ConversationGoals.Control;
 import io.aeyer.plowshare.server.goals.ConversationGoals.Reason;
 import io.aeyer.plowshare.server.goals.ConversationGoals.State;
+import io.aeyer.plowshare.server.goals.GoalAgentStore.Disposition;
 import io.aeyer.plowshare.server.goals.GoalAgents.Answer;
 import io.aeyer.plowshare.server.goals.GoalAgents.Batch;
 import io.aeyer.plowshare.server.goals.GoalAgents.Listen;
@@ -105,14 +106,17 @@ import io.aeyer.plowshare.server.goals.GoalConversationAccess.Visibility;
 import io.aeyer.plowshare.server.goals.GoalExecution.Prepared;
 import io.aeyer.plowshare.server.goals.GoalRepository.Binding;
 import io.aeyer.plowshare.server.goals.GoalWaitStore.Origin;
+import io.aeyer.plowshare.server.information.InformationAccess;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
+import io.aeyer.plowshare.server.information.JdbcJobInformationRepository;
 import io.aeyer.plowshare.server.llm.dispatch.Sampling;
 import io.aeyer.plowshare.server.messaging.JdbcMessagingRepository;
 import io.aeyer.plowshare.server.messaging.MessageInboxes;
 import io.aeyer.plowshare.server.messaging.MessageIngress;
 import io.aeyer.plowshare.server.messaging.MessageService.GoalAnswerReady;
 import io.aeyer.plowshare.server.messaging.MessageService.InstanceView;
+import io.aeyer.plowshare.server.messaging.MessageService.Route;
 import io.aeyer.plowshare.server.messaging.MessageService.Voice;
 import io.aeyer.plowshare.server.messaging.RelayMessaging;
 import io.aeyer.plowshare.server.orchestrations.GoalOrchestrations;
@@ -135,6 +139,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -149,6 +154,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -982,7 +989,7 @@ class DedicatedGoalAgentsDatabaseTest {
     for (var binding : List.of(running, blocked, paused)) {
       broker.subscribe(new Relay.SubscriptionKey(topic, "goal." + binding), Relay.Start.LATEST);
     }
-    Flyway.configure().dataSource(legacySource).load().migrate();
+    Flyway.configure().dataSource(legacySource).target("301").load().migrate();
 
     for (var binding : List.of(running, blocked)) {
       assertEquals(
@@ -1026,6 +1033,59 @@ class DedicatedGoalAgentsDatabaseTest {
         "SOURCE_UNAVAILABLE",
         legacy.queryForObject(
             "SELECT disposition FROM goal_agent_inputs WHERE listener=?", String.class, missing));
+
+    // An already closed Goal from V301 can still have an open native launch receipt.
+    UUID closedGoal =
+        legacy.queryForObject(
+            "SELECT goal FROM goal_agent_listeners WHERE id=?", UUID.class, blocked);
+    var oldGoals = new JdbcGoalRepository(legacy, UnitOfWork.NONE, BUDGET, LIMITS);
+    var old = oldGoals.find(closedGoal).orElseThrow();
+    var changed = old.progress().move(State.COMPLETE, null, null, null, old.progress().limit());
+    int version = oldGoals.change(old, changed).orElseThrow().version();
+    var caller = new ConversationStore(legacy).open(Home.of(project), Budget.of(8), null, owner);
+    String sender = "ins_legacyCaller";
+    legacy.update(
+        """
+        INSERT INTO message_instances(id,account,project,agent,conversation,lifetime)
+        VALUES(?,?,?,'caller',?,'persistent')
+        """,
+        sender,
+        owner,
+        project,
+        caller.id());
+    String recipient = old.binding().instance();
+    var nativeStore = new JdbcMessagingRepository(legacy, new JdbcAllowanceRepository(legacy));
+    var request =
+        nativeStore.insertMessage(recipient, "Review retained events.", Instant.now()).id();
+    nativeStore.insertRoute(
+        new Route(request, sender, recipient, null, true, false, false, null, false),
+        "goal-return:launch:" + UUID.randomUUID(),
+        null,
+        1,
+        false);
+    legacy.update(
+        """
+        INSERT INTO goal_return_routes(goal,audience,launch_message,caller_instance,goal_instance)
+        VALUES(?,'BOT',?,?,?)
+        """,
+        closedGoal,
+        request,
+        sender,
+        recipient);
+
+    Flyway.configure().dataSource(legacySource).load().migrate();
+    assertEquals(
+        List.of(version),
+        legacy.queryForList(
+            "SELECT goal_version FROM goal_return_intents WHERE goal=? AND kind='RESULT' AND delivery='PENDING'",
+            Integer.class,
+            closedGoal));
+    assertEquals(
+        "The Goal Agent completed after its final wake was removed.",
+        legacy.queryForObject(
+            "SELECT body FROM goal_return_intents WHERE goal=? AND kind='RESULT'",
+            String.class,
+            closedGoal));
   }
 
   private static UUID legacyGoal(
@@ -1149,6 +1209,17 @@ class DedicatedGoalAgentsDatabaseTest {
     var sibling = definition("sibling", List.of("result_list")).withSkills(List.of("goal"));
     var parent = logs.open(home, Budget.of(8), null, account);
     var other = logs.open(home, Budget.of(8), null, account);
+    var information =
+        new InformationJobs(new JdbcJobInformationRepository(jdbc), mock(InformationAccess.class));
+    String inputProject = home.project() + "-input";
+    long inputProjectId =
+        jdbc.queryForObject(
+            "INSERT INTO projects(name) VALUES(?) RETURNING id", Long.class, inputProject);
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES(?,?,'VIEWER')",
+        inputProjectId,
+        account);
+    information.bindSourceProject(parent.id(), inputProjectId, account);
     var parentAdmission =
         authority.admit(account, authority.scope(home), OperationExecution.actions(allowed));
     var otherAdmission =
@@ -1187,7 +1258,8 @@ class DedicatedGoalAgentsDatabaseTest {
             mock(JobStore.class),
             mock(SuspendedRunCalls.class),
             allowances,
-            messaging);
+            messaging,
+            information);
     var service =
         new DedicatedGoalAgents(
             inbox,
@@ -1268,7 +1340,37 @@ class DedicatedGoalAgentsDatabaseTest {
     assertEquals(Optional.of(parentAdmission.id()), restarted.parent(bound.admission()));
     var stored = restarted.find(bound.admission()).orElseThrow();
     assertEquals(Set.copyOf(parentAdmission.support()), Set.copyOf(stored.support()));
-    assertNotEquals(parentAdmission.id(), runtime.restore(bound).authority().id());
+    var prepared = runtime.restore(bound);
+    assertNotEquals(parentAdmission.id(), prepared.authority().id());
+    assertTrue(information.hasInputs(bound.conversation()));
+
+    // Withdrawing the source alone fences admitted work and later restores.
+    members.remove(inputProject, account);
+    assertThrows(NotFoundFault.class, () -> information.requireLog(bound.conversation(), account));
+    assertThrows(NotFoundFault.class, () -> runtime.require(prepared));
+    assertThrows(NotFoundFault.class, () -> runtime.restore(bound));
+    // A handoff created before the change has only its original calling conversation.
+    jdbc.update("DELETE FROM information_relay_log_inputs WHERE log_id=?", bound.conversation());
+    assertTrue(information.logAllowed(bound.conversation(), account));
+    assertThrows(NotFoundFault.class, () -> runtime.require(prepared));
+    assertThrows(NotFoundFault.class, () -> runtime.restore(bound));
+    assertThrows(
+        NotFoundFault.class,
+        () ->
+            service.start(
+                calling,
+                new Start(
+                    home.project(), worker.name(), request.objective(), null, UUID.randomUUID())));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "SELECT count(*) FROM message_instances WHERE project=?",
+            Integer.class,
+            home.project()));
+    jdbc.update(
+        "INSERT INTO project_members(project_id,handle,role) VALUES(?,?,'VIEWER')",
+        inputProjectId,
+        account);
 
     var siblingWithGrant =
         new AgentDefinition(
@@ -1344,6 +1446,9 @@ class DedicatedGoalAgentsDatabaseTest {
     files.remove(source, firstSchedule.name());
     files.remove(source, siblingSchedule.name());
     when(definitions.readAgent(allowed.name(), lookup)).thenReturn(allowed);
+    var retainedSibling = runtime.restore(siblingBound);
+    jdbc.update("DELETE FROM conversations WHERE id=?", other.id());
+    assertThrows(CallerFault.class, () -> runtime.require(retainedSibling));
     members.remove(home.project(), account);
     assertThrows(CallerFault.class, () -> runtime.restore(bound));
   }
@@ -2124,6 +2229,110 @@ class DedicatedGoalAgentsDatabaseTest {
     assertTrue(fixture.humanInbox().list(fixture.owner(), false, 0, 10).isEmpty());
   }
 
+  private enum FinalWake {
+    RELAY,
+    SCHEDULE,
+    RELAY_WITH_STEERING
+  }
+
+  @ParameterizedTest
+  @EnumSource(FinalWake.class)
+  void removing_the_final_wake_settles_the_native_launch_once(FinalWake last) {
+    var fixture =
+        waitFixture(
+            "goal-return-final-wake-" + last.name().toLowerCase(Locale.ROOT), ReturnFixture.BOT);
+    boolean scheduleLast = last == FinalWake.SCHEDULE;
+    var launch = fixture.started();
+    var route = fixture.returnStore().route(launch.goal()).orElseThrow().bot();
+    fixture.scheduler().dispatch();
+    var active = fixture.current();
+    UUID listener = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO goal_agent_listeners(id,goal,project_id,topic,generation) VALUES (?,?,?,?,?)",
+        listener,
+        launch.goal(),
+        fixture.project(),
+        "data.final-wake",
+        UUID.randomUUID());
+    var schedule =
+        fixture
+            .dedicated()
+            .proposeSchedule(
+                active.binding(),
+                fixture.prepared().get(),
+                "0 0 * * * *",
+                "UTC",
+                "Check the release.");
+    var files =
+        new JdbcScheduleDefinitionStore(
+            jdbc,
+            BUDGET.transactions(work, LIMITS.queryCeiling()),
+            new JdbcScheduleStore(jdbc),
+            new JdbcTriggerStore(jdbc),
+            new JdbcFiringStore(jdbc));
+    var source = files.register(fixture.owner(), fixture.project(), "server");
+    files.apply(source, schedule.name(), schedule.definition(), Instant.now());
+    finish(fixture.active().get(), active.progress().job(), 1);
+    assertEquals(State.IDLE, fixture.current().progress().state());
+
+    if (last == FinalWake.RELAY_WITH_STEERING) {
+      var bot = fixture.bot();
+      var home = bot.admission().home();
+      var context =
+          new RunExtras.Context(
+              bot.definition(),
+              bot.conversation(),
+              "session",
+              mock(Transcript.class),
+              home,
+              fixture.owner());
+      fixture
+          .messages()
+          .send(
+              context,
+              new SendMessageTool.Request(
+                  launch.instance(), "One more check.", null, false, false, "persistent", null),
+              home);
+    }
+    var removeListener =
+        new Unlisten(
+            launch.goal(),
+            launch.conversation(),
+            listener,
+            fixture.current().version(),
+            UUID.randomUUID());
+    if (scheduleLast) fixture.dedicated().unlisten(fixture.owner(), removeListener);
+    else files.remove(source, schedule.name());
+    assertEquals(State.IDLE, fixture.current().progress().state());
+    assertTrue(fixture.messages().finalReply(route.message()).isEmpty());
+
+    if (scheduleLast) files.remove(source, schedule.name());
+    else fixture.dedicated().unlisten(fixture.owner(), removeListener);
+    if (last == FinalWake.RELAY_WITH_STEERING) {
+      assertEquals(State.IDLE, fixture.current().progress().state());
+      var inbox = new JdbcGoalAgentStore(jdbc, work, BUDGET, LIMITS);
+      var unavailable = inbox.next(launch.goal(), false).orElseThrow();
+      fixture.dedicated().dispose(fixture.current(), unavailable, Disposition.SOURCE_UNAVAILABLE);
+    }
+    assertEquals(State.COMPLETE, fixture.current().progress().state());
+    assertFalse(fixture.messages().route(route.message()).orElseThrow().handled());
+    var result =
+        fixture.returnStore().pendingAfter(new UUID(0, 0), 100).stream()
+            .filter(intent -> intent.route().goal().equals(launch.goal()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(fixture.current().version(), result.goalVersion());
+
+    var restarted = fixture.scheduler();
+    restarted.dispatch();
+    String reply = fixture.messages().finalReply(route.message()).orElseThrow();
+    assertEquals("Verified", fixture.messages().delivery(reply, fixture.owner()).body());
+    assertTrue(fixture.messages().route(route.message()).orElseThrow().handled());
+    if (!scheduleLast) fixture.dedicated().unlisten(fixture.owner(), removeListener);
+    restarted.dispatch();
+    assertEquals(Optional.of(reply), fixture.messages().finalReply(route.message()));
+  }
+
   @Test
   void resuming_before_delivery_retires_the_old_blocker_notice() {
     var fixture = waitFixture("goal-return-stale-blocker", true);
@@ -2360,7 +2569,6 @@ class DedicatedGoalAgentsDatabaseTest {
     when(runtime.conversation(anyString()))
         .thenAnswer(call -> logs.find(call.getArgument(0)).orElseThrow());
     when(runtime.statusBudget(any(), any())).thenAnswer(call -> retained.get().budget());
-    when(runtime.idle(anyString())).thenReturn(true);
     var active = new AtomicReference<RunAdmission>();
     var prepared = new AtomicReference<Prepared>();
     when(runtime.start(any(), any(), anyString(), any()))
@@ -2435,6 +2643,8 @@ class DedicatedGoalAgentsDatabaseTest {
             UUID.randomUUID(),
             bot != null);
     var goal = bot == null ? dedicated.start(owner, request) : dedicated.start(bot, request);
+    // The class shares a database. This fake owns only the fixture's conversation.
+    when(runtime.idle(goal.conversation())).thenReturn(true);
     var approvals = new RunApprovalStore(jdbc, Instant::now);
     var calls =
         new JdbcSuspendedRunCalls(

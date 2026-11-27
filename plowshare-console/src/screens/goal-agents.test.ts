@@ -227,6 +227,41 @@ describe('Goal Agents screen', () => {
     screen.destroy();
   });
 
+  it('can cancel a paused Goal whose optional resume limit is invalid', async () => {
+    const paused: GoalStatus = { ...first, state: 'PAUSED' };
+    const { root, ask, screen, control } = fixture((type) => {
+      if (type === 'goal.list') return ok({ goals: [paused], next: null });
+      if (type === 'goal.status') return ok(paused);
+      return Promise.resolve({ code: 'CONFLICT' });
+    });
+    await screen.load();
+    control('.goal-open').click();
+    await vi.waitFor(() => expect(control('.goal-resume')).toBeTruthy());
+    const limit = root.querySelector<HTMLInputElement>('input[type="number"]');
+    if (!limit) throw new Error('Missing resume limit');
+    limit.value = '1001';
+    expect(limit.checkValidity()).toBe(false);
+
+    control('.goal-resume').click();
+    expect(
+      ask.mock.calls.some(([type]) => type === 'conversation.goal.resume'),
+    ).toBe(false);
+    control('.goal-cancel').click();
+    await vi.waitFor(() => {
+      const payload = ask.mock.calls.find(
+        ([type]) => type === 'conversation.goal.cancel',
+      )?.[1];
+      expect(payload).toMatchObject({
+        goal: firstGoal,
+        conversation: first.conversation,
+        version: first.version,
+      });
+      expect(payload).not.toHaveProperty('maxActivations');
+      expect(payload).not.toHaveProperty('maxModelCalls');
+    });
+    screen.destroy();
+  });
+
   it('reconciles after a lost control reply without resubmitting its effect', async () => {
     let saved = '';
     let committed = false;

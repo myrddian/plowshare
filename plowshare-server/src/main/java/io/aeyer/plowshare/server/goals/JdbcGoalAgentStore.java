@@ -679,6 +679,12 @@ final class JdbcGoalAgentStore implements GoalAgentStore {
   }
 
   @Override
+  public Optional<Integer> finishUnbound(UUID goal) {
+    return Optional.ofNullable(
+        jdbc.queryForObject("SELECT goal_finish_unbound_parked(?)", Integer.class, goal));
+  }
+
+  @Override
   public void extendCycle(UUID goal, int calls) {
     if (jdbc.update(
             "UPDATE conversation_goals SET cycle_calls=? WHERE id=? AND cycle IS NOT NULL AND cycle_calls<?",
