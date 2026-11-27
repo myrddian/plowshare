@@ -17,6 +17,7 @@ import io.aeyer.plowshare.server.embedding.EmbeddingIndexPlan;
 import io.aeyer.plowshare.server.embedding.EmbeddingProfile;
 import io.aeyer.plowshare.server.embedding.EmbeddingQuery;
 import io.aeyer.plowshare.server.embedding.EmbeddingSearchPolicy;
+import io.aeyer.plowshare.server.embedding.EmbeddingSlot;
 import io.aeyer.plowshare.server.information.InformationLogSql;
 import io.aeyer.plowshare.server.information.InformationLogVisibility;
 import io.aeyer.plowshare.server.reads.JdbcReadDeadline;
@@ -575,7 +576,7 @@ public final class JdbcPassageRepository implements PassageRepository {
       // A caller owns this physical transaction. Never renew its deadline or pretend nested
       // TransactionTemplate calls release its connection. Preserve the established monolithic path.
       return units.joined(() -> rankWindow(home, type, query, most, generation, scope));
-    var plan = new EmbeddingIndexPlan(query.profile());
+    var plan = passagePlan(query.profile());
     // Only the deployed full-vector HNSW policy has validated stable strict-order prefixes.
     // Half/binary and relaxed IVFFlat policies retain their established single-window behavior.
     if (!type.equals("entry")
@@ -664,13 +665,19 @@ public final class JdbcPassageRepository implements PassageRepository {
     if (valid.size() != keys.size()) throw ReadFailedException.invalidated();
   }
 
+  private static EmbeddingIndexPlan passagePlan(EmbeddingProfile profile) {
+    if (profile.slot() != EmbeddingSlot.PROSE)
+      throw new IllegalArgumentException("Passage queries require the prose embedding slot");
+    return new EmbeddingIndexPlan(profile);
+  }
+
   private Ranking rankWithinDeadline(
       Home home, String type, EmbeddingQuery query, int most, String generation, ReadScope scope) {
     ReadDeadline.check();
     sourceType(type);
     if (most < 1 || most > 2000)
       throw new IllegalArgumentException("passage result limit must be 1..2000");
-    var plan = new EmbeddingIndexPlan(query.profile());
+    var plan = passagePlan(query.profile());
     if (!plan.exact()) return indexedRank(home, type, query, most, generation, scope, plan);
     String join =
         type.equals("entry")
@@ -953,7 +960,7 @@ public final class JdbcPassageRepository implements PassageRepository {
         type.equals("entry")
             ? " JOIN entries e ON e.conversation_id=s.conversation_id AND e.ordinal=s.ordinal JOIN conversations owner ON owner.id=e.conversation_id "
             : " JOIN digests owner ON owner.id=s.source_id ";
-    String present = profile.map(p -> new EmbeddingIndexPlan(p).present("p")).orElse("false");
+    String present = profile.map(p -> passagePlan(p).present("p")).orElse("false");
     String complete =
         "s.status='ready' AND s.generation=? AND EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id /*passage-selection*/)"
             + " AND NOT EXISTS(SELECT 1 FROM retrieval_passages p WHERE p.source_type=s.source_type AND p.source_id=s.source_id AND /*passage-selection*/ NOT ("

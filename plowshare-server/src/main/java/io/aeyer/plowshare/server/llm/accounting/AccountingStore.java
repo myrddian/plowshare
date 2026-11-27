@@ -71,7 +71,7 @@ public final class AccountingStore {
             List<Boolean> same =
                 jdbc.query(
                     """
-                        SELECT journal_id = ? AND jsonb_strip_nulls(event_data) = jsonb_strip_nulls(?::jsonb)
+                        SELECT journal_id = ? AND event_digest = inference_event_digest_v1(?::jsonb)
                         FROM inference_accounting_events WHERE event_id = ?
                         """,
                     (row, number) -> row.getBoolean(1),
@@ -89,7 +89,8 @@ public final class AccountingStore {
               jdbc.update(
                   """
                             INSERT INTO inference_accounting_events(event_id, journal_id, journal_sequence,
-                                call_id, call_sequence, event_data) VALUES (?, ?, ?, ?, ?, ?::jsonb)
+                                call_id, call_sequence, event_digest)
+                            VALUES (?, ?, ?, ?, ?, inference_event_digest_v1(?::jsonb))
                             """,
                   event.eventId(),
                   journalId,

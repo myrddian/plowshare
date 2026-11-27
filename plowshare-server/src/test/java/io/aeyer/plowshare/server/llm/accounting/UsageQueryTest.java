@@ -13,15 +13,22 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.llm.dispatch.*;
 import io.aeyer.plowshare.server.ws.*;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
@@ -141,11 +148,21 @@ class UsageQueryTest {
   }
 
   void call(UsageAttribution owner, RateCard price, long input, boolean unknownRetry) {
-    var recorder = new AccountingRecorder(journal, AccountingFixtures.CLOCK, 10);
+    call(owner, price, input, unknownRetry, Lane.CHAT, AccountingFixtures.CLOCK);
+  }
+
+  private void call(
+      UsageAttribution owner,
+      RateCard price,
+      Long input,
+      boolean unknownRetry,
+      Lane lane,
+      Clock clock) {
+    var recorder = new AccountingRecorder(journal, clock, 10);
     var call =
         recorder.begin(
             new AccountingEvent.CallCreated(
-                owner, "model", "pool", "model", null, "local", Lane.CHAT, price));
+                owner, "model", "pool", "model", null, "local", lane, price));
     if (unknownRetry) {
       call.startAttempt();
       call.finishAttempt(
@@ -160,16 +177,18 @@ class UsageQueryTest {
     call.startAttempt();
     call.finishAttempt(
         CallLifecycle.SUCCEEDED,
-        UsageNormalizer.openAi(
-            new ObjectMapper()
-                .valueToTree(
-                    Map.of(
-                        "prompt_tokens",
-                        input,
-                        "completion_tokens",
-                        2,
-                        "total_tokens",
-                        input + 2))),
+        input == null
+            ? UsageObservation.UNKNOWN
+            : UsageNormalizer.openAi(
+                new ObjectMapper()
+                    .valueToTree(
+                        Map.of(
+                            "prompt_tokens",
+                            input,
+                            "completion_tokens",
+                            2,
+                            "total_tokens",
+                            input + 2))),
         null,
         200,
         AccountingEvent.FinishReason.STOP,
@@ -177,6 +196,114 @@ class UsageQueryTest {
         1);
     call.finish(CallLifecycle.SUCCEEDED);
     store.project(journal.journalId(), journal.readBatch(100));
+  }
+
+  @Test
+  void fleet_daily_repairs_match_atomic_totals_with_partial_days_costs_and_retries()
+      throws Exception {
+    var global = UsageAttribution.system(null, UsageAttribution.Operation.EMBEDDING_REPAIR);
+    var scoped = UsageAttribution.system(project, UsageAttribution.Operation.EMBEDDING_REPAIR);
+    call(global, null, null, false, Lane.EMBEDDING, AccountingFixtures.CLOCK);
+    call(scoped, AccountingFixtures.PRICE, 10L, false, Lane.EMBEDDING, AccountingFixtures.CLOCK);
+    call(scoped, null, 20L, true, Lane.EMBEDDING, AccountingFixtures.CLOCK);
+    call(parent, AccountingFixtures.PRICE, 30L, false);
+    Instant nextDay = AccountingFixtures.NOW.plus(1, ChronoUnit.DAYS);
+    call(global, null, 40L, false, Lane.EMBEDDING, Clock.fixed(nextDay, ZoneOffset.UTC));
+    assertEquals(
+        3L,
+        jdbc.queryForObject(
+            "SELECT sum(calls) FROM inference_daily_embedding_repairs", Long.class));
+    assertEquals(5, jdbc.queryForObject("SELECT count(*) FROM inference_calls", Integer.class));
+    assertEquals(6, jdbc.queryForObject("SELECT count(*) FROM inference_attempts", Integer.class));
+
+    // Rehearse a populated migration. It must rebuild the same contribution rows from the
+    // retained facts without relying on the live projector trigger.
+    String migration =
+        new ClassPathResource("db/migration/V290__daily_embedding_repair_usage.sql")
+            .getContentAsString(StandardCharsets.UTF_8);
+    new TransactionTemplate(new DataSourceTransactionManager(data))
+        .executeWithoutResult(
+            status -> {
+              jdbc.execute(
+                  """
+                  DROP TRIGGER inference_rollup_completed_repair ON inference_calls;
+                  DROP TRIGGER inference_reset_daily_repairs ON inference_calls;
+                  DROP FUNCTION inference_rollup_completed_repair();
+                  DROP FUNCTION inference_reset_daily_repairs();
+                  DROP VIEW inference_daily_embedding_repair_inputs;
+                  DROP FUNCTION inference_repair_rollup_eligible(inference_calls);
+                  DROP TABLE inference_daily_embedding_repairs;
+                  """);
+              jdbc.execute(migration);
+            });
+    assertEquals(
+        3L,
+        jdbc.queryForObject(
+            "SELECT sum(calls) FROM inference_daily_embedding_repairs", Long.class));
+
+    var rolled = report("usage.pools", fleetRange(nextDay, List.of("day", "operation"), null, 2));
+    var atomic = report("usage.pools", fleetRange(nextDay, List.of("run"), null, 20));
+    assertEquals(atomic.totals(), rolled.totals());
+    assertEquals("4", rolled.totals().calls());
+    assertEquals("5", rolled.totals().attempts());
+    assertEquals("2", rolled.totals().incompleteAttempts());
+    assertEquals("1", rolled.totals().failedAttempts());
+    assertEquals("3", rolled.totals().inputTokensKnown());
+    assertEquals("60", rolled.totals().inputTokens());
+    var repairs = rolled.groups().get(1);
+    assertEquals("EMBEDDING_REPAIR", repairs.operation());
+    assertEquals("1", repairs.globalCalls());
+    assertEquals("2", repairs.inputTokensKnown());
+    assertTrue(repairs.costs().containsKey("USD"));
+    assertNull(rolled.cursor());
+
+    var withPartial =
+        report(
+            "usage.pools",
+            fleetRange(nextDay.plusSeconds(1), List.of("day", "operation"), null, 2));
+    assertEquals("100", withPartial.totals().inputTokens());
+    assertEquals("5", withPartial.totals().calls());
+    assertNotNull(withPartial.cursor());
+    var second =
+        report(
+            "usage.pools",
+            fleetRange(
+                nextDay.plusSeconds(1), List.of("day", "operation"), withPartial.cursor(), 2));
+    assertEquals("40", second.groups().getFirst().inputTokens());
+    assertThrows(
+        CallerFault.class,
+        () ->
+            queries.report(
+                "bob",
+                queries.resolve("usage.pools", fleetRange(nextDay, List.of("day"), null, 20))));
+    assertEquals(
+        3,
+        queries
+            .calls(
+                "alice",
+                queries.resolve(
+                    "usage.calls", filter(null, "one", null, null, List.of(), null, 20)))
+            .calls()
+            .size());
+  }
+
+  private static Usage.Filter fleetRange(
+      Instant to, List<String> groups, String cursor, int limit) {
+    return new Usage.Filter(
+        null,
+        null,
+        null,
+        null,
+        null,
+        "model",
+        "pool",
+        "local",
+        "direct",
+        AccountingFixtures.NOW.truncatedTo(ChronoUnit.DAYS),
+        to,
+        groups,
+        cursor,
+        limit);
   }
 
   @Test

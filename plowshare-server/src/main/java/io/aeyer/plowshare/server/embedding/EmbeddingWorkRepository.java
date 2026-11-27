@@ -13,7 +13,12 @@ public interface EmbeddingWorkRepository {
     DIGESTS,
     DOCUMENTS,
     CHUNKS,
-    PASSAGES
+    PASSAGES;
+
+    /** Conversation and digest navigation use the prose passage corpus. */
+    public boolean supports(EmbeddingSlot slot) {
+      return this != PASSAGES || slot == EmbeddingSlot.PROSE;
+    }
   }
 
   /**
@@ -64,6 +69,8 @@ public interface EmbeddingWorkRepository {
     public RepairWork {
       Objects.requireNonNull(profile);
       Objects.requireNonNull(store);
+      if (!store.supports(profile.slot()))
+        throw new IllegalArgumentException("Embedding slot does not serve this store");
     }
   }
 

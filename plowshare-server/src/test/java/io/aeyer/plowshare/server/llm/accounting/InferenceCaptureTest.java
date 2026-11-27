@@ -275,9 +275,10 @@ class InferenceCaptureTest {
       assertNull(
           jdbc.queryForObject("SELECT provider_request_id FROM inference_attempts", String.class));
       assertFalse(
-          jdbc.queryForObject(
-                  "SELECT string_agg(event_data::text, '') FROM inference_accounting_events",
-                  String.class)
+          AccountingFixtures.MAPPER
+              .copy()
+              .findAndRegisterModules()
+              .writeValueAsString(harness.journal.readBatch(100))
               .contains("fake-accounting-secret"));
     }
   }
@@ -623,6 +624,7 @@ class InferenceCaptureTest {
               io.aeyer.plowshare.server.data.DataLayout.class,
               () -> new io.aeyer.plowshare.server.data.DataLayout(directory).initialise())
           .withBean(JdbcTemplate.class, () -> jdbc)
+          .withBean(UsageScopeRepository.class, () -> new JdbcUsageScopeRepository(jdbc))
           .withBean(
               org.springframework.transaction.PlatformTransactionManager.class,
               () -> new DataSourceTransactionManager(database))
