@@ -250,8 +250,12 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
     EmbeddingException firstFailure = null;
     // Each slot is a separate request. A failure in code still permits the prose checkpoint.
     for (EmbeddingSlot slot : EmbeddingSlot.values()) {
+      var slotSources =
+          sources.stream().filter(source -> source.key().store().supports(slot)).toList();
+      if (slotSources.isEmpty()) continue;
       for (var target : writeProfiles(slot)) {
-        var missing = sources.stream().filter(source -> !repository.ready(target, source)).toList();
+        var missing =
+            slotSources.stream().filter(source -> !repository.ready(target, source)).toList();
         if (missing.isEmpty()) continue;
         try {
           var output =
@@ -295,6 +299,7 @@ public final class DispatchingDualEmbeddings implements DualEmbeddings, Embeddin
 
   boolean repair(
       EmbeddingProfile target, EmbeddingWorkRepository.Source source, UsageAttribution owner) {
+    if (!source.key().store().supports(target.slot())) return false;
     if (repository.ready(target, source)) return true;
     var vector = vectors(target, List.of(source.text()), false, owner).getFirst();
     return preparation == null

@@ -11,6 +11,7 @@ import io.aeyer.plowshare.server.information.*;
 import io.aeyer.plowshare.server.llm.EmbeddingClient;
 import io.aeyer.plowshare.server.llm.EmbeddingException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -141,6 +144,39 @@ class EmbeddingRuntimeRepositoryTest {
     float[] result = new float[profile.space().definition().dimensions()];
     result[profile.slot() == EmbeddingSlot.CODE ? 1 : 0] = 1;
     return result;
+  }
+
+  private EmbeddingWorkRepository.Source passage(int position) {
+    jdbc.update(
+        "INSERT INTO retrieval_sources(source_type,source_id,source_hash) "
+            + "VALUES('digest','passage-fixture','fixture') ON CONFLICT DO NOTHING");
+    jdbc.update(
+        "INSERT INTO retrieval_passages(source_type,source_id,position,passage) "
+            + "VALUES('digest','passage-fixture',?,'passage fixture')",
+        position);
+    return repository
+        .source(
+            new EmbeddingWorkRepository.Key(
+                EmbeddingWorkRepository.Store.PASSAGES, "passage-fixture", "digest", position))
+        .orElseThrow();
+  }
+
+  private void legacyStage(
+      EmbeddingProfile profile, EmbeddingWorkRepository.Source source, String vector) {
+    jdbc.update(
+        "INSERT INTO retrieval_passages_embedding_staging VALUES('digest','passage-fixture',?,?,?,?,CAST(? AS vector))",
+        source.key().position(),
+        profile.slot().stored(),
+        profile.space().id(),
+        source.revision(),
+        vector);
+  }
+
+  private List<Integer> stagedPositions() {
+    return jdbc.queryForList(
+        "SELECT position FROM retrieval_passages_embedding_staging "
+            + "WHERE source_type='digest' AND source_id='passage-fixture' ORDER BY position",
+        Integer.class);
   }
 
   private void populate(EmbeddingProfile profile) {
@@ -325,6 +361,188 @@ class EmbeddingRuntimeRepositoryTest {
     assertTrue(repository.activate(replacement));
     assertEquals(replacement.space(), repository.active(EmbeddingSlot.PROSE).orElseThrow().space());
     assertThrows(EmbeddingException.class, () -> repository.read(active, () -> "must not run"));
+  }
+
+  @Test
+  void passageStagingSurvivesRollbackAndIsConsumedByActivationAndServingPublication() {
+    var initial = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    passage(0);
+    populate(initial);
+    assertEquals(List.of(0), stagedPositions());
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  assertTrue(repository.activate(initial));
+                  assertTrue(stagedPositions().isEmpty());
+                  throw new IllegalStateException("rolled back");
+                }));
+    assertEquals(List.of(0), stagedPositions());
+    assertTrue(repository.active(EmbeddingSlot.PROSE).isEmpty());
+    assertTrue(repository.activate(initial));
+    assertTrue(stagedPositions().isEmpty());
+
+    var replacement = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var serving = repository.active(EmbeddingSlot.PROSE).orElseThrow();
+    var next = passage(1);
+    var alternate = new float[] {0, 1, 0, 0};
+    assertTrue(repository.publish(replacement, next, alternate));
+    assertTrue(repository.publish(serving, next, vector(serving)));
+    assertTrue(repository.publish(serving, next, alternate));
+    assertEquals(List.of(1), stagedPositions());
+    assertEquals(
+        "[1,0,0,0]",
+        jdbc.queryForObject(
+            "SELECT prose_embedding::text FROM retrieval_passages "
+                + "WHERE source_type='digest' AND source_id='passage-fixture' AND position=1",
+            String.class));
+    populate(replacement);
+    assertTrue(repository.activate(replacement));
+    assertEquals(List.of(0, 1), stagedPositions());
+    assertEquals(
+        "[0,1,0,0]",
+        jdbc.queryForObject(
+            "SELECT prose_embedding::text FROM retrieval_passages "
+                + "WHERE source_type='digest' AND source_id='passage-fixture' AND position=1",
+            String.class));
+    var rollback = repository.configure(EmbeddingSlot.PROSE, initial.space(), initial.search());
+    assertTrue(repository.pending(rollback, EmbeddingWorkRepository.Store.PASSAGES, 100).isEmpty());
+    assertTrue(repository.activate(rollback));
+    assertEquals(
+        "[1,0,0,0]",
+        jdbc.queryForObject(
+            "SELECT prose_embedding::text FROM retrieval_passages "
+                + "WHERE source_type='digest' AND source_id='passage-fixture' AND position=1",
+            String.class));
+  }
+
+  @Test
+  void passageStagingCompactionRewritesStorageAndPreservesPendingStaleAndDifferingRows()
+      throws Exception {
+    var initial = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    var duplicate = passage(0);
+    var stale = passage(1);
+    var differing = passage(2);
+    var pending = passage(3);
+    populate(initial);
+    assertTrue(repository.activate(initial));
+    legacyStage(initial, duplicate, "[1,0,0,0]");
+    legacyStage(initial, stale, "[1,0,0,0]");
+    legacyStage(initial, differing, "[0,1,0,0]");
+    jdbc.update(
+        "UPDATE retrieval_passages SET passage='changed' "
+            + "WHERE source_type='digest' AND source_id='passage-fixture' AND position=1");
+    var replacement = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.EXACT, 4);
+    assertTrue(repository.publish(replacement, pending, vector(replacement)));
+
+    var fileNodeQuery =
+        "SELECT pg_relation_filenode('retrieval_passages_embedding_staging')::bigint";
+    var originalFileNode = jdbc.queryForObject(fileNodeQuery, Long.class);
+    String migration =
+        new ClassPathResource("db/migration/V288__compact_published_passage_embeddings.sql")
+            .getContentAsString(StandardCharsets.UTF_8);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            work.inTransaction(
+                () -> {
+                  jdbc.execute(migration);
+                  assertEquals(List.of(1, 2, 3), stagedPositions());
+                  throw new IllegalStateException("rolled back");
+                }));
+    assertEquals(originalFileNode, jdbc.queryForObject(fileNodeQuery, Long.class));
+    assertEquals(List.of(0, 1, 2, 3), stagedPositions());
+    work.inTransaction(
+        () -> {
+          jdbc.execute(migration);
+          return null;
+        });
+    assertNotEquals(originalFileNode, jdbc.queryForObject(fileNodeQuery, Long.class));
+    assertEquals(List.of(1, 2, 3), stagedPositions());
+    assertEquals(
+        List.of("[1,0,0,0]", "[0,1,0,0]", "[1,0,0,0]"),
+        jdbc.queryForList(
+            "SELECT embedding::text FROM retrieval_passages_embedding_staging "
+                + "WHERE source_type='digest' AND source_id='passage-fixture' ORDER BY position",
+            String.class));
+    assertThrows(DataAccessException.class, () -> legacyStage(initial, stale, "[1,0,0,0]"));
+  }
+
+  @Test
+  void prose_only_migration_retires_code_passage_storage_and_preserves_prose_and_repair_history()
+      throws Exception {
+    var code = target(EmbeddingSlot.CODE, EmbeddingSearchPolicy.Mode.HNSW_VECTOR, 3);
+    var prose = target(EmbeddingSlot.PROSE, EmbeddingSearchPolicy.Mode.HNSW_VECTOR, 4);
+    var source = passage(0);
+    var store = EmbeddingWorkRepository.Store.PASSAGES;
+    String codeIndex = new EmbeddingIndexPlan(code).indexName(store);
+    String proseIndex = new EmbeddingIndexPlan(prose).indexName(store);
+    String migration =
+        new ClassPathResource("db/migration/V291__prose_only_retrieval_passages.sql")
+            .getContentAsString(StandardCharsets.UTF_8);
+    UUID attempt = UUID.randomUUID();
+    work.inTransaction(
+        () -> {
+          // Restore the previous physical schema to exercise migration of populated rows.
+          jdbc.execute(
+              """
+              ALTER TABLE retrieval_passages DROP CONSTRAINT retrieval_passages_prose_only;
+              ALTER TABLE retrieval_passages_embedding_staging DROP CONSTRAINT retrieval_passage_staging_prose_only;
+              ALTER TABLE embedding_repair_scans DROP CONSTRAINT embedding_repair_scans_prose_passages;
+              ALTER TABLE embedding_repair_work DROP CONSTRAINT embedding_repair_work_prose_passages;
+              CREATE INDEX retrieval_passages_code_space ON retrieval_passages(code_space_id) WHERE code_embedding IS NOT NULL;
+              """);
+          jdbc.update(
+              """
+              UPDATE retrieval_passages SET code_embedding='[0,1,0]'::vector,code_space_id=?,
+                  code_source_revision=embedding_source_revision,prose_embedding='[1,0,0,0]'::vector,
+                  prose_space_id=?,prose_source_revision=embedding_source_revision
+              WHERE source_id='passage-fixture' AND position=0
+              """,
+              code.space().id(),
+              prose.space().id());
+          legacyStage(code, source, "[0,1,0]");
+          legacyStage(prose, source, "[1,0,0,0]");
+          jdbc.execute(new EmbeddingIndexPlan(code).createIndex(store, "retrieval_passages", 1));
+          jdbc.execute(new EmbeddingIndexPlan(prose).createIndex(store, "retrieval_passages", 1));
+          jdbc.update(
+              """
+              INSERT INTO embedding_repair_attempts(id,slot,space_id,store,source_type,source_id,
+                  position,source_revision,phase,reason)
+              VALUES(?,'code',?,'retrieval_passages','digest','passage-fixture',0,?,'PUBLISHED','NONE')
+              """,
+              attempt,
+              code.space().id(),
+              source.revision());
+          var node =
+              jdbc.queryForObject(
+                  "SELECT pg_relation_filenode('retrieval_passages')::bigint", Long.class);
+          jdbc.execute(migration);
+          assertNotEquals(
+              node,
+              jdbc.queryForObject(
+                  "SELECT pg_relation_filenode('retrieval_passages')::bigint", Long.class));
+          return null;
+        });
+    assertNull(jdbc.queryForObject("SELECT to_regclass(?)::text", String.class, codeIndex));
+    assertEquals(
+        proseIndex, jdbc.queryForObject("SELECT to_regclass(?)::text", String.class, proseIndex));
+    assertEquals(List.of(0), stagedPositions());
+    assertTrue(repository.ready(prose, source));
+    assertFalse(repository.publish(code, source, vector(code)));
+    assertTrue(repository.claimPending(code, store, 4).isEmpty());
+    assertEquals(
+        "PUBLISHED",
+        jdbc.queryForObject(
+            "SELECT phase FROM embedding_repair_attempts WHERE id=?", String.class, attempt));
+    passage(1);
+    assertEquals(
+        List.of("prose"),
+        jdbc.queryForList(
+            "SELECT slot FROM embedding_repair_work WHERE store='retrieval_passages' AND source_id='passage-fixture' AND position=1",
+            String.class));
   }
 
   @Test
@@ -1008,7 +1226,6 @@ class EmbeddingRuntimeRepositoryTest {
               return template.execute(status -> callback.get());
             }
           };
-      var legacy = new JdbcEmbeddingWorkRepository(old, transaction);
       var space =
           new JdbcEmbeddingSpaceRepository(old)
               .register(
@@ -1021,20 +1238,22 @@ class EmbeddingRuntimeRepositoryTest {
                       "cls",
                       EmbeddingSpace.Normalization.NONE,
                       "none"));
-      var profile =
-          legacy.configure(
-              EmbeddingSlot.PROSE,
-              space,
-              new EmbeddingSearchPolicy(
-                  EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      old.update(
+          "UPDATE embedding_slots SET target_space_id=?,target_mode='exact',target_distance='COSINE' WHERE slot='prose'",
+          space.id());
       old.update(
           "INSERT INTO memories(id,summary,scope,body,state,formed_at,formed_by,formed_where) VALUES('legacy','fixture','scope','body','active',now(),'fixture','fixture')");
-      var source =
-          legacy
-              .source(
-                  EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "legacy"))
-              .orElseThrow();
-      assertTrue(legacy.beginRepair(profile, source));
+      // Seed the V208 receipt directly. The current repository depends on later source guards.
+      assertEquals(
+          1,
+          old.update(
+              """
+              INSERT INTO memories_embedding_failures
+                  (source_id,slot,space_id,source_revision,category,retry_at)
+              SELECT id,'prose',?,embedding_source_revision,'RepairInFlight','infinity'
+              FROM memories WHERE id='legacy'
+              """,
+              space.id()));
       Flyway.configure().dataSource(ds).load().migrate();
       var row =
           old.queryForMap(
@@ -1049,7 +1268,14 @@ class EmbeddingRuntimeRepositoryTest {
           old.queryForObject(
               "SELECT retry_at='infinity'::timestamptz AND category='RepairInFlight' FROM memories_embedding_failures WHERE source_id='legacy'",
               Boolean.class));
-      assertTrue(legacy.beginRepairAttempt(profile, source).isEmpty());
+      var migrated = new JdbcEmbeddingWorkRepository(old, transaction);
+      var currentProfile = migrated.target(EmbeddingSlot.PROSE).orElseThrow();
+      var source =
+          migrated
+              .source(
+                  EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "legacy"))
+              .orElseThrow();
+      assertTrue(migrated.beginRepairAttempt(currentProfile, source).isEmpty());
     } finally {
       jdbc.execute("DROP DATABASE repair_legacy WITH (FORCE)");
     }

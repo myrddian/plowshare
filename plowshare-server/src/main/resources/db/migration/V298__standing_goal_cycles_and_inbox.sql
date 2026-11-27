@@ -106,7 +106,7 @@ CREATE TABLE goal_agent_unlisten_requests (
     PRIMARY KEY (executor,request)
 );
 
--- V292 recorded the job without the selected input. New direct steering could overtake
+-- V297 recorded the job without the selected input. New direct steering could overtake
 -- the old claimed item in the queue, so the exact input is unknowable for interrupted work.
 -- Retain the old backlog as uncertain without redispatch or a successful receipt.
 UPDATE goal_agent_inputs i SET settled=TRUE,disposition='UNCERTAIN'

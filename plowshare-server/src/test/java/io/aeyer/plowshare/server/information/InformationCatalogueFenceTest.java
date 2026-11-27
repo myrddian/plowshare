@@ -134,7 +134,7 @@ class InformationCatalogueFenceTest {
   private void preparedRevision() {
     var manifest =
         new InformationProjectionRepository.Manifest(
-            expected, resource, 1, "a".repeat(64), Map.of(), List.of());
+            expected, resource, 1, "a".repeat(64), Map.of(), List.of(), 1);
     when(projections.prepare(eq(context), eq(request), eq(expected), any(), any()))
         .thenReturn(new InformationProjectionRepository.Prepared(manifest, null));
     when(projections.copy(eq(context), eq(request), any(), any()))

@@ -923,14 +923,14 @@ class DedicatedGoalAgentsDatabaseTest {
 
   @Test
   void upgrade_fences_unidentified_legacy_inputs_and_preserves_paused_spending() {
-    // An isolated database preserves the V292 schema while the other cases use the latest schema.
+    // An isolated database preserves the V297 schema while the other cases use the latest schema.
     jdbc.execute("CREATE DATABASE goal_cycle_upgrade");
     var legacySource =
         new DriverManagerDataSource(
             POSTGRES.getJdbcUrl().replace("/" + POSTGRES.getDatabaseName(), "/goal_cycle_upgrade"),
             POSTGRES.getUsername(),
             POSTGRES.getPassword());
-    Flyway.configure().dataSource(legacySource).target("292").load().migrate();
+    Flyway.configure().dataSource(legacySource).target("297").load().migrate();
     var legacy = new JdbcTemplate(legacySource);
     String owner = "legacy-goal-owner";
     String project = "legacy-goals";

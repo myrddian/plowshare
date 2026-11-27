@@ -8,7 +8,12 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,7 +22,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Authorized reads over atomic rows. No inference capability is reachable from this service. */
+/** Authorized usage reads over atomic rows and compatible daily repair summaries. */
 @Repository
 public class JdbcUsageReportRepository implements UsageReportRepository {
   private static final Map<String, String> DIMENSIONS =
@@ -45,6 +50,12 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
           + "first_output_millis,duration_millis,start_accounting_millis,cost_result->'reasons' AS cost_reasons";
 
   private record Where(String sql, List<Object> args) {}
+
+  private record ReportSources(Where calls, Optional<Where> repairs) {}
+
+  private record Metric(String name, String calls, String repairs) {}
+
+  private static final List<Metric> METRICS = metrics();
 
   private final JdbcTemplate jdbc;
   private final ObjectMapper json;
@@ -78,14 +89,15 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
             reads.execute(
                 status -> {
                   Where where = where(account, resolved);
-                  var totals = aggregate(where, List.of(), 0, 1).getFirst();
+                  ReportSources sources = reportSources(where, resolved);
+                  var totals = aggregate(sources, List.of(), 0, 1).getFirst();
                   List<Map<String, Object>> groups = List.of();
                   String cursor = null;
                   if (!resolved.filter().groupBy().isEmpty()) {
                     int offset = offset(account, resolved);
                     var page =
                         aggregate(
-                            where,
+                            sources,
                             resolved.filter().groupBy(),
                             offset,
                             resolved.filter().limit() + 1);
@@ -549,26 +561,40 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
     return sql + " AND c." + column + "_id=?";
   }
 
-  private List<Map<String, Object>> aggregate(
-      Where where, List<String> groups, int offset, int limit) {
-    String dimensions =
-        groups.stream().map(DIMENSIONS::get).collect(java.util.stream.Collectors.joining(","));
-    String selections =
-        groups.stream()
-            .map(g -> DIMENSIONS.get(g) + " AS " + g)
-            .collect(java.util.stream.Collectors.joining(","));
-    var args = new ArrayList<>(where.args());
-    args.add(limit);
-    args.add(offset);
-    String sums =
-        "count(DISTINCT c.call_id)::text AS calls,count(a.attempt_id)::text AS attempts,"
-            + "count(a.attempt_id) FILTER(WHERE a.ended_at IS NULL OR a.input_tokens IS NULL OR a.usage_coverage='INVALID' OR c.lane='CHAT' AND a.output_tokens IS NULL)::text AS incomplete_attempts,"
-            + "count(DISTINCT c.call_id) FILTER(WHERE c.ended_at IS NULL)::text AS active_calls,"
-            + "count(a.attempt_id) FILTER(WHERE a.outcome IN ('FAILED','REFUSED','CANCELLED','INTERRUPTED'))::text AS failed_attempts,"
-            + "count(DISTINCT c.call_id) FILTER(WHERE c.scope='GLOBAL')::text AS global_calls,"
-            + "count(DISTINCT c.call_id) FILTER(WHERE c.attribution_status='SYSTEM')::text AS system_calls,"
-            + "count(DISTINCT c.call_id) FILTER(WHERE c.attribution_status='LEGACY_UNATTRIBUTED')::text AS legacy_calls,"
-            + "count(a.attempt_id) FILTER(WHERE a.cost_kind IN ('UNKNOWN','PARTIAL'))::text AS unknown_cost_attempts";
+  private static List<Metric> metrics() {
+    var metrics =
+        new ArrayList<>(
+            List.of(
+                new Metric("calls", "count(DISTINCT c.call_id)", "c.calls"),
+                new Metric("attempts", "count(a.attempt_id)", "c.calls"),
+                new Metric(
+                    "incomplete_attempts",
+                    "count(a.attempt_id) FILTER(WHERE a.ended_at IS NULL OR a.input_tokens IS NULL OR a.usage_coverage='INVALID' OR c.lane='CHAT' AND a.output_tokens IS NULL)",
+                    "c.incomplete_attempts"),
+                new Metric(
+                    "active_calls",
+                    "count(DISTINCT c.call_id) FILTER(WHERE c.ended_at IS NULL)",
+                    "0"),
+                new Metric(
+                    "failed_attempts",
+                    "count(a.attempt_id) FILTER(WHERE a.outcome IN ('FAILED','REFUSED','CANCELLED','INTERRUPTED'))",
+                    "0"),
+                new Metric(
+                    "global_calls",
+                    "count(DISTINCT c.call_id) FILTER(WHERE c.scope='GLOBAL')",
+                    "CASE WHEN c.project_id IS NULL THEN c.calls ELSE 0 END"),
+                new Metric(
+                    "system_calls",
+                    "count(DISTINCT c.call_id) FILTER(WHERE c.attribution_status='SYSTEM')",
+                    "c.calls"),
+                new Metric(
+                    "legacy_calls",
+                    "count(DISTINCT c.call_id) FILTER(WHERE c.attribution_status='LEGACY_UNATTRIBUTED')",
+                    "0"),
+                new Metric(
+                    "unknown_cost_attempts",
+                    "count(a.attempt_id) FILTER(WHERE a.cost_kind IN ('UNKNOWN','PARTIAL'))",
+                    "c.unknown_cost_attempts")));
     for (String field :
         List.of(
             "input_tokens",
@@ -576,59 +602,126 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
             "provider_total_tokens",
             "cache_read_tokens",
             "cache_write_tokens",
-            "reasoning_tokens"))
-      sums +=
-          ",COALESCE(sum(a."
-              + field
-              + "),0)::text AS "
-              + field
-              + ",count(a."
-              + field
-              + ")::text AS "
-              + field
-              + "_known";
-    String grouping =
-        groups.isEmpty()
-            ? ""
-            : " GROUP BY " + dimensions + " ORDER BY " + dimensions + " NULLS FIRST";
-    var rows =
-        jdbc.queryForList(
-            "SELECT "
-                + (groups.isEmpty() ? "" : selections + ",")
-                + sums
-                + " FROM inference_calls c LEFT JOIN inference_attempts a ON a.call_id=c.call_id WHERE "
-                + where.sql()
-                + grouping
-                + " LIMIT ? OFFSET ?",
-            args.toArray());
-    // Monetary sums remain separated by currency; no cross-currency grand total.
-    String pageFilter = "";
-    var costArgs = new ArrayList<>(where.args());
-    if (!groups.isEmpty()) {
-      if (rows.isEmpty()) return rows;
-      var clauses = new ArrayList<String>();
-      for (var row : rows) {
-        var equalities = new ArrayList<String>();
-        for (String g : groups) {
-          equalities.add(DIMENSIONS.get(g) + " IS NOT DISTINCT FROM ?::text");
-          costArgs.add(row.get(g));
-        }
-        clauses.add("(" + String.join(" AND ", equalities) + ")");
-      }
-      pageFilter = " AND (" + String.join(" OR ", clauses) + ")";
+            "reasoning_tokens")) {
+      metrics.add(new Metric(field, "COALESCE(sum(a." + field + "),0)", "c." + field));
+      metrics.add(new Metric(field + "_known", "count(a." + field + ")", "c." + field + "_known"));
     }
-    var costs =
-        jdbc.queryForList(
-            "SELECT "
-                + (groups.isEmpty() ? "" : selections + ",")
-                + "a.cost_currency, sum(a.cost_amount)::text AS amount "
-                + "FROM inference_calls c JOIN inference_attempts a ON a.call_id=c.call_id WHERE "
-                + where.sql()
-                + pageFilter
-                + " AND a.cost_amount IS NOT NULL AND a.cost_currency IS NOT NULL GROUP BY "
-                + (groups.isEmpty() ? "" : dimensions + ",")
-                + "a.cost_currency",
-            costArgs.toArray());
+    return List.copyOf(metrics);
+  }
+
+  private static ReportSources reportSources(Where calls, Resolved resolved) {
+    Filter filter = resolved.filter();
+    // Fleet authorization has already been checked by where(). Scoped reads and their live
+    // identity/lineage filters continue to use atomic facts.
+    if (!resolved.type().equals("usage.pools")
+        || filter.project() != null
+        || filter.agent() != null
+        || filter.conversation() != null
+        || filter.run() != null
+        || filter.orchestration() != null
+        || filter.groupBy().contains("agent")
+        || filter.groupBy().contains("run")) return new ReportSources(calls, Optional.empty());
+
+    Instant firstDay = filter.from().truncatedTo(ChronoUnit.DAYS);
+    if (!firstDay.equals(filter.from())) firstDay = firstDay.plus(1, ChronoUnit.DAYS);
+    Instant endDay = filter.to().truncatedTo(ChronoUnit.DAYS);
+    if (!firstDay.isBefore(endDay)) return new ReportSources(calls, Optional.empty());
+
+    var callArgs = new ArrayList<>(calls.args());
+    callArgs.add(Timestamp.from(firstDay));
+    callArgs.add(Timestamp.from(endDay));
+    var raw =
+        new Where(
+            calls.sql()
+                + " AND NOT (c.created_at>=? AND c.created_at<? AND inference_repair_rollup_eligible(c))",
+            List.copyOf(callArgs));
+    var repairArgs = new ArrayList<Object>();
+    repairArgs.add(LocalDate.ofInstant(firstDay, ZoneOffset.UTC));
+    repairArgs.add(LocalDate.ofInstant(endDay, ZoneOffset.UTC));
+    String repairSql = "c.day>=? AND c.day<?";
+    if (filter.model() != null) {
+      repairSql += " AND c.wire_model=?";
+      repairArgs.add(filter.model());
+    }
+    if (filter.pool() != null) {
+      repairSql += " AND c.pool=?";
+      repairArgs.add(filter.pool());
+    }
+    if (filter.route() != null) {
+      repairSql += " AND c.billing_route=?";
+      repairArgs.add(filter.route());
+    }
+    return new ReportSources(raw, Optional.of(new Where(repairSql, List.copyOf(repairArgs))));
+  }
+
+  private static String repairDimension(String group) {
+    return switch (group) {
+      case "day" -> "to_char(c.day,'YYYY-MM-DD')";
+      case "operation" -> "'EMBEDDING_REPAIR'::text";
+      default -> DIMENSIONS.get(group);
+    };
+  }
+
+  private List<Map<String, Object>> aggregate(
+      ReportSources sources, List<String> groups, int offset, int limit) {
+    String dimensions = groups.stream().map(DIMENSIONS::get).collect(Collectors.joining(","));
+    String selections =
+        groups.stream().map(g -> DIMENSIONS.get(g) + " AS " + g).collect(Collectors.joining(","));
+    String groupNames = String.join(",", groups);
+    var args = new ArrayList<>(sources.calls().args());
+    boolean useRepairs = sources.repairs().isPresent();
+    String sums =
+        METRICS.stream()
+            .map(
+                metric ->
+                    "("
+                        + metric.calls()
+                        + ")"
+                        + (useRepairs ? "" : "::text")
+                        + " AS "
+                        + metric.name())
+            .collect(Collectors.joining(","));
+    String query =
+        "SELECT "
+            + prefix(selections)
+            + sums
+            + " FROM inference_calls c LEFT JOIN inference_attempts a ON a.call_id=c.call_id WHERE "
+            + sources.calls().sql()
+            + groupBy(dimensions);
+    if (useRepairs) {
+      Where repairs = sources.repairs().orElseThrow();
+      String rolledFields = METRICS.stream().map(Metric::repairs).collect(Collectors.joining(","));
+      String rolledDimensions =
+          groups.stream()
+              .map(JdbcUsageReportRepository::repairDimension)
+              .collect(Collectors.joining(","));
+      String merged =
+          METRICS.stream()
+              .map(metric -> "coalesce(sum(" + metric.name() + "),0)::text AS " + metric.name())
+              .collect(Collectors.joining(","));
+      query =
+          "SELECT "
+              + prefix(groupNames)
+              + merged
+              + " FROM ("
+              + query
+              + " UNION ALL SELECT "
+              + prefix(rolledDimensions)
+              + rolledFields
+              + " FROM inference_daily_embedding_repairs c WHERE "
+              + repairs.sql()
+              + ") contributions"
+              + groupBy(groupNames);
+      args.addAll(repairs.args());
+    }
+    if (!groups.isEmpty())
+      query += " ORDER BY " + String.join(" NULLS FIRST,", groups) + " NULLS FIRST";
+    args.add(limit);
+    args.add(offset);
+    var rows = jdbc.queryForList(query + " LIMIT ? OFFSET ?", args.toArray());
+
+    if (rows.isEmpty()) return rows;
+    var costs = costs(sources, groups, rows, dimensions, selections);
     for (var row : rows) {
       var byCurrency = new TreeMap<String, String>();
       for (var cost : costs)
@@ -650,6 +743,78 @@ public class JdbcUsageReportRepository implements UsageReportRepository {
               && "0".equals(row.get("active_calls")));
     }
     return rows;
+  }
+
+  private List<Map<String, Object>> costs(
+      ReportSources sources,
+      List<String> groups,
+      List<Map<String, Object>> rows,
+      String dimensions,
+      String selections) {
+    // Monetary sums remain separated by currency; no cross-currency grand total.
+    var args = new ArrayList<>(sources.calls().args());
+    String query =
+        "SELECT "
+            + prefix(selections)
+            + "a.cost_currency, sum(a.cost_amount) AS amount"
+            + " FROM inference_calls c JOIN inference_attempts a ON a.call_id=c.call_id WHERE "
+            + sources.calls().sql()
+            + costPage(groups, rows, DIMENSIONS::get, args)
+            + " AND a.cost_amount IS NOT NULL AND a.cost_currency IS NOT NULL"
+            + " GROUP BY "
+            + prefix(dimensions)
+            + "a.cost_currency";
+    if (sources.repairs().isPresent()) {
+      Where repairs = sources.repairs().orElseThrow();
+      String groupNames = prefix(String.join(",", groups));
+      String rolledDimensions =
+          groups.stream()
+              .map(JdbcUsageReportRepository::repairDimension)
+              .collect(Collectors.joining(","));
+      args.addAll(repairs.args());
+      query =
+          "SELECT "
+              + groupNames
+              + "cost_currency,sum(amount) AS amount FROM ("
+              + query
+              + " UNION ALL SELECT "
+              + prefix(rolledDimensions)
+              + "c.cost_currency,c.cost_amount"
+              + " FROM inference_daily_embedding_repairs c WHERE "
+              + repairs.sql()
+              + " AND c.cost_currency IS NOT NULL"
+              + costPage(groups, rows, JdbcUsageReportRepository::repairDimension, args)
+              + ") contributions GROUP BY "
+              + groupNames
+              + "cost_currency";
+    }
+    return jdbc.queryForList(query, args.toArray());
+  }
+
+  private static String costPage(
+      List<String> groups,
+      List<Map<String, Object>> rows,
+      Function<String, String> dimension,
+      List<Object> args) {
+    if (groups.isEmpty()) return "";
+    var clauses = new ArrayList<String>();
+    for (var row : rows) {
+      var equalities = new ArrayList<String>();
+      for (String group : groups) {
+        equalities.add(dimension.apply(group) + " IS NOT DISTINCT FROM ?::text");
+        args.add(row.get(group));
+      }
+      clauses.add("(" + String.join(" AND ", equalities) + ")");
+    }
+    return " AND (" + String.join(" OR ", clauses) + ")";
+  }
+
+  private static String prefix(String csv) {
+    return csv.isEmpty() ? "" : csv + ",";
+  }
+
+  private static String groupBy(String csv) {
+    return csv.isEmpty() ? "" : " GROUP BY " + csv;
   }
 
   /**

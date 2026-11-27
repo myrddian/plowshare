@@ -6,12 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.aeyer.plowshare.server.llm.dispatch.TokenUsage;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.AbstractDataSource;
@@ -501,20 +506,79 @@ class AccountingStoreTest {
   }
 
   @Test
-  void replay_accepts_old_event_payloads_without_new_nullable_timing_fields() {
+  void compact_receipts_upgrade_replays_of_legacy_events_without_nullable_fields()
+      throws Exception {
     try (var journal = journal(directory)) {
       measured(journal);
       var batch = journal.readBatch(100);
       store.project(journal.journalId(), batch);
-      jdbc.update(
-          """
-                    UPDATE inference_accounting_events SET event_data = jsonb_set(event_data, '{payload}',
-                        (event_data->'payload') - 'startAccountingMillis' - 'queueMillis' - 'admissionAccountingMillis')
-                    """);
+      var mapper =
+          AccountingFixtures.MAPPER
+              .copy()
+              .registerModule(new JavaTimeModule())
+              .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+      var bodies = new ArrayList<String>();
+      for (var entry : batch) bodies.add(mapper.writeValueAsString(entry.event()));
+      String sql =
+          new ClassPathResource("db/migration/V289__inference_replay_receipts.sql")
+              .getContentAsString(StandardCharsets.UTF_8);
+      new TransactionTemplate(new DataSourceTransactionManager(database))
+          .executeWithoutResult(
+              status -> {
+                jdbc.execute(
+                    "ALTER TABLE inference_accounting_events DROP COLUMN event_digest, ADD COLUMN event_data jsonb");
+                for (int i = 0; i < batch.size(); i++)
+                  jdbc.update(
+                      "UPDATE inference_accounting_events SET event_data=jsonb_strip_nulls(?::jsonb) WHERE event_id=?",
+                      bodies.get(i),
+                      batch.get(i).event().eventId());
+                jdbc.execute(
+                    "ALTER TABLE inference_accounting_events ALTER COLUMN event_data SET NOT NULL");
+                jdbc.execute("DROP FUNCTION inference_event_digest_v1(jsonb)");
+                jdbc.execute(sql);
+              });
+      assertEquals(
+          List.of(32, 32, 32, 32),
+          jdbc.queryForList(
+              "SELECT octet_length(event_digest) FROM inference_accounting_events", Integer.class));
       store.project(journal.journalId(), batch);
       assertEquals(1, count("inference_attempts"));
       assertEquals(4, store.watermark(journal.journalId()));
     }
+  }
+
+  @Test
+  void receipt_digest_keeps_jsonb_equality_for_numbers_objects_and_ordered_arrays() {
+    String compared =
+        "SELECT inference_event_digest_v1(?::jsonb) = inference_event_digest_v1(?::jsonb)";
+    String event =
+        """
+        {"amount":10.2300,"a":[null,1.00,{"x":null}],"s":"x\\" 1.00"}
+        """;
+    assertTrue(
+        jdbc.queryForObject(
+            compared,
+            Boolean.class,
+            event,
+            """
+        {"a":[null,1,{}],"s":"x\\" 1.00","discarded":null,"amount":10.23}
+        """));
+    assertFalse(
+        jdbc.queryForObject(
+            compared,
+            Boolean.class,
+            event,
+            """
+        {"a":[null,1,{}],"s":"x\\" 1.0","amount":10.23}
+        """));
+    assertFalse(
+        jdbc.queryForObject(
+            compared,
+            Boolean.class,
+            event,
+            """
+        {"a":[1,null,{}],"s":"x\\" 1.00","amount":10.23}
+        """));
   }
 
   @Test

@@ -470,7 +470,7 @@ conversation history with TODOs. The CLI accepts JSON on stdin for these reads.
 | `plowshare goal status --payload -` | Required `project` and `goal`. Use the current status version for controls. |
 | `plowshare goal receipt --payload -` | Required `project` and the original launch `requestId`. Returns the original start response. |
 
-V296 retains the latest explicit completion from newly committed dedicated
+V301 retains the latest explicit completion from newly committed dedicated
 Goal settlements. The result includes its job, turn, summary and evidence.
 Older completions without an exact retained result stay absent after upgrade.
 
@@ -490,7 +490,7 @@ its already authorized remaining allowance. Previously spent calls still count.
 Change a Goal cycle's allowance through resume. Resuming a parked goal restores
 its idle state.
 
-When upgrading from V292, the server cannot recover the exact inbox item
+When upgrading from V297, the server cannot recover the exact inbox item
 claimed by an interrupted old turn. Pending inputs for those interrupted turns
 are recorded as uncertain. Old paused rows keep their previous resume
 behavior because their storage did not distinguish a parked cycle from an

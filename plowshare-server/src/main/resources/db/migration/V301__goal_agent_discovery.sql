@@ -1,5 +1,5 @@
 -- One explicit committed completion per dedicated Goal, independent of its next cycle.
--- V295 did not retain every standing completion or exact evidence. Leave those results absent.
+-- V300 did not retain every standing completion or exact evidence. Leave those results absent.
 CREATE TABLE goal_agent_latest_results (
     goal UUID PRIMARY KEY REFERENCES conversation_goals(id) ON DELETE CASCADE,
     cycle UUID,
