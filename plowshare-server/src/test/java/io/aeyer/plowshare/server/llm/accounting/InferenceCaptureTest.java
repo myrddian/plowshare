@@ -624,6 +624,7 @@ class InferenceCaptureTest {
               io.aeyer.plowshare.server.data.DataLayout.class,
               () -> new io.aeyer.plowshare.server.data.DataLayout(directory).initialise())
           .withBean(JdbcTemplate.class, () -> jdbc)
+          .withBean(UsageScopeRepository.class, () -> new JdbcUsageScopeRepository(jdbc))
           .withBean(
               org.springframework.transaction.PlatformTransactionManager.class,
               () -> new DataSourceTransactionManager(database))

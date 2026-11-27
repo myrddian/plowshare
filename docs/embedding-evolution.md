@@ -150,8 +150,9 @@ adds permanent policy/input-bound/retry metadata and permits source-fenced
 staging for either the current serving or replacement space.
 
 Conversation and digest passages use the prose slot. Migration V291 reclaims
-their code vectors and indexes. Code search continues to use code embeddings
-in the document corpus.
+their code vectors and indexes by rewriting the passage table under an
+exclusive lock. PostgreSQL rebuilds the retained indexes during the rewrite.
+Code search continues to use code embeddings in the document corpus.
 
 Passages, document chunks and document summaries consume a staged vector in the same transaction that
 publishes it. The slot and source locks preserve the first committed result on

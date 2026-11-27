@@ -327,7 +327,9 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
             ), selected AS (
               SELECT p.*,d.store,false AS activate FROM pointers p
                 CROSS JOIN (VALUES ('memories'),('digests'),('documents'),('chunks'),('retrieval_passages')) d(store)
-                WHERE (SELECT due FROM wake) AND (EXISTS(SELECT 1 FROM embedding_repair_work w
+                WHERE (SELECT due FROM wake)
+                  AND (p.slot='prose' OR d.store<>'retrieval_passages')
+                  AND (EXISTS(SELECT 1 FROM embedding_repair_work w
                   WHERE w.slot=p.slot AND w.space_id=p.space_id AND w.store=d.store
                     AND w.available_at<=CURRENT_TIMESTAMP)
                   OR EXISTS(SELECT 1 FROM embedding_repair_scans scan

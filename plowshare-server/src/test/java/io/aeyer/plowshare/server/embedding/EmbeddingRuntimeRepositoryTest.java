@@ -1226,7 +1226,6 @@ class EmbeddingRuntimeRepositoryTest {
               return template.execute(status -> callback.get());
             }
           };
-      var legacy = new JdbcEmbeddingWorkRepository(old, transaction);
       var space =
           new JdbcEmbeddingSpaceRepository(old)
               .register(
@@ -1239,20 +1238,22 @@ class EmbeddingRuntimeRepositoryTest {
                       "cls",
                       EmbeddingSpace.Normalization.NONE,
                       "none"));
-      var profile =
-          legacy.configure(
-              EmbeddingSlot.PROSE,
-              space,
-              new EmbeddingSearchPolicy(
-                  EmbeddingSearchPolicy.Mode.EXACT, EmbeddingSearchPolicy.Distance.COSINE));
+      old.update(
+          "UPDATE embedding_slots SET target_space_id=?,target_mode='exact',target_distance='COSINE' WHERE slot='prose'",
+          space.id());
       old.update(
           "INSERT INTO memories(id,summary,scope,body,state,formed_at,formed_by,formed_where) VALUES('legacy','fixture','scope','body','active',now(),'fixture','fixture')");
-      var source =
-          legacy
-              .source(
-                  EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "legacy"))
-              .orElseThrow();
-      assertTrue(legacy.beginRepair(profile, source));
+      // Seed the V208 receipt directly. The current repository depends on later source guards.
+      assertEquals(
+          1,
+          old.update(
+              """
+              INSERT INTO memories_embedding_failures
+                  (source_id,slot,space_id,source_revision,category,retry_at)
+              SELECT id,'prose',?,embedding_source_revision,'RepairInFlight','infinity'
+              FROM memories WHERE id='legacy'
+              """,
+              space.id()));
       Flyway.configure().dataSource(ds).load().migrate();
       var row =
           old.queryForMap(
@@ -1267,7 +1268,14 @@ class EmbeddingRuntimeRepositoryTest {
           old.queryForObject(
               "SELECT retry_at='infinity'::timestamptz AND category='RepairInFlight' FROM memories_embedding_failures WHERE source_id='legacy'",
               Boolean.class));
-      assertTrue(legacy.beginRepairAttempt(profile, source).isEmpty());
+      var migrated = new JdbcEmbeddingWorkRepository(old, transaction);
+      var currentProfile = migrated.target(EmbeddingSlot.PROSE).orElseThrow();
+      var source =
+          migrated
+              .source(
+                  EmbeddingWorkRepository.Key.of(EmbeddingWorkRepository.Store.MEMORIES, "legacy"))
+              .orElseThrow();
+      assertTrue(migrated.beginRepairAttempt(currentProfile, source).isEmpty());
     } finally {
       jdbc.execute("DROP DATABASE repair_legacy WITH (FORCE)");
     }
