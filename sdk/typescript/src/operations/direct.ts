@@ -43,6 +43,7 @@ import {
 } from './retrieval.ts';
 import type { BoundPayloads } from './administration.ts';
 import type { ExtendedPayloads } from './catalog.ts';
+import type { GoalAgentListener, GoalAgentSources } from './replies.ts';
 import { containedRunningCheck } from './application-deployments.ts';
 import type { Outcome } from '../binding/envelope.ts';
 
@@ -235,7 +236,19 @@ function isGoalRequest(
   return GOAL_OPERATIONS.some((operation) => operation === request.type);
 }
 
+const DEDICATED_GOAL_OPERATIONS = [
+  'goal.answer',
+  'goal.list',
+  'goal.status',
+  'goal.receipt',
+  'goal.start',
+  'goal.sources',
+  'message.listen',
+  'message.unlisten',
+] as const;
+
 export const VALIDATED_OPERATIONS: readonly Operation[] = [
+  ...DEDICATED_GOAL_OPERATIONS,
   'proc.list',
   'proc.inspect',
   'proc.calls',
@@ -327,6 +340,7 @@ export async function dispatch(
     'conversation.list',
     'conversation.latest',
     'orchestration.start',
+    ...DEDICATED_GOAL_OPERATIONS,
     ...GOAL_OPERATIONS,
   ].includes(asked.type)
     ? decodeRequest(asked.type, asked.payload)
@@ -341,6 +355,95 @@ export async function dispatch(
 
 /** The same checked boundary for frontends that already own request lifetime and WS I/O. */
 export function resultOf(asked: Request, outcome: Outcome): Result {
+  if (
+    asked.type === 'goal.list' ||
+    asked.type === 'goal.status' ||
+    asked.type === 'goal.receipt'
+  ) {
+    if (outcome.code !== 'OK')
+      return {
+        kind: ['CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)
+          ? 'invalid-response'
+          : 'refused',
+        outcome,
+      };
+    try {
+      let matches: boolean;
+      if (asked.type === 'goal.list') {
+        const page = decodeReply('goal.list', outcome.payload);
+        const { project, after, limit = 20 } = asked.payload;
+        matches =
+          page.goals.length <= limit &&
+          page.goals.every(
+            (row) =>
+              row.project === project && row.goal !== after?.toLowerCase(),
+          );
+      } else if (asked.type === 'goal.status') {
+        const status = decodeReply('goal.status', outcome.payload);
+        matches =
+          status.project === asked.payload.project &&
+          status.goal === asked.payload.goal.toLowerCase();
+      } else {
+        matches =
+          decodeReply('goal.receipt', outcome.payload).requestId ===
+          asked.payload.requestId.toLowerCase();
+      }
+      return { kind: matches ? 'completed' : 'invalid-response', outcome };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
+  if (
+    asked.type === 'goal.answer' ||
+    asked.type === 'goal.start' ||
+    asked.type === 'goal.sources' ||
+    asked.type === 'message.listen' ||
+    asked.type === 'message.unlisten'
+  ) {
+    if (outcome.code !== 'OK')
+      return {
+        kind: ['CREATED', 'ACCEPTED', 'NO_CONTENT'].includes(outcome.code)
+          ? 'invalid-response'
+          : 'refused',
+        outcome,
+      };
+    try {
+      if (asked.type === 'goal.answer') {
+        const receipt = decodeReply(asked.type, outcome.payload);
+        const matches =
+          receipt.goal === asked.payload.goal.toLowerCase() &&
+          receipt.conversation === asked.payload.conversation &&
+          receipt.question === asked.payload.question.toLowerCase() &&
+          receipt.requestId === asked.payload.requestId.toLowerCase();
+        return { kind: matches ? 'completed' : 'invalid-response', outcome };
+      }
+      if (asked.type === 'message.unlisten') {
+        const receipt = decodeReply(asked.type, outcome.payload);
+        const matches =
+          receipt.goal === asked.payload.goal.toLowerCase() &&
+          receipt.binding === asked.payload.binding.toLowerCase() &&
+          receipt.requestId === asked.payload.requestId.toLowerCase() &&
+          receipt.version === asked.payload.version + 1;
+        return { kind: matches ? 'completed' : 'invalid-response', outcome };
+      }
+      const matches =
+        asked.type === 'goal.start'
+          ? decodeReply('goal.start', outcome.payload).requestId ===
+            asked.payload.requestId.toLowerCase()
+          : asked.type === 'goal.sources'
+            ? matchesGoalSources(
+                decodeReply('goal.sources', outcome.payload),
+                asked.payload,
+              )
+            : matchesGoalListener(
+                decodeReply('message.listen', outcome.payload),
+                asked.payload,
+              );
+      return { kind: matches ? 'completed' : 'invalid-response', outcome };
+    } catch {
+      return { kind: 'invalid-response', outcome };
+    }
+  }
   if (isGoalRequest(asked)) {
     if (outcome.code !== 'OK')
       return {
@@ -944,4 +1047,30 @@ export async function waitForOrchestration(
         return { ...result, kind: 'invalid-response', orchestration: id };
     }
   }
+}
+
+function matchesGoalSources(
+  reply: GoalAgentSources,
+  request: Payloads['goal.sources'],
+): boolean {
+  return (
+    reply.goal === request.goal.toLowerCase() &&
+    reply.sources.length <= (request.limit ?? 100) &&
+    reply.sources.every(
+      (source) =>
+        source.kind === (request.kind ?? 'TEXT') &&
+        (request.prefix == null || source.topic.startsWith(request.prefix)),
+    )
+  );
+}
+
+function matchesGoalListener(
+  reply: GoalAgentListener,
+  request: Payloads['message.listen'],
+): boolean {
+  return (
+    reply.goal === request.goal.toLowerCase() &&
+    reply.topic === request.topic &&
+    reply.generation === request.generation.toLowerCase()
+  );
 }

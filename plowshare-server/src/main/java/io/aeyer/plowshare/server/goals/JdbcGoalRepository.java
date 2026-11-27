@@ -13,6 +13,9 @@ import io.aeyer.plowshare.server.pool.SqlWorkBudget;
 import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +24,7 @@ import java.util.function.Supplier;
 import org.springframework.dao.NonTransientDataAccessResourceException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.SqlArrayValue;
 import org.springframework.transaction.CannotCreateTransactionException;
 
 final class JdbcGoalRepository implements GoalRepository {
@@ -30,9 +34,8 @@ final class JdbcGoalRepository implements GoalRepository {
 UPDATE conversation_goals
 SET state=?, activations=?, activation_limit=?, job=?, last_job=?, last_turn=?, reason=?, detail=?,
     no_progress=?, answer_digest=?, version=version+1
-WHERE id=? AND version=?
-RETURNING *
 """;
+  private static final String VERSION = " WHERE id=? AND version=? RETURNING *";
 
   private final JdbcTemplate jdbc;
   private final UnitOfWork transactions;
@@ -63,6 +66,11 @@ RETURNING *
   @Override
   public Optional<Goal> find(UUID id) {
     return bounded(() -> select("SELECT * FROM conversation_goals WHERE id=?", id));
+  }
+
+  @Override
+  public Optional<Goal> lock(UUID id) {
+    return bounded(() -> select("SELECT * FROM conversation_goals WHERE id=? FOR UPDATE", id));
   }
 
   @Override
@@ -156,13 +164,19 @@ ON CONFLICT (executor,request) DO NOTHING
 
   @Override
   public Goal insert(Binding binding, int limit) {
+    return insertDedicated(binding, limit, null);
+  }
+
+  @Override
+  public Goal insertDedicated(Binding binding, int limit, Cycle initial) {
     return bounded(
         () ->
             select(
                     """
 INSERT INTO conversation_goals
-    (id,conversation,admission,executor,agent,fingerprint,allowance,objective,criteria,activation_limit)
-VALUES (?,?,?,?,?,?,?,?,?,?)
+    (id,conversation,admission,executor,agent,fingerprint,allowance,objective,criteria,
+     activation_limit,instance,calling_agent,calling_conversation,cycle,cycle_start_spent,cycle_calls)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT DO NOTHING RETURNING *
 """,
                     binding.id(),
@@ -174,7 +188,13 @@ ON CONFLICT DO NOTHING RETURNING *
                     binding.allowance(),
                     binding.objective(),
                     binding.criteria(),
-                    limit)
+                    limit,
+                    binding.instance(),
+                    binding.callingAgent(),
+                    binding.callingConversation(),
+                    initial == null ? null : initial.id(),
+                    initial == null ? null : initial.startSpent(),
+                    initial == null ? null : initial.maxCalls())
                 .orElseThrow(
                     () -> new Refused("This conversation already has an unfinished goal")));
   }
@@ -185,7 +205,35 @@ ON CONFLICT DO NOTHING RETURNING *
   }
 
   @Override
-  public void settle(UUID id, String job, Runnable writeTurn, Function<Goal, Progress> next) {
+  public Optional<Goal> claim(Goal before, Progress running, Cycle cycle, Instant automaticAt) {
+    return bounded(
+        () ->
+            select(
+                UPDATE
+                    + """
+        ,cycle=?,cycle_start_spent=?,cycle_calls=?,last_automatic_at=COALESCE(?,last_automatic_at)
+        """
+                    + VERSION,
+                running.state().name(),
+                running.activations(),
+                running.limit(),
+                running.job(),
+                running.lastJob(),
+                running.lastTurn(),
+                null,
+                null,
+                running.noProgress(),
+                running.answerDigest(),
+                cycle.id(),
+                cycle.startSpent(),
+                cycle.maxCalls(),
+                automaticAt == null ? null : OffsetDateTime.ofInstant(automaticAt, ZoneOffset.UTC),
+                before.binding().id(),
+                before.version()));
+  }
+
+  @Override
+  public void settle(UUID id, String job, Runnable writeTurn, Function<Goal, Settlement> next) {
     bounded(
         () ->
             transactions.inTransaction(
@@ -196,8 +244,28 @@ ON CONFLICT DO NOTHING RETURNING *
                           .orElseThrow(
                               () -> new IllegalStateException("The goal no longer owns this turn"));
                   writeTurn.run();
-                  return update(current, next.apply(current)).orElseThrow();
+                  var settlement = next.apply(current);
+                  var updated = update(current, settlement.progress()).orElseThrow();
+                  if (settlement.completion() != null)
+                    retainResult(current, settlement.completion());
+                  return updated;
                 }));
+  }
+
+  private void retainResult(Goal current, GoalAgents.Result result) {
+    jdbc.update(
+        """
+        INSERT INTO goal_agent_latest_results(goal,cycle,job,turn,summary,evidence)
+        VALUES (?,?,?,?,?,?)
+        ON CONFLICT (goal) DO UPDATE SET cycle=EXCLUDED.cycle,job=EXCLUDED.job,
+          turn=EXCLUDED.turn,summary=EXCLUDED.summary,evidence=EXCLUDED.evidence
+        """,
+        current.binding().id(),
+        current.cycle() == null ? null : current.cycle().id(),
+        result.job(),
+        result.turn(),
+        result.summary(),
+        new SqlArrayValue("text", result.evidence().toArray()));
   }
 
   @Override
@@ -206,9 +274,14 @@ ON CONFLICT DO NOTHING RETURNING *
         () ->
             jdbc.query(
                 """
-                SELECT * FROM conversation_goals
-                WHERE state IN ('READY','RUNNING','PAUSING','STOPPING')
-                  AND id>? ORDER BY id LIMIT ?
+                SELECT g.* FROM conversation_goals g
+                WHERE (g.state IN ('READY','RUNNING','WAITING','PAUSING','STOPPING')
+                  OR (g.state='IDLE' AND EXISTS (SELECT 1
+                """
+                    + JdbcGoalAgentStore.READY_INPUTS
+                    + """
+                    AND i.goal=g.id)))
+                  AND g.id>? ORDER BY g.id LIMIT ?
                 """,
                 ROW,
                 after,
@@ -217,7 +290,7 @@ ON CONFLICT DO NOTHING RETURNING *
 
   private Optional<Goal> update(Goal goal, Progress progress) {
     return select(
-        UPDATE,
+        UPDATE + VERSION,
         progress.state().name(),
         progress.activations(),
         progress.limit(),
@@ -259,7 +332,10 @@ ON CONFLICT DO NOTHING RETURNING *
             row.getString("fingerprint"),
             row.getObject("allowance", UUID.class),
             row.getString("objective"),
-            row.getString("criteria"));
+            row.getString("criteria"),
+            row.getString("instance"),
+            row.getString("calling_agent"),
+            row.getString("calling_conversation"));
     var reason = row.getString("reason");
     var progress =
         new Progress(
@@ -273,7 +349,18 @@ ON CONFLICT DO NOTHING RETURNING *
             row.getString("detail"),
             row.getInt("no_progress"),
             row.getString("answer_digest"));
-    return new Goal(binding, row.getInt("version"), progress);
+    UUID cycleId = row.getObject("cycle", UUID.class);
+    var cycle =
+        cycleId == null
+            ? null
+            : new Cycle(cycleId, row.getInt("cycle_start_spent"), row.getInt("cycle_calls"));
+    var automaticAt = row.getObject("last_automatic_at", OffsetDateTime.class);
+    return new Goal(
+        binding,
+        row.getInt("version"),
+        progress,
+        cycle,
+        automaticAt == null ? null : automaticAt.toInstant());
   }
 
   private static String encode(Status status) {

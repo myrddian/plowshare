@@ -1,34 +1,47 @@
 package io.aeyer.plowshare.server.agents;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 /** Durable accepted skill instructions. An ambiguous invocation is inspected, never replayed. */
 public final class JdbcSkillExecutionsRepository implements SkillExecutions {
   private final JdbcTemplate jdbc;
 
   public JdbcSkillExecutionsRepository(JdbcTemplate jdbc) {
-    this.jdbc = java.util.Objects.requireNonNull(jdbc, "jdbc");
+    this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
-  private static final org.springframework.jdbc.core.RowMapper<Execution> ROW =
-      (rs, n) ->
-          new Execution(
-              rs.getString("account_handle"),
-              rs.getObject("invocation", UUID.class),
-              rs.getString("payload"),
-              rs.getString("parent_conversation"),
-              rs.getString("conversation"),
-              rs.getString("executor"),
-              SkillDefinition.parse(
-                  new DefinitionSource.Definition(
-                      rs.getString("skill"), rs.getString("origin"), rs.getString("source")),
-                  OrchestrationDefinition.Tier.valueOf(rs.getString("tier"))),
-              SkillDefinition.Mode.valueOf(rs.getString("mode")),
-              rs.getString("state"),
-              rs.getString("result"));
+  private static final RowMapper<Execution> ROW =
+      (rs, n) -> {
+        var operation = rs.getObject("handoff_operation", UUID.class);
+        var handoff =
+            operation == null
+                ? null
+                : new Handoff(
+                    operation,
+                    rs.getString("handoff_capabilities"),
+                    rs.getBoolean("handoff_human"),
+                    rs.getString("handoff_message"));
+        return new Execution(
+            rs.getString("account_handle"),
+            rs.getObject("invocation", UUID.class),
+            rs.getString("payload"),
+            rs.getString("parent_conversation"),
+            rs.getString("conversation"),
+            rs.getString("executor"),
+            SkillDefinition.parse(
+                new DefinitionSource.Definition(
+                    rs.getString("skill"), rs.getString("origin"), rs.getString("source")),
+                OrchestrationDefinition.Tier.valueOf(rs.getString("tier"))),
+            SkillDefinition.Mode.valueOf(rs.getString("mode")),
+            rs.getString("state"),
+            rs.getString("result"),
+            handoff);
+      };
 
   public Optional<Execution> find(String account, UUID invocation) {
     return jdbc
@@ -50,12 +63,46 @@ public final class JdbcSkillExecutionsRepository implements SkillExecutions {
       String executor,
       SkillDefinition skill,
       SkillDefinition.Mode mode) {
-    new Execution(account, id, payload, parent, null, executor, skill, mode, "claimed", null);
+    return insert(account, id, payload, parent, executor, skill, mode, null);
+  }
+
+  @Override
+  public boolean claimHandoff(
+      String account,
+      UUID id,
+      String payload,
+      String parent,
+      String executor,
+      SkillDefinition skill,
+      Handoff handoff) {
+    return insert(
+        account,
+        id,
+        payload,
+        parent,
+        executor,
+        skill,
+        SkillDefinition.Mode.DIRECT,
+        Objects.requireNonNull(handoff));
+  }
+
+  private boolean insert(
+      String account,
+      UUID id,
+      String payload,
+      String parent,
+      String executor,
+      SkillDefinition skill,
+      SkillDefinition.Mode mode,
+      Handoff handoff) {
+    new Execution(
+        account, id, payload, parent, null, executor, skill, mode, "claimed", null, handoff);
     return jdbc.update(
             """
                 INSERT INTO skill_executions(account_handle, invocation, payload, parent_conversation,
-                    executor, skill, source, origin, tier, mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    executor, skill, source, origin, tier, mode, handoff_operation, handoff_capabilities,
+                    handoff_human, handoff_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (account_handle, invocation) DO NOTHING
                 """,
             account,
@@ -67,7 +114,11 @@ public final class JdbcSkillExecutionsRepository implements SkillExecutions {
             skill.source(),
             skill.origin(),
             skill.tier().name(),
-            mode.name())
+            mode.name(),
+            handoff == null ? null : handoff.operation(),
+            handoff == null ? null : handoff.capabilities(),
+            handoff != null && handoff.human(),
+            handoff == null ? null : handoff.message())
         == 1;
   }
 

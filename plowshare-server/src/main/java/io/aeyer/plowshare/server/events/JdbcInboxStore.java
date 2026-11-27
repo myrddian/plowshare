@@ -2,6 +2,9 @@ package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.MemoryIds;
 import io.aeyer.plowshare.server.information.*;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -9,8 +12,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -39,12 +45,18 @@ public class JdbcInboxStore implements InboxStore {
   private static final String UNREAD =
       " AND application_project_id IS NULL AND read_at IS NULL AND settled_at IS NULL";
 
+  private static final String HUMAN_GOAL_NOTICES =
+      "'goal.result','goal.question','goal.blocked','goal.cancelled'";
+
   private static final String SINCE_LAST_TURN =
       """
             FROM user_inbox i, conversations c
              WHERE i.application_project_id IS NULL AND i.handle = ? AND i.read_at IS NULL AND i.settled_at IS NULL AND c.id = ?
                AND i.arrived_at > COALESCE(c.last_turn_at, c.created_at)
-            """;
+            """
+          + " AND i.kind NOT IN ("
+          + HUMAN_GOAL_NOTICES
+          + ")";
 
   private final JdbcTemplate jdbc;
   private InformationLogVisibility visibility = InformationLogVisibility.direct();
@@ -356,6 +368,90 @@ public class JdbcInboxStore implements InboxStore {
         == 1;
   }
 
+  @Override
+  public GoalNotice goalNotice(
+      String account,
+      UUID goal,
+      String conversation,
+      UUID intent,
+      GoalInbox.Kind kind,
+      Instant at) {
+    if (information != null) information.requireLog(conversation, account);
+    String id = goalNoticeId(account, goal, intent);
+    String inboxKind =
+        switch (kind) {
+          case RESULT -> "goal.result";
+          case QUESTION -> "goal.question";
+          case BLOCKED -> "goal.blocked";
+          case CANCELLED -> "goal.cancelled";
+        };
+    String text =
+        switch (kind) {
+              case RESULT -> "A Goal result is available.";
+              case QUESTION -> "A Goal is waiting for your answer.";
+              case BLOCKED -> "A Goal is blocked.";
+              case CANCELLED -> "A Goal was cancelled.";
+            }
+            + " Open the Goal conversation for details. Goal "
+            + goal
+            + ".";
+    String about = kind == GoalInbox.Kind.QUESTION ? "goal-question:" + goal + ":" + intent : null;
+    int inserted =
+        jdbc.update(
+            "INSERT INTO user_inbox(id,handle,kind,answer,conversation,about,arrived_at)"
+                + " VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+            id,
+            account,
+            inboxKind,
+            text,
+            conversation,
+            about,
+            Timestamp.from(at));
+    if (inserted == 0
+        && !Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM user_inbox WHERE id=? AND handle=? AND kind=?"
+                    + " AND conversation=? AND about IS NOT DISTINCT FROM ? AND application_project_id IS NULL)",
+                Boolean.class,
+                id,
+                account,
+                inboxKind,
+                conversation,
+                about))) {
+      throw new IllegalStateException("Goal notice identity was used for a different intent");
+    }
+    return new GoalNotice(id, inserted == 1);
+  }
+
+  @Override
+  public boolean settleGoalQuestion(String account, UUID goal, UUID intent, Instant at) {
+    return jdbc.update(
+            "UPDATE user_inbox SET settled_at=? WHERE id=? AND handle=? AND kind='goal.question'"
+                + " AND about=? AND application_project_id IS NULL AND settled_at IS NULL",
+            Timestamp.from(at),
+            goalNoticeId(account, goal, intent),
+            account,
+            "goal-question:" + goal + ":" + intent)
+        == 1;
+  }
+
+  private static String goalNoticeId(String account, UUID goal, UUID intent) {
+    Objects.requireNonNull(account);
+    Objects.requireNonNull(goal);
+    Objects.requireNonNull(intent);
+    try {
+      var sha256 = MessageDigest.getInstance("SHA-256");
+      return PREFIX
+          + HexFormat.of()
+              .formatHex(
+                  sha256.digest(
+                      ("goal-return:" + account + "\0" + goal + ":" + intent)
+                          .getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
+  }
+
   /** Settles all notices about a decision and returns the accounts whose Inbox counts changed. */
   public List<String> settle(String about, Instant at) {
     return jdbc.queryForList(
@@ -391,7 +487,7 @@ public class JdbcInboxStore implements InboxStore {
                   + " FROM user_inbox WHERE application_project_id IS NULL AND handle=? AND settled_at IS NULL"
                   + filter
                   + (unreadOnly ? " AND read_at IS NULL" : "")
-                  + (ordinaryOnly ? " AND kind<>'approval'" : "")
+                  + (ordinaryOnly ? " AND kind NOT IN ('approval'," + HUMAN_GOAL_NOTICES + ")" : "")
                   + " ORDER BY arrived_at DESC,id DESC OFFSET ? LIMIT ?",
               JdbcInboxStore::row,
               args.toArray());

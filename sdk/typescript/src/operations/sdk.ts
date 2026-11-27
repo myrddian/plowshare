@@ -95,8 +95,22 @@ export type {
   ExternalConversationLocator,
   ConversationOpenRequestEx,
   AgentRunRequestEx,
+  GoalAnswerRequest,
+  GoalListRequest,
+  GoalStatusRequest,
+  GoalReceiptRequest,
 } from './catalog.ts';
-export type { Replies } from './replies.ts';
+export type {
+  GoalAnswerReceipt,
+  GoalAgentStarted,
+  GoalPage,
+  GoalStatus,
+  GoalResult,
+  GoalScheduleWake,
+  GoalRelayWake,
+  GoalPendingBatch,
+  Replies,
+} from './replies.ts';
 export type {
   ToolEffectReceiptView,
   ToolCallTrace,

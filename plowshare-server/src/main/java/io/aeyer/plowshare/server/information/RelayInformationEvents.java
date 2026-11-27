@@ -6,6 +6,8 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumption;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -122,7 +124,11 @@ public final class RelayInformationEvents implements InformationEvents {
     // The general message, not a family of this subsystem's own. Relay stores the notice opaquely
     // and never interprets it; the structure a subscriber needs is encoded by
     // InformationEventCodec here and decoded by it on the read path below.
-    relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    relay.registerOwnedTopic(
+        topic,
+        RelayPayload.Kind.TEXT,
+        Relay.Policy.systemDefault(),
+        RelayTopicOwnership.internal(Owner.INFORMATION));
     var payload =
         new RelayPayload.Text(
             InformationEventCodec.write(

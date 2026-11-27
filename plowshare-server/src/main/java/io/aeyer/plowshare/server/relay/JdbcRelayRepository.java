@@ -82,49 +82,104 @@ public final class JdbcRelayRepository implements RelayRepository {
   @Override
   public Relay.Topic configureTopic(
       Relay.TopicKey key, RelayPayload.Kind kind, Relay.Policy policy) {
-    return register(key, kind, policy, true);
+    return register(key, kind, policy, Optional.empty(), true);
   }
 
   @Override
   public Relay.Topic registerTopic(
       Relay.TopicKey key, RelayPayload.Kind kind, Relay.Policy initialPolicy) {
-    return register(key, kind, initialPolicy, false);
+    return register(key, kind, initialPolicy, Optional.empty(), false);
+  }
+
+  @Override
+  public Relay.Topic registerOwnedTopic(
+      Relay.TopicKey key,
+      RelayPayload.Kind kind,
+      Relay.Policy policy,
+      RelayTopicOwnership ownership,
+      boolean replacePolicy) {
+    Objects.requireNonNull(ownership).requireSubsystem(kind);
+    return register(key, kind, policy, Optional.of(ownership), replacePolicy);
   }
 
   private Relay.Topic register(
-      Relay.TopicKey key, RelayPayload.Kind kind, Relay.Policy policy, boolean replacePolicy) {
+      Relay.TopicKey key,
+      RelayPayload.Kind kind,
+      Relay.Policy policy,
+      Optional<RelayTopicOwnership> declaration,
+      boolean replacePolicy) {
     var requested = new Relay.Topic(key, kind, policy, 0, 0);
+    var scope = RelayScopeCodec.write(key);
+    var ownership = declaration.orElseGet(() -> RelayTopicOwnership.ordinary(key, kind));
     return transactions.inTransaction(
         () -> {
           var inserted =
               jdbc.query(
                   """
-          INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds,max_records)
-          VALUES(?,?,?,?,?,?) ON CONFLICT(scope_key,name) DO NOTHING
-          """
+                  INSERT INTO relay_topics(scope_key,project_id,name,payload_kind,retention_seconds,
+                      max_records,topic_owner,goal_feed)
+                  VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(scope_key,name) DO NOTHING
+                  """
                       + " RETURNING "
                       + TOPIC_COLUMNS,
                   JdbcRelayRepository::topicRow,
-                  RelayScopeCodec.write(key),
+                  scope,
                   RelayScopeCodec.project(key),
                   key.name(),
                   requested.kind().name(),
                   policy.retention().getSeconds(),
-                  policy.maxRecords());
-          Relay.Topic existing = inserted.isEmpty() ? topic(key, true) : inserted.getFirst();
+                  policy.maxRecords(),
+                  ownership.owner().name(),
+                  ownership.goalFeed());
+          if (!inserted.isEmpty()) return inserted.getFirst();
+
+          // A competing owner sees the committed classification under the same lock as policy
+          // changes. Neutral ensure calls can still use an existing topic under their own rules.
+          var retained =
+              jdbc
+                  .query(
+                      "SELECT "
+                          + TOPIC_COLUMNS
+                          + ",topic_owner,goal_feed FROM relay_topics"
+                          + " WHERE scope_key=? AND name=? FOR UPDATE",
+                      (row, index) ->
+                          new RegisteredTopic(
+                              topicRow(row, index), JdbcRelayTopicRegistry.ownership(row)),
+                      scope,
+                      key.name())
+                  .stream()
+                  .findFirst()
+                  .orElseThrow(() -> new RelayTopicMissingException());
+          Relay.Topic existing = retained.topic();
           if (existing.kind() != kind)
             throw new IllegalArgumentException(
                 "an existing Relay topic cannot change payload family");
+          if (declaration.isPresent() && !ownership.equals(retained.ownership())) {
+            // A verified owner can classify a legacy topic as internal. Enabling discovery
+            // requires a fresh generation without ambiguous historical publications.
+            if (!retained.ownership().equals(RelayTopicOwnership.UNCLASSIFIED)
+                || ownership.goalFeed())
+              throw new IllegalArgumentException(
+                  "Relay topic already has a different ownership declaration");
+            changed(
+                jdbc.update(
+                    "UPDATE relay_topics SET topic_owner=? WHERE scope_key=? AND name=?",
+                    ownership.owner().name(),
+                    scope,
+                    key.name()));
+          }
           if (!replacePolicy || existing.policy().equals(policy)) return existing;
           changed(
               jdbc.update(
                   """
-          UPDATE relay_topics SET retention_seconds=?,max_records=?,prune_at=oldest_published_at+? * interval '1 second' WHERE scope_key=? AND name=?
-          """,
+                  UPDATE relay_topics SET retention_seconds=?,max_records=?,
+                      prune_at=oldest_published_at+? * interval '1 second'
+                  WHERE scope_key=? AND name=?
+                  """,
                   policy.retention().getSeconds(),
                   policy.maxRecords(),
                   policy.retention().getSeconds(),
-                  RelayScopeCodec.write(key),
+                  scope,
                   key.name()));
           return new Relay.Topic(
               key,
@@ -135,6 +190,8 @@ public final class JdbcRelayRepository implements RelayRepository {
               existing.generation());
         });
   }
+
+  private record RegisteredTopic(Relay.Topic topic, RelayTopicOwnership ownership) {}
 
   @Override
   public Relay.Publication append(Relay.TopicKey key, Relay.Draft draft, Instant publishedAt) {
@@ -724,7 +781,7 @@ public final class JdbcRelayRepository implements RelayRepository {
             key.subscriber())
         .stream()
         .findFirst()
-        .orElseThrow(() -> new IllegalStateException("Relay subscription does not exist"));
+        .orElseThrow(Relay.SubscriptionUnavailable::new);
   }
 
   private Relay.Subscription move(Relay.Subscription previous, long position, Instant seenAt) {

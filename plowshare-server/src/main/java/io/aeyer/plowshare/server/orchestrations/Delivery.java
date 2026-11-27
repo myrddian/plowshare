@@ -474,12 +474,7 @@ public final class Delivery implements DeliveryPort, ChildCompletionDelivery {
     deliver(
         "ending:" + child,
         RESULT,
-        () ->
-            store
-                .find(child)
-                .filter(run -> Objects.equals(parent, run.parent()))
-                .filter(run -> endedAt != null && endedAt.equals(run.endedAt()))
-                .filter(run -> run.state().terminal() && run.resultDeliveredAt() == null),
+        () -> endedAt == null ? Optional.empty() : store.undeliveredEnding(child, parent, endedAt),
         Utterances::endingForCaller,
         () -> store.resultDelivered(child, endedAt),
         null,

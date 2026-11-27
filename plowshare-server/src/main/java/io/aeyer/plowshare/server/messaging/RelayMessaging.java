@@ -29,6 +29,7 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.events.EventPayload;
 import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.FiringRecord.GoalSchedule;
 import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.NotFoundFault;
@@ -61,6 +62,18 @@ import org.slf4j.LoggerFactory;
  */
 public final class RelayMessaging implements MessageService {
   private static final Logger LOG = LoggerFactory.getLogger(RelayMessaging.class);
+
+  private GoalMessageInbox goalInbox = GoalMessageInbox.NONE;
+  private UnitOfWork goalScheduleTransactions;
+
+  public void useGoalInbox(GoalMessageInbox inbox) {
+    goalInbox = Objects.requireNonNull(inbox);
+  }
+
+  /** The Goal admission joins this SQL unit and rechecks retained grants before commit. */
+  public void useGoalScheduleTransactions(UnitOfWork transactions) {
+    goalScheduleTransactions = Objects.requireNonNull(transactions);
+  }
 
   private Routing routing =
       new Routing() {
@@ -175,6 +188,7 @@ public final class RelayMessaging implements MessageService {
     this.firings = firings;
     this.inboxes = Objects.requireNonNull(inboxes);
     this.work = work;
+    this.goalScheduleTransactions = work;
     this.voice = voice;
     this.definitions = definitions;
     this.drain = drain;
@@ -406,11 +420,14 @@ public final class RelayMessaging implements MessageService {
   public MessageIngress.Task receive(String account, MessageIngress.Request request) {
     if (PERSONAL_ALERT_CHANNEL.equals(request.channel()))
       throw new MessageRefused("This messaging channel is reserved for Personal alerts.");
-    return receive(account, request, null, null);
+    if (GOAL_SCHEDULE_CHANNEL.equals(request.channel()))
+      throw new MessageRefused("This messaging channel is reserved for Goal schedules.");
+    return receive(account, request, null, null, null);
   }
 
   // The colon keeps it outside the public Relay namespace grammar.
   private static final String PERSONAL_ALERT_CHANNEL = "system:personal-alert";
+  private static final String GOAL_SCHEDULE_CHANNEL = "system:goal-schedule";
 
   @Override
   public void requirePersonalAlertRoute(String account, String route) {
@@ -443,7 +460,8 @@ public final class RelayMessaging implements MessageService {
             account,
             request,
             new ScheduledWork.Target("message", null, null, null, route),
-            new AlertDestination(address, reference))
+            new AlertDestination(address, reference),
+            null)
         .message();
   }
 
@@ -489,6 +507,11 @@ public final class RelayMessaging implements MessageService {
     return address;
   }
 
+  @Override
+  public boolean goalScheduleTarget(Instance instance) {
+    return goalInbox.scheduleTarget(instance);
+  }
+
   /** An authenticated schedule uses the same private transport, route checks and command wake. */
   public MessageIngress.Task receiveScheduled(
       String account,
@@ -496,15 +519,43 @@ public final class RelayMessaging implements MessageService {
       String schedule,
       String firing,
       ScheduledWork definition) {
+    return receiveScheduled(account, sourceProject, schedule, firing, definition, null);
+  }
+
+  @Override
+  public MessageIngress.Task receiveGoalSchedule(
+      String account, String sourceProject, GoalSchedule firing, ScheduledWork definition) {
+    var target = definition.target();
+    if (!target.kind().equals("message")
+        || target.to() == null
+        || !target.to().startsWith("ins_")
+        || target.route() != null
+        || target.project() != null && !target.project().equals(sourceProject)
+        || !definition.action().kind().equals("agent"))
+      throw new MessageRefused("The Goal schedule destination changed");
+    return receiveScheduled(
+        account, sourceProject, firing.schedule(), firing.firing(), definition, firing);
+  }
+
+  private MessageIngress.Task receiveScheduled(
+      String account,
+      String sourceProject,
+      String schedule,
+      String firing,
+      ScheduledWork definition,
+      GoalSchedule goalSchedule) {
     var target = definition.target();
     String identity = schedule + "\n" + target + "\n" + definition.action().agent();
     String client = "schedule-" + UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
+    // Preserve existing legacy context identities. Goal tasks use a distinct namespace even
+    // when their source, destination and instruction match a pre-upgrade legacy schedule.
     var context =
-        UUID.nameUUIDFromBytes((account + "\n" + client).getBytes(StandardCharsets.UTF_8));
+        stableUuid(
+            account + "\n" + client + (goalSchedule == null ? "" : "\n" + GOAL_SCHEDULE_CHANNEL));
     var request =
         new MessageIngress.Request(
             sourceProject,
-            MessageIngress.LEGACY_CHANNEL,
+            goalSchedule == null ? MessageIngress.LEGACY_CHANNEL : GOAL_SCHEDULE_CHANNEL,
             client,
             definition.action().agent(),
             UUID.nameUUIDFromBytes(firing.getBytes(StandardCharsets.UTF_8)),
@@ -513,14 +564,15 @@ public final class RelayMessaging implements MessageService {
             definition.action().command(),
             null,
             RelayCausation.root("schedule-firing:" + RelayPort.hash(account + "\n" + firing)));
-    return receive(account, request, target, null);
+    return receive(account, request, target, null, goalSchedule);
   }
 
   private MessageIngress.Task receive(
       String account,
       MessageIngress.Request request,
       ScheduledWork.Target scheduled,
-      AlertDestination alert) {
+      AlertDestination alert,
+      GoalSchedule goalSchedule) {
     if (request.requestId() == null
         || request.project() == null
         || request.project().isBlank()
@@ -544,7 +596,8 @@ public final class RelayMessaging implements MessageService {
     String encoded = MessageToolCodec.source(source);
     if (encoded.getBytes(StandardCharsets.UTF_8).length > 128 * 1024)
       throw new MessageRefused("Incoming source exceeds 128 KiB.");
-    return work.inTransaction(
+    var transactions = goalSchedule == null ? work : goalScheduleTransactions;
+    return transactions.inTransaction(
         () -> {
           lock("mailbox:" + account);
           lock(
@@ -578,10 +631,11 @@ public final class RelayMessaging implements MessageService {
                   : repository.externalContext(context, account, request).stream().toList();
           if (context == null || (scheduled != null && contexts.isEmpty())) {
             if (context == null) context = UUID.randomUUID();
-            AgentDefinition definition;
-            if (scheduled == null)
-              definition = definitions.resolve(request.agent(), request.project());
-            else {
+            if (scheduled == null) {
+              var definition = definitions.resolve(request.agent(), request.project());
+              sender = passiveSender(account, request, definition);
+              recipient = create(account, request.project(), definition, "persistent", false, null);
+            } else {
               var address =
                   routing.resolve(
                       account,
@@ -589,17 +643,18 @@ public final class RelayMessaging implements MessageService {
                       scheduled.project(),
                       scheduled.to(),
                       scheduled.route());
-              String targetProject = address.project();
-              if (address.to().startsWith("ins_"))
-                targetProject = owned(address.to(), account).project();
-              routing.require(account, request.project(), targetProject);
-              definition = definitions.resolve(request.agent(), targetProject);
+              recipient =
+                  destination(
+                          ingressTarget(request, scheduled, true),
+                          account,
+                          request.project(),
+                          address)
+                      .instance();
+              requireScheduledGoalEvidence(recipient, goalSchedule);
+              sender =
+                  passiveSender(
+                      account, request, definitions.resolve(request.agent(), recipient.project()));
             }
-            sender = passiveSender(account, request, definition);
-            recipient =
-                scheduled == null
-                    ? create(account, request.project(), definition, "persistent", false, null)
-                    : destination(ingressTarget(request, scheduled, true), sender).instance();
             if (!recipient.agent().equals(request.agent()))
               throw new MessageRefused("Scheduled action does not match its recipient");
             repository.insertExternalContext(
@@ -613,10 +668,16 @@ public final class RelayMessaging implements MessageService {
               var current = destination(ingressTarget(request, scheduled, true), sender).instance();
               if (!current.id().equals(recipient.id()))
                 throw new MessageRefused("The schedule route changed its retained destination");
+              requireScheduledGoalEvidence(recipient, goalSchedule);
             }
           }
-          return enqueueIngress(account, request, context, sender, recipient, null);
+          return enqueueIngress(account, request, context, sender, recipient, null, goalSchedule);
         });
+  }
+
+  private void requireScheduledGoalEvidence(Instance recipient, GoalSchedule firing) {
+    if (firing == null && goalInbox.owns(recipient.id()))
+      throw new MessageRefused("A Goal wake requires a current dedicated schedule firing");
   }
 
   /** Admission already holds the account lock. A new item follows the current recipient. */
@@ -652,7 +713,7 @@ public final class RelayMessaging implements MessageService {
       repository.insertInstance(sender, false);
       repository.insertExternalContext(context, account, request, sender.id(), recipient.id());
     }
-    return enqueueIngress(account, request, context, sender, recipient, alert.reference());
+    return enqueueIngress(account, request, context, sender, recipient, alert.reference(), null);
   }
 
   private Instance passiveSender(
@@ -668,23 +729,27 @@ public final class RelayMessaging implements MessageService {
       UUID context,
       Instance sender,
       Instance recipient,
-      PersonalAlert alert) {
+      PersonalAlert alert,
+      GoalSchedule goalSchedule) {
     requireReadable(sender);
     requireReadable(recipient);
     String message =
-        send(
-            sender,
-            new SendMessageTool.Request(
-                recipient.id(),
-                request.body(),
-                null,
-                alert == null,
+        sendIntent(
+                sender,
+                new SendMessageTool.Request(
+                    recipient.id(),
+                    request.body(),
+                    null,
+                    alert == null,
+                    false,
+                    "persistent",
+                    request.requestId().toString()),
                 false,
-                "persistent",
-                request.requestId().toString()),
-            false,
-            null,
-            request.causation());
+                null,
+                null,
+                request.causation(),
+                goalSchedule)
+            .message();
     UUID id = UUID.randomUUID();
     repository.insertExternalTask(id, context, account, request, message);
     if (alert != null && alert.firing() != null) repository.bindMailboxAlert(message, alert);
@@ -823,6 +888,95 @@ public final class RelayMessaging implements MessageService {
   }
 
   @Override
+  public Optional<AgentTool> goalReturnReader(RunExtras.Context context, Consumer<String> inherit) {
+    if (context.definition() == null
+        || !context.definition().bot()
+        || !context.definition().tools().contains(SendMessageTool.NAME)
+        || context.conversationId() == null
+        || context.callerHandle() == null
+        || context.home() == null
+        || context.home().isGlobal()) return Optional.empty();
+    try {
+      var sources =
+          repository.byConversationAgent(context.conversationId(), context.definition().name());
+      if (sources.size() != 1 || !goalReturnReaderSource(context, sources.getFirst()))
+        return Optional.empty();
+      var bound = sources.getFirst();
+      requireGoalCaller(bound);
+      return Optional.of(
+          new GoalReturnReadTool(
+              (request, home) -> readGoalReturn(context, bound.id(), request, home, inherit)));
+    } catch (CallerFault | NotFoundFault unavailable) {
+      return Optional.empty();
+    }
+  }
+
+  private static boolean goalReturnReaderSource(RunExtras.Context context, Instance source) {
+    return source.active()
+        && source.lifetime().equals("persistent")
+        && source.account().equals(context.callerHandle())
+        && source.project().equals(context.home().project())
+        && source.conversation().equals(context.conversationId())
+        && source.agent().equals(context.definition().name());
+  }
+
+  private String readGoalReturn(
+      RunExtras.Context context,
+      String callerInstance,
+      GoalReturnReadTool.Request request,
+      Home home,
+      Consumer<String> inherit) {
+    try {
+      if (!context.home().equals(home)) throw unavailableGoalReturn();
+      return goalScheduleTransactions.inTransaction(
+          () -> {
+            var caller =
+                instance(callerInstance)
+                    .filter(source -> goalReturnReaderSource(context, source))
+                    .orElseThrow(RelayMessaging::unavailableGoalReturn);
+            requireGoalCaller(caller);
+            var original =
+                route(request.message())
+                    .filter(
+                        row ->
+                            row.sender().equals(caller.id())
+                                && row.goalPurpose() == GoalMessagePurpose.HANDOFF
+                                && row.replyTo() == null
+                                && row.replyExpected()
+                                && !row.generated())
+                    .orElseThrow(RelayMessaging::unavailableGoalReturn);
+            var goal = owned(original.recipient(), caller.account());
+            requireScope(goal, caller.account(), caller.project());
+            routing.require(caller.account(), caller.project(), goal.project());
+            var binding = new GoalReturn(caller.id(), goal.id(), original.message());
+            var page =
+                repository
+                    .goalReturnReplies(binding, request.before(), GoalReturnReadTool.PAGE_SIZE + 1)
+                    .orElseThrow(RelayMessaging::unavailableGoalReturn);
+            var replies = page.replies();
+            // No model history may receive reply prose until the source's durable read
+            // requirements are carried into this exact authenticated receiving log.
+            if (replies.isEmpty()) requireReadable(goal);
+            else inherit.accept(goal.conversation());
+            var returned =
+                replies.stream()
+                    .limit(GoalReturnReadTool.PAGE_SIZE)
+                    .map(MessageToolCodec.GoalReturnItem::of)
+                    .toList();
+            return MessageToolCodec.goalReturns(
+                new MessageToolCodec.GoalReturnPage(
+                    original.message(),
+                    page.handled() ? "handled" : "awaiting",
+                    page.ending(),
+                    returned,
+                    replies.size() > returned.size() ? returned.getLast().id() : null));
+          });
+    } catch (CallerFault | NotFoundFault unavailable) {
+      return MessageToolCodec.refusal(Code.MESSAGE_REFUSED, unavailableGoalReturn().getMessage());
+    }
+  }
+
+  @Override
   public AgentListTool directory(RunExtras.Context context, boolean canSend) {
     return new AgentListTool((request, home) -> listDestinations(context, canSend, request, home));
   }
@@ -933,8 +1087,11 @@ public final class RelayMessaging implements MessageService {
             home,
             context.callerHandle());
     try {
+      // A reply can join the Goal answer journal. Start the owning SQL budget before any
+      // connection is acquired, so Messaging and the exact Goal acceptance share the unit.
+      var transactions = request.replyTo() == null ? work : goalScheduleTransactions;
       Sent sent =
-          work.inTransaction(
+          transactions.inTransaction(
               () -> {
                 // Providers may reuse tool-call IDs in later turns. Include the persisted
                 // handling turn, while preserving the same identity on a retried call.
@@ -1002,7 +1159,12 @@ public final class RelayMessaging implements MessageService {
   }
 
   private record Sent(
-      String message, Route route, Instance sender, Instance recipient, boolean queued) {}
+      String message,
+      Route route,
+      Instance sender,
+      Instance recipient,
+      boolean queued,
+      boolean replay) {}
 
   private String send(
       Instance sender, SendMessageTool.Request request, boolean generated, String ending) {
@@ -1030,6 +1192,30 @@ public final class RelayMessaging implements MessageService {
       String ending,
       Instance passiveExport,
       RelayCausation suppliedCausation) {
+    return sendIntent(sender, request, generated, ending, passiveExport, suppliedCausation, null);
+  }
+
+  private Sent sendIntent(
+      Instance sender,
+      SendMessageTool.Request request,
+      boolean generated,
+      String ending,
+      Instance passiveExport,
+      RelayCausation suppliedCausation,
+      GoalSchedule goalSchedule) {
+    return sendIntent(
+        sender, request, generated, ending, passiveExport, suppliedCausation, goalSchedule, false);
+  }
+
+  private Sent sendIntent(
+      Instance sender,
+      SendMessageTool.Request request,
+      boolean generated,
+      String ending,
+      Instance passiveExport,
+      RelayCausation suppliedCausation,
+      GoalSchedule goalSchedule,
+      boolean passiveGoal) {
     if (!generated
         && request.body().getBytes(StandardCharsets.UTF_8).length > limits.getBodyBytes())
       throw new MessageRefused(
@@ -1050,7 +1236,8 @@ public final class RelayMessaging implements MessageService {
             route,
             sender,
             instance(route.recipient()).orElseThrow(),
-            repository.queued(retained));
+            repository.queued(retained),
+            true);
       }
     }
     Route original =
@@ -1060,6 +1247,7 @@ public final class RelayMessaging implements MessageService {
                 .orElseThrow(() -> new MessageRefused("No incoming message with that ID."));
     Instance recipient;
     boolean opening = false;
+    boolean goalAnswerRoute = false;
     if (original != null) {
       if (!original.recipient().equals(sender.id()))
         throw new MessageRefused("Only the recipient can reply to this message.");
@@ -1067,11 +1255,28 @@ public final class RelayMessaging implements MessageService {
       if (request.to() != null && !request.to().equals(recipient.id()))
         throw new MessageRefused("The reply's return address is supplied by the harness; omit to.");
       lockRequest(original.message());
-      if (!generated && repository.terminated(original.message()))
-        throw new MessageRefused("This message was cancelled or expired.");
-      if (request.finalReply() && finalReply(original.message()).isPresent()) {
+      goalAnswerRoute = original.goalPurpose() == GoalMessagePurpose.QUESTION;
+      if (goalAnswerRoute) {
+        if (generated || request.replyExpected() || !request.finalReply())
+          throw new MessageRefused(
+              "Use a final reply without a new reply request for a Goal question.");
+        requireGoalEndpoints(sender, recipient);
+        repository.lockConversation(sender.conversation());
+        requireGoalCaller(sender);
+        var launch = new GoalReturn(sender.id(), recipient.id(), original.replyTo());
+        if (original.handled() || !questionFor(launch, original) || !lockOpenGoalRequest(launch))
+          throw new MessageRefused("This Goal question is no longer open.");
+      }
+      if (original.goalPurpose() == GoalMessagePurpose.HANDOFF) {
+        if (!passiveGoal)
+          throw new MessageRefused("The Goal owner supplies the outcome for this request.");
+        if (original.handled() || finalReply(original.message()).isPresent())
+          throw unavailableGoalReturn();
+      } else if (request.finalReply() && finalReply(original.message()).isPresent()) {
         throw new MessageRefused("This message already has a final reply.");
       }
+      if (!generated && repository.terminated(original.message()))
+        throw new MessageRefused("This message was cancelled or expired.");
     } else if (passiveExport != null) {
       // The export repository proved both endpoints. This path retains a private external request,
       // never resolves a body-selected recipient and never creates a paid wake for that endpoint.
@@ -1082,6 +1287,7 @@ public final class RelayMessaging implements MessageService {
       opening = target.opening();
     }
     if (!recipient.account().equals(sender.account())) throw unavailableInstance();
+    boolean passive = passiveGoal || goalAnswerRoute;
     if (!recipient.active() && original == null && passiveExport == null)
       throw new MessageRefused(
           Code.INSTANCE_ENDED,
@@ -1092,11 +1298,14 @@ public final class RelayMessaging implements MessageService {
       throw new MessageRefused(
           Code.INVALID_ARGUMENT, "The message exceeds this server's message size limit.");
     }
-    if (!generated && recipient.active() && queueFull(repository.pendingCount(recipient.id()))) {
+    if (!generated
+        && !passive
+        && recipient.active()
+        && queueFull(repository.pendingCount(recipient.id()))) {
       throw new MessageRefused(Code.QUEUE_FULL, "The recipient's pending message queue is full.");
     }
     // Cross-project routing grants message delivery, not document/history inheritance.
-    if (sender.project().equals(recipient.project())) lineage.accept(sender, recipient);
+    if (!passive && sender.project().equals(recipient.project())) lineage.accept(sender, recipient);
     MessageRecord message = repository.insertMessage(recipient.id(), request.body(), clock.get());
     Route publicationRoute =
         new Route(
@@ -1111,17 +1320,34 @@ public final class RelayMessaging implements MessageService {
             false,
             suppliedCausation != null
                 ? suppliedCausation
-                : original == null ? null : original.causation());
+                : original == null ? null : original.causation(),
+            GoalMessagePurpose.of(request.callId()));
     repository.insertRoute(
         publicationRoute,
         request.callId(),
         MessageSendIdentity.fingerprint(request, generated, ending),
-        (recipient.active()
+        (!passive && recipient.active()
             ? definitions.resolve(recipient.agent(), recipient.project()).maxModelCalls()
             : 1),
-        recipient.active());
+        !passive && recipient.active());
+    if (passive) {
+      if (goalAnswerRoute && request.finalReply()) {
+        if (!goalInbox.stageGoalAnswer(recipient, publicationRoute))
+          throw new MessageRefused("This Goal question no longer accepts an answer.");
+        repository.endRequest(original.message(), Outcome.Ending.ANSWERED);
+      }
+      if (request.replyExpected()) repository.awaiting(message.id());
+      else repository.handled(message.id());
+      return new Sent(message.id(), publicationRoute, sender, recipient, false, false);
+    }
     if (request.timeoutSeconds() != null)
       repository.deadline(message.id(), clock.get().plusSeconds(request.timeoutSeconds()));
+    if (goalSchedule != null) {
+      goalInbox.stageScheduled(recipient, message.id(), goalSchedule);
+      return new Sent(message.id(), publicationRoute, sender, recipient, true, false);
+    }
+    if (recipient.active() && goalInbox.stage(recipient, message.id()))
+      return new Sent(message.id(), publicationRoute, sender, recipient, true, false);
     var committedInbox =
         inboxes.publish(
             message,
@@ -1166,7 +1392,7 @@ public final class RelayMessaging implements MessageService {
               LOG.warn("draining message recipient {} failed", recipient.id(), undrained);
             }
           });
-    return new Sent(message.id(), publicationRoute, sender, recipient, recipient.active());
+    return new Sent(message.id(), publicationRoute, sender, recipient, recipient.active(), false);
   }
 
   @Override
@@ -1192,6 +1418,16 @@ public final class RelayMessaging implements MessageService {
   public String incoming(String message) {
     Route route = route(message).orElseThrow();
     return incoming(route, instance(route.recipient()).orElseThrow());
+  }
+
+  @Override
+  public Optional<String> goalInput(Instance recipient, String message) {
+    var route =
+        route(message).filter(row -> row.recipient().equals(recipient.id()) && !row.handled());
+    if (route.isEmpty() || repository.terminated(message)) return Optional.empty();
+    requireReadable(recipient);
+    requireReadable(instance(route.get().sender()).orElseThrow());
+    return Optional.of(incoming(route.get(), recipient));
   }
 
   private String incoming(Route route, Instance recipient) {
@@ -1248,6 +1484,13 @@ public final class RelayMessaging implements MessageService {
           lockRequest(message);
           Route original = route(message).orElseThrow();
           if (original.handled()) return null;
+          // Passive Goal requests have a separate settlement owner. A stop can close their
+          // receipt, but must never generate a second reply or dispatch paid work.
+          if (original.goalPurpose() == GoalMessagePurpose.HANDOFF
+              || original.goalPurpose() == GoalMessagePurpose.QUESTION) {
+            repository.endRequest(original.message(), outcome.ending());
+            return null;
+          }
           if (outcome.ending() == Outcome.Ending.AWAITING
               || !settledBudget && repository.awaitingBudget(message)) {
             repository.awaiting(message);
@@ -1733,6 +1976,294 @@ public final class RelayMessaging implements MessageService {
         state.createdAt());
   }
 
+  @Override
+  public InstanceView openGoalInbox(String account, String project, String agent) {
+    return work.inTransaction(
+        () ->
+            view(
+                create(
+                    account,
+                    project,
+                    definitions.resolve(agent, project),
+                    "persistent",
+                    false,
+                    null)));
+  }
+
+  @Override
+  public GoalReturn openGoalReturn(
+      String account,
+      String project,
+      String conversation,
+      AgentDefinition caller,
+      String originalMessage,
+      String goalInstance,
+      UUID invocation) {
+    Objects.requireNonNull(invocation);
+    return goalScheduleTransactions.inTransaction(
+        () -> {
+          lock("mailbox:" + account);
+          var original =
+              route(MessagePayload.identifier(originalMessage, "bdm_"))
+                  .orElseThrow(RelayMessaging::unavailableGoalReturn);
+          lockRequest(original.message());
+          var sender = owned(original.recipient(), account);
+          var previous = owned(original.sender(), account);
+          var goal = owned(goalInstance, account);
+          var sources = repository.byConversationAgent(conversation, caller.name());
+          if (!sender.conversation().equals(conversation)
+              || !sender.agent().equals(caller.name())
+              || !sender.project().equals(project)
+              || sources.size() != 1
+              || !sources.getFirst().id().equals(sender.id())
+              || !caller.bot()
+              || !caller.tools().contains(SendMessageTool.NAME)
+              || original.generated()
+              || original.handled()
+              || original.goalPurpose() != GoalMessagePurpose.ORDINARY
+              || repository.terminated(original.message())
+              || !goal.lifetime().equals("persistent")) {
+            throw unavailableGoalReturn();
+          }
+          requireGoalEndpoints(sender, goal);
+          requireReadable(previous);
+          repository.lockConversation(sender.conversation());
+          requireGoalCaller(sender);
+          var request =
+              new SendMessageTool.Request(
+                  goal.id(),
+                  "Goal handoff accepted from message "
+                      + original.message()
+                      + ". Follow the correlated replies for its outcome.",
+                  null,
+                  true,
+                  false,
+                  "persistent",
+                  GoalMessagePurpose.HANDOFF.invocation(invocation));
+          var sent =
+              sendIntent(sender, request, false, null, goal, original.causation(), null, true);
+          return new GoalReturn(sender.id(), goal.id(), sent.message());
+        });
+  }
+
+  @Override
+  public GoalReturnAttempt publishGoalReturn(
+      GoalReturn binding,
+      UUID intent,
+      String body,
+      GoalReturnKind kind,
+      Consumer<String> accepted) {
+    Objects.requireNonNull(binding);
+    Objects.requireNonNull(intent);
+    Objects.requireNonNull(kind);
+    Objects.requireNonNull(accepted);
+    return goalScheduleTransactions.inTransaction(
+        () -> {
+          // Resolve the account from the original request before locking the shared mailbox.
+          var initial = instance(binding.sender());
+          if (initial.isEmpty()) return new GoalReturnUnavailable();
+          lockMailbox(initial.orElseThrow());
+          var current = goalRequest(binding);
+          if (current.isEmpty()) return new GoalReturnUnavailable();
+          Route original = current.orElseThrow();
+          Instance caller = instance(binding.sender()).orElseThrow();
+          Instance goal = instance(binding.recipient()).orElseThrow();
+          try {
+            requireGoalEndpoints(caller, goal);
+            repository.lockConversation(caller.conversation());
+            requireGoalCaller(caller);
+          } catch (CallerFault | NotFoundFault unavailable) {
+            return new GoalReturnUnavailable();
+          }
+          boolean question = kind == GoalReturnKind.QUESTION;
+          boolean terminal = kind == GoalReturnKind.RESULT || kind == GoalReturnKind.CANCELLED;
+          if (!terminal && !lockOpenGoalRequest(binding)) return new GoalReturnUnavailable();
+          var purpose =
+              switch (kind) {
+                case QUESTION -> GoalMessagePurpose.QUESTION;
+                case BLOCKED -> GoalMessagePurpose.NOTICE;
+                case RESULT, CANCELLED -> GoalMessagePurpose.TERMINAL;
+              };
+          String ending =
+              switch (kind) {
+                case RESULT -> Outcome.Ending.ANSWERED.name();
+                case BLOCKED -> Outcome.Ending.UNAVAILABLE.name();
+                case CANCELLED -> Outcome.Ending.CANCELLED.name();
+                case QUESTION -> null;
+              };
+          var request =
+              new SendMessageTool.Request(
+                  null,
+                  body,
+                  original.message(),
+                  question,
+                  terminal,
+                  "persistent",
+                  purpose.invocation(intent));
+          // Reuse the native invocation journal. The attempt's callback records the exact receipt
+          // before any other transaction can reply or cross the Goal cancellation fence.
+          Sent sent;
+          try {
+            sent = sendIntent(goal, request, false, ending, null, null, null, true);
+          } catch (MessageRefused unavailable) {
+            return new GoalReturnUnavailable();
+          }
+          if (!sent.replay() && terminal)
+            repository.endRequest(original.message(), Outcome.Ending.valueOf(ending));
+          accepted.accept(sent.message());
+          return new GoalReturnPublished(sent.message());
+        });
+  }
+
+  @Override
+  public GoalAnswer goalAnswer(GoalReturn binding, String questionMessage) {
+    if (!openGoalRequest(binding)) return new GoalAnswerClosed();
+    return readGoalAnswer(binding, questionMessage);
+  }
+
+  private GoalAnswer readGoalAnswer(GoalReturn binding, String questionMessage) {
+    var question = route(MessagePayload.identifier(questionMessage, "bdm_"));
+    if (question.isEmpty()) return new GoalAnswerClosed();
+    var asked = question.orElseThrow();
+    if (!questionFor(binding, asked)) return new GoalAnswerClosed();
+    try {
+      var caller = instance(asked.recipient()).orElseThrow(RelayMessaging::unavailableGoalReturn);
+      var goal = instance(asked.sender()).orElseThrow(RelayMessaging::unavailableGoalReturn);
+      requireGoalEndpoints(caller, goal);
+      requireGoalCaller(caller);
+    } catch (CallerFault | NotFoundFault unavailable) {
+      return new GoalAnswerClosed();
+    }
+    if (!asked.handled()) return new GoalAnswerPending();
+    if (!Outcome.Ending.ANSWERED.name().equals(asked.ending())) return new GoalAnswerClosed();
+    return finalReply(asked.message())
+        .flatMap(this::route)
+        .filter(
+            answer ->
+                asked.message().equals(answer.replyTo())
+                    && asked.recipient().equals(answer.sender())
+                    && asked.sender().equals(answer.recipient())
+                    && answer.finalReply()
+                    && answer.ending() == null
+                    && answer.handled()
+                    && !answer.generated()
+                    && !answer.replyExpected())
+        .flatMap(answer -> repository.message(answer.message()))
+        .<GoalAnswer>map(GoalAnswerReady::new)
+        .orElseGet(GoalAnswerClosed::new);
+  }
+
+  @Override
+  public boolean withGoalAnswer(
+      GoalReturn binding, String questionMessage, String answerMessage, Runnable claim) {
+    Objects.requireNonNull(claim);
+    return goalScheduleTransactions.inTransaction(
+        () -> {
+          var caller = instance(binding.sender());
+          if (caller.isEmpty()) return false;
+          lockMailbox(caller.orElseThrow());
+          repository.lockConversation(caller.orElseThrow().conversation());
+          if (!lockOpenGoalRequest(binding)) return false;
+          var ready = readGoalAnswer(binding, questionMessage);
+          if (!(ready instanceof GoalAnswerReady answer)
+              || !answer.message().id().equals(answerMessage)) return false;
+          // Claim joins this transaction, so the mailbox/request fences stay held through Goal
+          // commit.
+          claim.run();
+          return true;
+        });
+  }
+
+  @Override
+  public void withholdGoalReturn(GoalReturn binding, Runnable recorded) {
+    goalScheduleTransactions.inTransaction(
+        () -> {
+          var caller = instance(binding.sender());
+          if (caller.isPresent()) {
+            lockMailbox(caller.orElseThrow());
+            if (lockOpenGoalRequest(binding))
+              repository.endRequest(binding.message(), Outcome.Ending.UNAVAILABLE);
+          }
+          recorded.run();
+          return null;
+        });
+  }
+
+  @Override
+  public void settleGoalQuestion(GoalReturn binding, String questionMessage) {
+    goalScheduleTransactions.inTransaction(
+        () -> {
+          var sender = instance(binding.sender());
+          if (sender.isEmpty()) return null;
+          lockMailbox(sender.orElseThrow());
+          if (goalRequest(binding).isEmpty()) return null;
+          var question =
+              route(MessagePayload.identifier(questionMessage, "bdm_"))
+                  .filter(row -> questionFor(binding, row) && !row.handled());
+          if (question.isEmpty()) return null;
+          lockRequest(questionMessage);
+          repository.endRequest(questionMessage, Outcome.Ending.CANCELLED);
+          return null;
+        });
+  }
+
+  private static boolean questionFor(GoalReturn binding, Route question) {
+    return binding.message().equals(question.replyTo())
+        && binding.recipient().equals(question.sender())
+        && binding.sender().equals(question.recipient())
+        && question.replyExpected()
+        && !question.finalReply()
+        && !question.generated()
+        && question.goalPurpose() == GoalMessagePurpose.QUESTION;
+  }
+
+  private boolean openGoalRequest(GoalReturn binding) {
+    return goalRequest(binding).filter(route -> !route.handled()).isPresent()
+        && !repository.terminated(binding.message());
+  }
+
+  /** The caller already holds the mailbox lock used by native cancellation and reply writes. */
+  private boolean lockOpenGoalRequest(GoalReturn binding) {
+    if (goalRequest(binding).isEmpty()) return false;
+    lockRequest(binding.message());
+    return openGoalRequest(binding);
+  }
+
+  private Optional<Route> goalRequest(GoalReturn binding) {
+    return route(binding.message())
+        .filter(
+            original ->
+                original.sender().equals(binding.sender())
+                    && original.recipient().equals(binding.recipient())
+                    && original.replyExpected()
+                    && original.replyTo() == null
+                    && !original.generated()
+                    && original.goalPurpose() == GoalMessagePurpose.HANDOFF);
+  }
+
+  private void requireGoalCaller(Instance caller) {
+    var current = definitions.resolve(caller.agent(), caller.project());
+    if (!current.name().equals(caller.agent())
+        || !current.bot()
+        || !current.tools().contains(SendMessageTool.NAME)) throw unavailableGoalReturn();
+    checkRouteConversation(
+        caller.account(), caller.project(), caller.agent(), caller.conversation());
+  }
+
+  private void requireGoalEndpoints(Instance caller, Instance goal) {
+    requireScope(goal, caller.account(), caller.project());
+    if (!caller.active()
+        || !goal.active()
+        || !caller.lifetime().equals("persistent")
+        || !goal.lifetime().equals("persistent")) throw unavailableGoalReturn();
+    routing.require(caller.account(), caller.project(), goal.project());
+    requireReadable(goal);
+  }
+
+  private static MessageRefused unavailableGoalReturn() {
+    return new MessageRefused("A correlated Goal return is unavailable");
+  }
+
   /** Opening is reversible and keyed by the caller's retained UUID; retries create no new log. */
   public InstanceView open(
       String account, String project, String agent, boolean makeDefault, String requestId) {
@@ -1790,6 +2321,8 @@ public final class RelayMessaging implements MessageService {
           lockMailbox(instance);
           instance = owned(id, account);
           requireReadable(instance);
+          if (goalInbox.owns(id))
+            throw new MessageRefused("A dedicated Goal Agent cannot become the project default.");
           if (!instance.active() || !instance.lifetime().equals("persistent"))
             throw new MessageRefused(
                 "Only an active persistent instance can be the project default.");

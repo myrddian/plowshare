@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -1224,7 +1225,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
           "Answering a frame on session '{}' failed outside the router.", session, unexpected);
       outcome = Outcome.failed(fault.code(), fault.detail());
     }
-    // Independent reads can complete after a membership change, including while waiting for the
+    // Protected replies can complete after a membership change, including while waiting for the
     // physical writer. Retain the same disclosure fence as negotiated concurrent dispatch without
     // changing the synchronous handler contract for older clients. This is a fresh boundary check,
     // not another scheduling admission or permission lookup used to construct a resource key.
@@ -1234,7 +1235,8 @@ public final class EventChannelHandler extends TextWebSocketHandler
         type == null ? FrameTypes.REFUSED : type,
         answer,
         () -> {},
-        type != null && DispatchPolicy.independentRead(type)
+        type != null
+                && (DispatchPolicy.independentRead(type) || router().requiresGoalDisclosure(type))
             ? () -> {
               if (!delivery.running
                   || !socket.isOpen()
@@ -1532,15 +1534,25 @@ public final class EventChannelHandler extends TextWebSocketHandler
     if (session == null || body == null) {
       return;
     }
-    if (!projectDelivery(
-        session, "conversation.turns", Map.of("conversation", body.conversation()))) return;
+
     sessions
         .find(session)
         .flatMap(live -> live.attached(Role.LISTENER, WebSocketSession.class))
         .map(socket -> socket.getAttributes().get(DELIVERY))
         .filter(Delivery.class::isInstance)
         .map(Delivery.class::cast)
-        .ifPresent(delivery -> delivery.offer(body));
+        .ifPresent(
+            delivery ->
+                delivery.offerGrowth(
+                    body,
+                    () ->
+                        projectDelivery(
+                                session,
+                                "conversation.turns",
+                                Map.of("conversation", body.conversation()))
+                            && router()
+                                .permitsGoalGrowth(
+                                    body.conversation(), handleOf(session).orElse(null))));
   }
 
   private static void stopDelivery(WebSocketSession socket) {
@@ -1569,7 +1581,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
    * An account push — a bare, arbitrary body — droppable on the same terms as a {@link Push}. See
    * {@link #push(String, Object)}.
    */
-  private record Pushed(Object body) implements Pending {}
+  private record Pushed(Object body, BooleanSupplier current) implements Pending {
+    Pushed(Object body) {
+      this(body, () -> true);
+    }
+  }
 
   /**
    * An answer to a client's frame, which goes out in an {@link Envelope} and is not droppable.
@@ -1836,7 +1852,11 @@ public final class EventChannelHandler extends TextWebSocketHandler
      * is reading, and nothing more.
      */
     void offer(Object body) {
-      if (pending.offer(new Pushed(body))) {
+      offerGrowth(body, () -> true);
+    }
+
+    void offerGrowth(Object body, BooleanSupplier current) {
+      if (pending.offer(new Pushed(body, current))) {
         waiting.release();
         return;
       }
@@ -2162,7 +2182,7 @@ public final class EventChannelHandler extends TextWebSocketHandler
     private String frameFor(Pending next) {
       return switch (next) {
         case Push push -> pushed(push.event());
-        case Pushed account -> bare(account.body());
+        case Pushed account -> account.current().getAsBoolean() ? bare(account.body()) : null;
         case Streamed streamed -> streamed(streamed.delta());
         case Reply reply -> reply.frame();
       };

@@ -398,6 +398,7 @@ public final class JobRuntime {
 
   private RunAuthority retainedResources;
   private GoalTurn goalTurn;
+  private AgentDelegates goalRootDefinitions;
   private boolean goalExecution;
 
   /**
@@ -413,7 +414,20 @@ public final class JobRuntime {
     retained.goalTurn = admission.goal();
     retained.goalExecution = admission.goal() != null;
     if (retained.goalExecution) retained.budgetRequests = BudgetRequests.NONE;
+    if (admission.goal() != null && admission.goal().retainsApprovals()) {
+      retainGoalApprovals(retained);
+      retained.goalRootDefinitions = delegates;
+    }
     return retained;
+  }
+
+  private void retainGoalApprovals(JobRuntime target) {
+    // Only the dedicated root has a durable wait owner. Its synchronous delegates must
+    // not retain consent against a stack and allowance the Goal cannot restore.
+    target.approvals = approvals;
+    target.suspendedRunCalls = suspendedRunCalls;
+    target.approvalRoots = approvalRoots;
+    target.approvalReviewSessions = approvalReviewSessions;
   }
 
   private JobRuntime retainedCopy(RunAuthority authority) {
@@ -2060,11 +2074,16 @@ public final class JobRuntime {
           callerHandle,
           incoming,
           operation);
-    if (goalExecution) GoalTurn.requireAgent(definition);
+    boolean root = goalTurn != null && goalTurn.conversation().equals(transcript.conversationId());
+    boolean dedicated = root && goalTurn.retainsApprovals();
+    if (goalExecution) GoalTurn.requireAgent(definition, dedicated);
     else RetainedAgent.require(definition);
     JobRuntime bound = retainedCopy(retainedResources);
-    if (goalTurn != null && goalTurn.conversation().equals(transcript.conversationId()))
-      bound.goalTurn = goalTurn;
+    if (root) bound.goalTurn = goalTurn;
+    if (dedicated) retainGoalApprovals(bound);
+    // The admitted root can look up its own definition with its declared orchestration grants.
+    // Delegates still resolve through the narrower retained capability graph.
+    var liveDefinitions = dedicated ? goalRootDefinitions : delegates;
     // Each child pins its own definition while retaining every ancestor's checks. No mutable
     // current-agent/current-account state is shared between parent and child loops.
     bound.admittedAuthority =
@@ -2079,10 +2098,10 @@ public final class JobRuntime {
           if (!Objects.equals(admittedSubject, callerHandle)
               || sessionId != null
               || (agents != null
-                  && !delegates
+                  && liveDefinitions
                       .find(home, null, callerHandle, definition.name())
                       .filter(definition::equals)
-                      .isPresent())) throw new CallerFault("Acting agent authority changed");
+                      .isEmpty())) throw new CallerFault("Acting agent authority changed");
         };
     return bound.execute(
         definition,
@@ -2254,7 +2273,15 @@ public final class JobRuntime {
     // loop's own returns knowing a fallback exists. See Rerouting.
     admittedAuthority.run();
     if (operation != null) operations.requireTargets(operation, home, List.of());
-    if (confined) RetainedAgent.require(definition);
+    if (confined) {
+      if (goalExecution)
+        GoalTurn.requireAgent(
+            definition,
+            goalTurn != null
+                && goalTurn.retainsApprovals()
+                && goalTurn.conversation().equals(transcript.conversationId()));
+      else RetainedAgent.require(definition);
+    }
     String owner = ownerOf(callerHandle, sessionId, transcript.conversationId());
     RunUsage tracking = runUsage;
     Transcript ownedTranscript =
@@ -2364,6 +2391,7 @@ public final class JobRuntime {
                       operation)
                   : converse(
                       definition,
+                      sourceDefinition,
                       userPrompt,
                       home,
                       budget,
@@ -3024,6 +3052,7 @@ public final class JobRuntime {
   @SuppressWarnings("try")
   private Outcome converse(
       AgentDefinition definition,
+      AgentDefinition admittedDefinition,
       String userPrompt,
       Home home,
       Budget budget,
@@ -3166,6 +3195,13 @@ public final class JobRuntime {
             watch,
             userPrompt,
             mailboxEnabled);
+    if (skills != null && !confined) {
+      // Skill decoration limits the tools for this turn. A handoff still checks against the
+      // original admitted definition, including after a clarification in a later turn.
+      for (var tool :
+          skills.goalTools(admittedDefinition, transcript, sessionId, owner, end, operation))
+        offered.putIfAbsent(tool.schema().name(), tool);
+    }
     BoundCommands.Prepared bound =
         boundCommands == null
             ? null
@@ -3309,7 +3345,7 @@ public final class JobRuntime {
             && suspendedRunCalls != null
             && transcript.conversationId() != null
             && !suspendedRunCalls.pending(transcript.conversationId()).isEmpty();
-    if (approvalContinuation) {
+    if (approvalContinuation && (goalTurn == null || goalTurn.approval() == null)) {
       history.remove(openedAt);
       openedAt = Math.max(0, history.size() - 1);
     }
@@ -3477,12 +3513,14 @@ public final class JobRuntime {
     // it is appended, which is what makes what a model can be shown exactly
     // what was written down.
     LoggedEntry openingEntry =
-        approvalContinuation
+        approvalContinuation && (goalTurn == null || !goalTurn.continuing())
             ? LoggedEntry.diagnostic(userPrompt)
             : LoggedEntry.utterance(userPrompt, transcript.speaker())
                 .withInputProvenance(transcript.inputProvenance());
-    if (retainsBudget) transcript.recordDurably(openingEntry);
+    boolean retainedGoalResult = goalTurn != null && goalTurn.ownerResult();
+    if (retainsBudget || retainedGoalResult) transcript.recordDurably(openingEntry);
     else transcript.record(openingEntry);
+    if (retainedGoalResult) goalTurn.dependencySettled();
     if (bound != null && bound.notice() != null)
       transcript.record(LoggedEntry.notice(bound.notice()));
     // Recorded AFTER the utterance, matching the log-order requirement:
@@ -3578,7 +3616,29 @@ public final class JobRuntime {
     if (suspendedRunCalls != null && transcript.conversationId() != null) {
       var resumption = new RunCallResumption(suspendedRunCalls);
       List<String> readNotes = new ArrayList<>();
-      for (var pending : suspendedRunCalls.pending(transcript.conversationId())) {
+      var pendingCalls = suspendedRunCalls.pending(transcript.conversationId());
+      var goalApproval = goalTurn == null ? null : goalTurn.approval();
+      if (goalTurn != null
+          && !pendingCalls.isEmpty()
+          && (goalApproval == null
+              || pendingCalls.size() != 1
+              || !goalApproval.id().equals(pendingCalls.getFirst().approval())
+              || !goalApproval.call().equals(pendingCalls.getFirst().tool().id())
+              || "started".equals(pendingCalls.getFirst().state())
+                  && pendingCalls.getFirst().result() == null)) {
+        return stopped(
+            Ending.UNAVAILABLE,
+            "The Goal could not reconcile the exact original approval.",
+            trail,
+            0,
+            0,
+            "");
+      }
+      if (goalApproval != null && pendingCalls.isEmpty()) {
+        return stopped(
+            Ending.UNAVAILABLE, "The original Goal approval is unavailable.", trail, 0, 0, "");
+      }
+      for (var pending : pendingCalls) {
         var pendingTool = pending.tool();
         WebToolSecurity.Bound pendingWeb =
             offered.get(pendingTool.name()) instanceof WebToolSecurity.Bound web ? web : null;
@@ -3625,15 +3685,22 @@ public final class JobRuntime {
                             .windowed(result.fileWindow()),
                         pending.approval());
                     if (pendingWeb != null) pendingWeb.resultRecorded();
-                    replaceRetainedResult(
-                        history,
-                        pendingTool,
+                    var projected =
                         pendingWeb == null
                             ? fileToolMessage(pendingTool.id(), result.text(), result.fileWindow())
-                            : pendingWeb.projectRetained(pendingTool.id(), result.text()));
+                            : pendingWeb.projectRetained(pendingTool.id(), result.text());
+                    if (goalApproval == null)
+                      replaceRetainedResult(history, pendingTool, projected);
+                    else
+                      replaceDirectResult(
+                          history,
+                          transcript.projectedAnswer(goalApproval.answer()),
+                          pendingTool,
+                          projected);
                     if (result.fileWindow() != null)
                       readNotes.add(result.fileWindow().note(pendingTool.id()));
                   });
+          if (resumed && goalApproval != null) goalTurn.dependencySettled();
         } catch (RuntimeException interrupted) {
           failures.report(FailureReporter.Source.RUNTIME, interrupted);
           return stopped(
@@ -4652,6 +4719,7 @@ public final class JobRuntime {
                         wanted -> {
                           var tool = offered.get(wanted.name());
                           return (suspendedRunCalls != null && tool instanceof RetainedApprovalTool)
+                              || tool instanceof GoalTurn.WaitTool
                               || directFileMutation(tool, wanted.name()) != null;
                         });
         Integer answerOrdinal = null;
@@ -4769,6 +4837,8 @@ public final class JobRuntime {
                 tool == null ? null : extras.fence().refusal(wanted.name(), wanted.arguments());
             if (goalTurn != null && GoalTurn.UPDATE.equals(wanted.name()) && asked.size() != 1)
               fenced = "Call goal_update by itself after all required work has settled.";
+            if (tool instanceof GoalTurn.WaitTool && asked.size() != 1)
+              fenced = "Call this Goal wait tool by itself.";
             if (fenced == null && tool != null && skills != null) {
               fenced = skills.refusal(transcript.conversationId(), wanted.name());
             }
@@ -4824,6 +4894,12 @@ public final class JobRuntime {
             } else {
               Hooks active = activeHooks(route, harnessRun, skillChecks);
               tool.calledAs(wanted.id());
+              if (tool instanceof GoalTurn.WaitTool waitTool)
+                waitTool.calledAt(
+                    extras.end(),
+                    transcript.spokenIn(),
+                    Objects.requireNonNull(answerOrdinal),
+                    wanted.id());
               // run's gate stands around the chain and is no hook's to leave out:
               // RunTool says why.
               ToolPre preTool =
@@ -4842,17 +4918,56 @@ public final class JobRuntime {
                   && suspendedRunCalls != null) {
                 var question = run.waitingApproval().orElseThrow();
                 String approval = question.id();
-                suspendedRunCalls.retainAt(
-                    approval,
-                    transcript.conversationId(),
-                    sessionId,
-                    question.side(),
-                    callerHandle,
+                var retainedTool =
                     new ToolCall(
                         wanted.id(),
                         wanted.name(),
-                        run.retainedArguments(preTool.arguments(), home)),
-                    answerOrdinal);
+                        run.retainedArguments(preTool.arguments(), home));
+                final Integer originalAnswer = answerOrdinal;
+                Runnable retainCall =
+                    () ->
+                        suspendedRunCalls.retainAt(
+                            approval,
+                            transcript.conversationId(),
+                            sessionId,
+                            question.side(),
+                            callerHandle,
+                            retainedTool,
+                            originalAnswer);
+                if (goalTurn != null && goalTurn.retainsApprovals()) {
+                  var originalTurn = transcript.spokenIn();
+                  if (originalTurn == null
+                      || originalAnswer == null
+                      || !FileTools.READ_NAME.equals(wanted.name())
+                      || !transcript.conversationId().equals(question.conversation())) {
+                    throw new IllegalStateException("The approval has no exact Goal invocation");
+                  }
+                  goalTurn.retainApproval(
+                      approval,
+                      originalTurn.turnOrdinal(),
+                      originalAnswer,
+                      wanted.id(),
+                      retainCall);
+                  toolRecords.forEach(record -> transcript.record(LoggedEntry.hook(record)));
+                  String waiting = "The harness retained this file read for approval.";
+                  transcript.recordDurably(LoggedEntry.toolResult(wanted.id(), waiting));
+                  recording.returned(ToolLines.REFUSED);
+                  for (var sibling : asked.subList(asked.indexOf(wanted) + 1, asked.size())) {
+                    transcript.recordDurably(
+                        LoggedEntry.toolResult(
+                            sibling.id(),
+                            "The harness stopped this batch at the approval. This call did not run."));
+                  }
+                  return new Outcome(
+                      Ending.AWAITING,
+                      ApprovalDelivery.question(question),
+                      steps,
+                      modelCalls,
+                      "",
+                      Pace.NONE,
+                      true);
+                }
+                retainCall.run();
                 // The model's original stack, including all delegated parents and sibling calls,
                 // remains suspended. Neither waiting nor an approval answer enters its prompt.
                 toolRecords.forEach(r -> transcript.record(LoggedEntry.hook(r)));
@@ -4998,7 +5113,7 @@ public final class JobRuntime {
                   if (confined)
                     retainedResources.require(
                         home,
-                        goalTurn != null && GoalTurn.UPDATE.equals(wanted.name())
+                        goalTurn != null && goalTurn.intrinsic(wanted.name())
                             ? List.of()
                             : RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
                   admittedAuthority.run();
@@ -5089,7 +5204,7 @@ public final class JobRuntime {
                     if (confined)
                       retainedResources.require(
                           home,
-                          goalTurn != null && GoalTurn.UPDATE.equals(wanted.name())
+                          goalTurn != null && goalTurn.intrinsic(wanted.name())
                               ? List.of()
                               : RetainedToolAccess.resources(wanted.name(), preTool.arguments()));
                   } catch (CallerFault withdrawn) {
@@ -6195,7 +6310,10 @@ public final class JobRuntime {
                       throw new WorkspaceRefusedException(
                           "This file operation needs human approval but has no retained conversation");
                     var root = approvalRoots.apply(conversation);
-                    boolean attended = root.isEmpty() || root.orElseThrow().origin() == Origin.TURN;
+                    boolean dedicatedGoal = goalTurn != null && goalTurn.retainsApprovals();
+                    boolean attended =
+                        !dedicatedGoal
+                            && (root.isEmpty() || root.orElseThrow().origin() == Origin.TURN);
                     if (attended && sessionId == null || !attended && callerHandle == null)
                       throw new WorkspaceRefusedException(
                           "No person can be asked about this file operation");
@@ -6603,8 +6721,10 @@ public final class JobRuntime {
                 return decision;
               }));
     }
-    if (goalTurn != null && extras.end() != null)
+    if (goalTurn != null && extras.end() != null) {
       offered.put(GoalTurn.UPDATE, goalTurn.tool(extras.end()));
+      goalTurn.listenerTools().forEach(tool -> offered.put(tool.schema().name(), tool));
+    }
     reads.offered(offered.keySet());
     return offered;
   }

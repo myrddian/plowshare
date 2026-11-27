@@ -15,6 +15,7 @@ import io.aeyer.plowshare.server.goals.ConversationGoals.State;
 import io.aeyer.plowshare.server.goals.ConversationGoals.Status;
 import io.aeyer.plowshare.server.goals.GoalRepository.Binding;
 import io.aeyer.plowshare.server.goals.GoalRepository.Progress;
+import io.aeyer.plowshare.server.goals.GoalRepository.Settlement;
 import io.aeyer.plowshare.server.pool.SqlWorkBudget;
 import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import java.time.Duration;
@@ -199,8 +200,10 @@ WHERE a.legacy_handle=? AND s.project_id=?
         "job_fixture",
         turn,
         current ->
-            new Progress(
-                State.COMPLETE, 1, 4, null, "job_fixture", ordinal, null, "Verified", 0, null));
+            new Settlement(
+                new Progress(
+                    State.COMPLETE, 1, 4, null, "job_fixture", ordinal, null, "Verified", 0, null),
+                null));
     assertEquals(1, turns.forConversation(binding.conversation()).size());
     assertEquals(State.COMPLETE, repository.find(binding.id()).orElseThrow().progress().state());
   }

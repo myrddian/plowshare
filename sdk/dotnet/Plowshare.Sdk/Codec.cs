@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -46,6 +47,7 @@ internal sealed class OptionalConverterFactory : JsonConverterFactory
 internal static class Codec
 {
     private static readonly JsonDocument catalog = LoadCatalog();
+    private static readonly UTF8Encoding strictUtf8 = new(false, true);
     private static JsonDocument LoadCatalog()
     {
         using var stream = typeof(Codec).Assembly.GetManifestResourceStream("Plowshare.Sdk.Schemas.json")
@@ -61,6 +63,12 @@ internal static class Codec
     }
     public static JsonElement Input<T>(string operation, T request)
     {
+        // The JSON encoder would silently replace an unpaired surrogate in a typed answer.
+        if (request is GoalAnswerRequest { Answer: string text })
+        {
+            try { strictUtf8.GetByteCount(text); }
+            catch (EncoderFallbackException) { throw Invalid(); }
+        }
         var raw = JsonSerializer.SerializeToElement(request);
         var projected = Decode(catalog.RootElement.GetProperty("inputs").GetProperty(operation), raw, true, 0);
         return JsonSerializer.SerializeToElement(projected);
@@ -82,6 +90,65 @@ internal static class Codec
     {
         if(operation.StartsWith("tool.scope.host.",StringComparison.Ordinal)||operation.StartsWith("tool.scope.worker.",StringComparison.Ordinal)){if(!HostedMatches(operation,request,result))throw Invalid();return;}
         static string? IdentityText(JsonElement row, string name) => row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (operation == "goal.receipt")
+        {
+            var requestId = IdentityText(request, "requestId");
+            if (requestId is null || !string.Equals(requestId, IdentityText(result, "requestId"), StringComparison.OrdinalIgnoreCase))
+                throw Invalid();
+            return;
+        }
+        if (operation == "goal.status")
+        {
+            var goal = IdentityText(request, "goal");
+            if (goal is null || !string.Equals(goal, IdentityText(result, "goal"), StringComparison.OrdinalIgnoreCase)
+                || IdentityText(request, "project") != IdentityText(result, "project"))
+                throw Invalid();
+            return;
+        }
+        if (operation == "goal.list")
+        {
+            var goals = result.GetProperty("goals");
+            var project = IdentityText(request, "project");
+            var after = IdentityText(request, "after");
+            var limit = request.TryGetProperty("limit", out var suppliedLimit) ? suppliedLimit.GetDouble() : 20;
+            if (goals.GetArrayLength() > limit) throw Invalid();
+            var seen = new HashSet<string>();
+            string? last = null;
+            foreach (var status in goals.EnumerateArray())
+            {
+                var goal = IdentityText(status, "goal");
+                if (goal is null || !seen.Add(goal) ||
+                    string.Equals(goal, after, StringComparison.OrdinalIgnoreCase) ||
+                    IdentityText(status, "project") != project)
+                    throw Invalid();
+                last = goal;
+            }
+            var next = IdentityText(result, "next");
+            if (next is not null && next != last) throw Invalid();
+            return;
+        }
+        if (operation is "message.unlisten" or "goal.answer")
+        {
+            var coordinate = operation == "goal.answer" ? "question" : "binding";
+            foreach (var key in new[] { "goal", coordinate, "requestId" })
+            {
+                var asked = IdentityText(request, key);
+                if (asked is null || !string.Equals(asked, IdentityText(result, key), StringComparison.OrdinalIgnoreCase)) throw Invalid();
+            }
+            if (operation == "goal.answer")
+            {
+                var conversation = IdentityText(request, "conversation");
+                if (conversation is null || !string.Equals(conversation, IdentityText(result, "conversation"), StringComparison.Ordinal))
+                    throw Invalid();
+                return;
+            }
+            static double? Version(JsonElement row) =>
+                row.ValueKind == JsonValueKind.Object && row.TryGetProperty("version", out var value)
+                && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var version) ? version : null;
+            var previous = Version(request);
+            if (previous is null or < 1 || Version(result) != previous + 1) throw Invalid();
+            return;
+        }
         if (operation is "relay.group.delete" or "relay.group.inspect") {
             foreach(var key in operation=="relay.group.delete" ? new[]{"project","topic","group","generation"}:new[]{"project","topic","group"}) {
                 string? asked=IdentityText(request,key);

@@ -3,11 +3,13 @@ package io.aeyer.plowshare.server.events;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /** Existing firing inbox as a transactional scheduled-event subscriber, independent of jobs. */
 public interface ScheduledArrival {
   /** Copies every matching firing and applies existing queue policy; performs no external work. */
-  List<Arrival> record(String event, String schedule, Instant fireAt, Instant now);
+  List<Arrival> record(
+      String event, String schedule, Instant fireAt, Instant now, UUID goalGeneration);
 
   /** Post-commit hint to start recorded work; lost hints leave durable firings for recovery. */
   void dispatch(List<Arrival> arrivals);

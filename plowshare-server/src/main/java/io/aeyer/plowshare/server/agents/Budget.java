@@ -129,6 +129,21 @@ public final class Budget {
 
   /** A wake's finite scheduling window draws claims from the root's canonical allowance. */
   public static Budget boardLease(UUID source, int window, Supplier<Optional<Claim>> claim) {
+    return window(source, window, claim);
+  }
+
+  /** A Goal cycle changes its window only through a durable owner-authorized resume. */
+  public static Budget goalWindow(UUID source, int limit, Supplier<Optional<Claim>> claim) {
+    Budget budget = window(source, limit, claim);
+    budget.durableLimit =
+        ignored -> {
+          throw new CallerFault(
+              "Use the Goal Agent's pause and resume controls to change its allowance");
+        };
+    return budget;
+  }
+
+  private static Budget window(UUID source, int window, Supplier<Optional<Claim>> claim) {
     if (window < 1) throw new IllegalArgumentException("Positive wake window required");
     Budget lease = new Budget(window, null, Objects.requireNonNull(source));
     lease.windowed = true;

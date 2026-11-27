@@ -73,7 +73,9 @@ public final class AgentRunner implements Dispatcher.Runner {
         configured == null
             ? Optional.<ScheduledWork.File>empty()
             : configured.managed(trigger.name(), trigger.definedBy());
+    var goalSchedule = firing.goalSchedule();
     if (managed.isEmpty()) {
+      if (goalSchedule != null) throw new IllegalStateException("The Goal schedule source changed");
       if (configured != null && configured.requiresDefinition(trigger.name(), trigger.definedBy()))
         throw new IllegalStateException("The registered schedule source is missing");
       return new Dispatcher.Started.Job(
@@ -91,12 +93,15 @@ public final class AgentRunner implements Dispatcher.Runner {
       if (messaging == null)
         throw new IllegalStateException("Messaging is unavailable on this server");
       var task =
-          messaging.receiveScheduled(
-              trigger.definedBy(),
-              source.project(),
-              trigger.name(),
-              firing.id(),
-              file.definition());
+          goalSchedule == null
+              ? messaging.receiveScheduled(
+                  trigger.definedBy(),
+                  source.project(),
+                  trigger.name(),
+                  firing.id(),
+                  file.definition())
+              : messaging.receiveGoalSchedule(
+                  trigger.definedBy(), source.project(), goalSchedule, file.definition());
       ended.accept(
           null,
           new Outcome(
@@ -111,6 +116,8 @@ public final class AgentRunner implements Dispatcher.Runner {
               ""));
       return new Dispatcher.Started.Message(task.message());
     }
+    if (goalSchedule != null)
+      throw new IllegalStateException("The Goal schedule destination changed");
     // Explicit command inputs are pinned as written; event metadata never becomes skill arguments.
     var action = file.definition().action();
     String task = action.utterance();

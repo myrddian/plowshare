@@ -31,7 +31,7 @@ import { isList } from '../binding/values.ts';
 import { OPERATION_SCHEMAS } from './operation-schemas.ts';
 import type { JsonValue } from './administration.ts';
 import type { Operation, Payloads, Request } from './direct.ts';
-import type { Replies } from './replies.ts';
+import type { GoalPage, GoalStatus, Replies } from './replies.ts';
 
 /** Generated contract vocabulary. No vendor parser or raw schema crosses the SDK. */
 export interface Schema {
@@ -313,6 +313,17 @@ export function decodeReply<K extends keyof Replies>(
   validateProcReply(type, decoded);
   validateFileStoreReplies(type, decoded);
   validateMessagingOrigins(type, decoded);
+  if (type === 'goal.list') validateGoalPage(decoded as GoalPage);
+  if (type === 'goal.status') validateGoalStatus(decoded as GoalStatus);
+  if (
+    type === 'goal.receipt' ||
+    type === 'goal.answer' ||
+    type === 'goal.start' ||
+    type === 'goal.sources' ||
+    type === 'message.listen' ||
+    type === 'message.unlisten'
+  )
+    validateGoalReply(type, decoded);
   return decoded;
 }
 
@@ -367,5 +378,174 @@ function validateActingReply(type: string, value: unknown): void {
       !Number.isFinite(Date.parse(value['expiresAt']))
     )
       throw new Error('Invalid acting context reply');
+  }
+}
+
+const goalUuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u;
+function goalIdentity(value: string): boolean {
+  return (
+    value.length === 36 &&
+    goalUuid.test(value) &&
+    value !== '00000000-0000-0000-0000-000000000000'
+  );
+}
+function goalPositive(value: number, maximum = 2147483647): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= maximum;
+}
+function goalText(value: string, maximum: number): boolean {
+  return value.length > 0 && value.length <= maximum && !value.includes('\0');
+}
+function goalInstant(value: string): boolean {
+  return (
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/u.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+function validateGoalPage(page: GoalPage): void {
+  if (
+    page.goals.length > 50 ||
+    new Set(page.goals.map((row) => row.goal)).size !== page.goals.length ||
+    (page.next !== null && page.next !== page.goals.at(-1)?.goal)
+  )
+    throw new Error('Invalid Goal Agent page');
+  for (const row of page.goals) validateGoalStatus(row);
+}
+function validateGoalStatus(status: GoalStatus): void {
+  if (
+    !goalIdentity(status.goal) ||
+    !goalText(status.project, 1024) ||
+    !/^cnv_[A-Za-z0-9]{1,124}$/u.test(status.conversation) ||
+    !/^ins_[A-Za-z0-9]{1,124}$/u.test(status.instance) ||
+    !goalPositive(status.version) ||
+    (status.agent !== null && !goalText(status.agent, 1024)) ||
+    (status.objective !== null && !goalText(status.objective, 16000)) ||
+    (status.nextScheduleAt !== null && !goalInstant(status.nextScheduleAt)) ||
+    status.schedules.length > 16 ||
+    status.relayListeners.length > 16 ||
+    (!status.readable &&
+      (status.agent !== null ||
+        status.objective !== null ||
+        status.detail !== null ||
+        status.latestResult !== null ||
+        status.nextScheduleAt !== null ||
+        status.schedules.length > 0 ||
+        status.relayListeners.length > 0 ||
+        status.moreSchedules ||
+        status.moreRelayListeners))
+  )
+    throw new Error('Invalid Goal Agent status');
+  const result = status.latestResult;
+  if (
+    result !== null &&
+    (!/^job_[A-Za-z0-9]{1,124}$/u.test(result.job) ||
+      !goalPositive(result.turn) ||
+      !goalText(result.summary, 16000) ||
+      result.evidence.length < 1 ||
+      result.evidence.length > 12 ||
+      result.evidence.some((item) => !goalText(item, 500)))
+  )
+    throw new Error('Invalid Goal Agent result');
+  for (const wake of status.schedules) {
+    if (
+      !goalText(wake.schedule, 512) ||
+      !goalIdentity(wake.generation) ||
+      (wake.nextFireAt !== null && !goalInstant(wake.nextFireAt))
+    )
+      throw new Error('Invalid Goal Agent schedule wake');
+  }
+  for (const wake of status.relayListeners) {
+    if (
+      !goalIdentity(wake.binding) ||
+      !goalIdentity(wake.generation) ||
+      (wake.topic !== null &&
+        (wake.topic.length > 1024 ||
+          !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u.test(wake.topic))) ||
+      (wake.pendingBatch !== null &&
+        (!goalIdentity(wake.pendingBatch.id) ||
+          !goalPositive(wake.pendingBatch.memberCount, 16) ||
+          !goalInstant(wake.pendingBatch.deadline)))
+    )
+      throw new Error('Invalid Goal Agent Relay listener');
+  }
+}
+
+function validateGoalReply(
+  type:
+    | 'goal.answer'
+    | 'goal.receipt'
+    | 'goal.start'
+    | 'goal.sources'
+    | 'message.listen'
+    | 'message.unlisten',
+  value: unknown,
+): void {
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u;
+  const topic = /^[a-z][a-z0-9]*([._-][a-z0-9]+)*$/u;
+  if (
+    !object(value) ||
+    typeof value['goal'] !== 'string' ||
+    !uuid.test(value['goal'])
+  )
+    throw new Error('Invalid Goal Agent identity');
+  const validTopic = (name: unknown) =>
+    typeof name === 'string' && name.length <= 1024 && topic.test(name);
+  const validUuid = (candidate: unknown) =>
+    typeof candidate === 'string' && uuid.test(candidate);
+  if (type === 'goal.answer') {
+    const ids = [value['goal'], value['question'], value['requestId']];
+    if (
+      !ids.every(
+        (id) => validUuid(id) && id !== '00000000-0000-0000-0000-000000000000',
+      ) ||
+      typeof value['conversation'] !== 'string' ||
+      !/^cnv_[A-Za-z0-9]{1,124}$/u.test(value['conversation'])
+    )
+      throw new Error('Invalid Goal Agent answer receipt');
+  } else if (type === 'goal.start' || type === 'goal.receipt') {
+    const version = value['version'];
+    if (
+      !validUuid(value['requestId']) ||
+      typeof value['instance'] !== 'string' ||
+      !/^ins_[A-Za-z0-9]{1,123}$/u.test(value['instance']) ||
+      typeof value['conversation'] !== 'string' ||
+      !/^cnv_[A-Za-z0-9]{1,123}$/u.test(value['conversation']) ||
+      typeof version !== 'number' ||
+      !Number.isSafeInteger(version) ||
+      version < 1
+    )
+      throw new Error('Invalid Goal Agent launch receipt');
+  } else if (type === 'message.listen') {
+    if (
+      !validUuid(value['binding']) ||
+      !validUuid(value['generation']) ||
+      !validTopic(value['topic'])
+    )
+      throw new Error('Invalid Goal Agent listener receipt');
+  } else if (type === 'message.unlisten') {
+    const version = value['version'];
+    const zero = '00000000-0000-0000-0000-000000000000';
+    if (
+      !validUuid(value['binding']) ||
+      !validUuid(value['requestId']) ||
+      [value['goal'], value['binding'], value['requestId']].includes(zero) ||
+      typeof version !== 'number' ||
+      !Number.isInteger(version) ||
+      version < 1 ||
+      version > 2147483647
+    )
+      throw new Error('Invalid Goal Agent listener removal receipt');
+  } else {
+    const items: unknown = value['sources'];
+    if (
+      !Array.isArray(items) ||
+      items.length > 100 ||
+      items.some(
+        (source: unknown) =>
+          !object(source) ||
+          !validTopic(source['topic']) ||
+          !validUuid(source['generation']),
+      )
+    )
+      throw new Error('Invalid Goal Agent source page');
   }
 }

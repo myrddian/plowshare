@@ -1,9 +1,14 @@
 import { actingOptions, type RequestOptions } from '../binding/acting.ts';
 import { outcomeIn } from '../binding/envelope.ts';
-import type { Answer } from './response.ts';
+import type { Answer, CheckedAnswer } from './response.ts';
 import { ConnectionFault } from '../binding/connection.ts';
 import { succeeded } from '../binding/codes.ts';
-import { resultOf, VALIDATED_OPERATIONS } from './direct.ts';
+import {
+  resultOf,
+  VALIDATED_OPERATIONS,
+  type Operation,
+  type Payloads,
+} from './direct.ts';
 import { decodeRequest, decodeReply } from './schema.ts';
 import type { OperationTransport } from './response.ts';
 
@@ -16,9 +21,13 @@ export function checkedTransport(wire: {
     payload?: unknown,
     options?: RequestOptions,
   ): Promise<Answer>;
-}): OperationTransport {
+}) {
   return {
-    async ask(type, payload, options) {
+    ask: async <K extends Operation>(
+      type: K,
+      payload: Payloads[K],
+      options?: RequestOptions,
+    ): Promise<CheckedAnswer<K>> => {
       const request = decodeRequest(type, payload);
       const raw =
         options === undefined
@@ -42,7 +51,7 @@ export function checkedTransport(wire: {
           throw new Error('Operation coordinates or outcome do not match.');
         return {
           ...detail,
-          payload: decodeReply(request.type, answer.payload),
+          payload: decodeReply(type, answer.payload),
         };
       } catch (cause) {
         throw new ConnectionFault(
@@ -52,5 +61,5 @@ export function checkedTransport(wire: {
         );
       }
     },
-  };
+  } satisfies OperationTransport;
 }

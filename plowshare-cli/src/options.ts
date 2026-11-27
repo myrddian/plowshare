@@ -20,6 +20,9 @@ Memory verbs: index, read, recall, write, navigate, digest, curate, proposals,
 read takes an id; recall/navigate take question text. Other arguments are JSON.
 Conversation: open, list, latest, lifecycle, turns, compactions, chat, trajectory,
               context, projection, resume, follow
+Goal Agents: goal list PROJECT or JSON {project,after?,limit?}, goal status {project,goal},
+     goal receipt {project,requestId}. Continue a page with its next cursor as after.
+     Recover an uncertain goal start with the original project and requestId.
 Agent: list, define, run. Job: list, limits, plus status/cancel aliases above.
 Proc: list, inspect, calls, tools, queues [JSON selector]. All non-archived conversations,
      including internal logs and completed work; visibility:"server" requires an administrator.

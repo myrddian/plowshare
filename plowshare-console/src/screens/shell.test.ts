@@ -120,7 +120,13 @@ describe('eight views and no router', () => {
   it('offers every view in the nav, with inbox first', () => {
     expect(
       [...root.querySelectorAll('[data-nav]')].map((node) => node.textContent),
-    ).toEqual(VIEWS.map((view) => (view === 'proc' ? 'processes' : view)));
+    ).toEqual(
+      VIEWS.map((view) => {
+        if (view === 'proc') return 'processes';
+        if (view === 'goal-agents') return 'goal agents';
+        return view;
+      }),
+    );
   });
 
   it('lands on chat and marks it as the one showing', async () => {

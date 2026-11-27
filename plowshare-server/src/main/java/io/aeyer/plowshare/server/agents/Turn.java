@@ -1368,10 +1368,22 @@ public final class Turn {
       UUID allowance,
       RunAdmission admission,
       Runnable requireStart) {
+    return speakGoal(conversation, definition, opening, allowance, null, admission, requireStart);
+  }
+
+  /** Dedicated Goal Agents spend the retained allowance of their persistent inbox owner. */
+  public Optional<String> speakGoal(
+      String conversation,
+      AgentDefinition definition,
+      String opening,
+      UUID allowance,
+      Budget dedicated,
+      RunAdmission admission,
+      Runnable requireStart) {
     var goal = Objects.requireNonNull(admission.goal());
     if (!conversation.equals(goal.conversation()))
       throw new IllegalArgumentException("Goal turn must use its retained conversation");
-    GoalTurn.requireAgent(definition);
+    GoalTurn.requireAgent(definition, dedicated != null);
     try {
       return Optional.of(
           speak(
@@ -1383,10 +1395,17 @@ public final class Turn {
               null,
               outcome -> admission.ended().run(),
               record -> {
-                requireSpeakable(record);
-                if (record.budget() == null
-                    || !record.budget().capped()
-                    || !allowance.equals(record.budget().identity())
+                if (dedicated == null) requireSpeakable(record);
+                else {
+                  requireActive(record, "deliver a goal input");
+                  if (record.origin() != Origin.MESSAGE
+                      || !definition.name().equals(record.agent()))
+                    throw new Refused("Goal Agent inbox belongs to another definition");
+                }
+                Budget goalBudget = dedicated == null ? record.budget() : dedicated;
+                if (goalBudget == null
+                    || !goalBudget.capped()
+                    || !allowance.equals(goalBudget.identity())
                     || record.turnCap() != null && !record.turnCap().capped())
                   throw new Refused("Goal requires its original finite conversation limits");
                 admission.check().run();
@@ -1394,7 +1413,7 @@ public final class Turn {
               },
               false,
               goal.speaker(),
-              null,
+              dedicated,
               admission));
     } catch (GoalConversationOccupied busy) {
       return Optional.empty();
@@ -1604,7 +1623,12 @@ public final class Turn {
               && !definition.nativeOnly()
               && budget.exhausted()
               && automaticLimits.budget(id, budget, definition, sessionId, Transcript.NONE);
-      if (budget.exhausted() && !definition.nativeOnly() && !savingRetainedReport) {
+      boolean settlingGoalDependency =
+          admission != null && admission.goal() != null && admission.goal().continuing();
+      if (budget.exhausted()
+          && !definition.nativeOnly()
+          && !savingRetainedReport
+          && !settlingGoalDependency) {
         throw new Refused(
             "conversation "
                 + id
@@ -1640,7 +1664,11 @@ public final class Turn {
                     + " calls remain accounted for."));
       if (admission != null) {
         transcript.confine(admission.check(), admission.subject());
-        if (admission.goal() != null) transcript.goal(admission.goal());
+        if (admission.goal() != null) {
+          var goal = admission.goal();
+          transcript.goal(goal);
+          if (goal.inputProvenance() != null) transcript.prepareInput(goal.inputProvenance());
+        }
       }
       Consumer<Outcome> ended =
           outcome -> {

@@ -50,6 +50,9 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "conversation.list",
           "conversation.latest",
           "agent.list",
+          "goal.list",
+          "goal.status",
+          "goal.receipt",
           "job.list",
           "job.status",
           "board.topics",
@@ -160,7 +163,11 @@ record DispatchPolicy(Kind kind, List<Resource> resources) {
           "conversation.goal.get",
           "conversation.goal.pause",
           "conversation.goal.resume",
-          "conversation.goal.cancel");
+          "conversation.goal.cancel",
+          "goal.sources",
+          "goal.answer",
+          "message.listen",
+          "message.unlisten");
   private static final Set<String> SCHEDULES =
       Set.of(
           "schedule.define",

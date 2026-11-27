@@ -21,6 +21,8 @@ import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.TurnRecord;
 import io.aeyer.plowshare.server.archive.TurnStore;
 import io.aeyer.plowshare.server.auth.AuthFilter;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
+import io.aeyer.plowshare.server.information.InformationCaller;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import io.aeyer.plowshare.server.requests.RequestedAfter;
 import io.aeyer.plowshare.server.requests.RequestedAgent;
@@ -35,6 +37,7 @@ import io.aeyer.plowshare.server.requests.RequestedTurnCap;
 import io.aeyer.plowshare.server.requests.RequestedWindow;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -189,7 +192,15 @@ public class ConversationController {
         : entries.forAccount(io.aeyer.plowshare.server.information.InformationCaller.account());
   }
 
+  private GoalConversationAccess goalAccess;
+
+  @Autowired(required = false)
+  public void useGoalAccess(GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
+  }
+
   private void requireInformation(String log) {
+    if (goalAccess != null && goalAccess.requireLog(InformationCaller.account(), log)) return;
     if (information != null)
       information.requireLog(
           log, io.aeyer.plowshare.server.information.InformationCaller.account());

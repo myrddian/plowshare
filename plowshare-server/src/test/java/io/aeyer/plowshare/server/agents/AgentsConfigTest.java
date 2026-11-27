@@ -481,6 +481,7 @@ class AgentsConfigTest {
             "critic",
             "diagnosis_verifier",
             "document_summariser",
+            "goal_worker",
             "image_reader",
             "information_tag_grouper",
             "information_tagger",

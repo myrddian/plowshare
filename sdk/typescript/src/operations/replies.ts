@@ -51,6 +51,101 @@ export interface ActingTurnReceipt {
   readonly job: string | null;
 }
 
+export interface GoalAgentStarted {
+  readonly goal: string;
+  readonly conversation: string;
+  readonly instance: string;
+  readonly version: number;
+  readonly requestId: string;
+}
+
+/** Current project-scoped status. Content is withheld when readable is false. */
+export interface GoalStatus {
+  readonly goal: string;
+  readonly project: string;
+  readonly conversation: string;
+  readonly instance: string;
+  readonly agent: string | null;
+  readonly objective: string | null;
+  readonly lifecycle: 'AD_HOC' | 'STANDING';
+  readonly state: ConversationGoalStatus['state'];
+  readonly version: number;
+  readonly readable: boolean;
+  readonly reason: ConversationGoalStatus['reason'];
+  readonly detail: string | null;
+  readonly latestResult: GoalResult | null;
+  readonly nextScheduleAt: string | null;
+  readonly schedules: readonly GoalScheduleWake[];
+  readonly relayListeners: readonly GoalRelayWake[];
+  readonly moreSchedules: boolean;
+  readonly moreRelayListeners: boolean;
+}
+
+/** Latest committed cycle or terminal result and the conversation turn that produced it. */
+export interface GoalResult {
+  readonly job: string;
+  readonly turn: number;
+  readonly summary: string;
+  readonly evidence: readonly string[];
+}
+export interface GoalScheduleWake {
+  readonly schedule: string;
+  readonly generation: string;
+  readonly paused: boolean;
+  readonly nextFireAt: string | null;
+}
+export interface GoalRelayWake {
+  readonly binding: string;
+  readonly topic: string | null;
+  readonly generation: string;
+  readonly failure:
+    'SOURCE_CHANGED' | 'RETENTION_GAP' | 'UNSUPPORTED_PUBLICATION' | null;
+  readonly pendingBatch: GoalPendingBatch | null;
+}
+export interface GoalPendingBatch {
+  readonly id: string;
+  readonly state: 'OPEN' | 'READY';
+  readonly memberCount: number;
+  readonly deadline: string;
+}
+export interface GoalPage {
+  readonly goals: readonly GoalStatus[];
+  readonly next: string | null;
+}
+
+export interface GoalAgentSources {
+  readonly goal: string;
+  readonly project: string;
+  readonly sources: readonly {
+    readonly topic: string;
+    readonly generation: string;
+    readonly kind: 'TEXT' | 'EMPTY';
+  }[];
+}
+
+export interface GoalAgentListener {
+  readonly binding: string;
+  readonly goal: string;
+  readonly topic: string;
+  readonly generation: string;
+}
+
+/** Retained acknowledgement for a versioned removal of a dedicated Goal Agent listener. */
+export interface GoalAgentUnlistenReceipt {
+  readonly goal: string;
+  readonly binding: string;
+  readonly version: number;
+  readonly requestId: string;
+}
+
+/** Coordinates of a dedicated Goal Agent answer accepted for durable delivery. */
+export interface GoalAnswerReceipt {
+  readonly goal: string;
+  readonly conversation: string;
+  readonly question: string;
+  readonly requestId: string;
+}
+
 export interface ConversationGoalStatus {
   readonly goal: string;
   readonly conversation: string;
@@ -60,6 +155,8 @@ export interface ConversationGoalStatus {
   readonly state:
     | 'READY'
     | 'RUNNING'
+    | 'IDLE'
+    | 'WAITING'
     | 'PAUSING'
     | 'PAUSED'
     | 'BLOCKED'
@@ -140,6 +237,14 @@ export interface Replies
   // and not with the conversation family's OK replies. Its own shape, not a StartedJob: the handle
   // is in `job` and the identity the caller correlates on is `child`.
   'application.child.run': ContainedApplicationRunning;
+  'goal.start': GoalAgentStarted;
+  'goal.list': GoalPage;
+  'goal.status': GoalStatus;
+  'goal.receipt': GoalAgentStarted;
+  'goal.sources': GoalAgentSources;
+  'goal.answer': GoalAnswerReceipt;
+  'message.listen': GoalAgentListener;
+  'message.unlisten': GoalAgentUnlistenReceipt;
   'conversation.goal.start': ConversationGoalStatus;
   'conversation.goal.get': ConversationGoalStatus;
   'conversation.goal.pause': ConversationGoalStatus;

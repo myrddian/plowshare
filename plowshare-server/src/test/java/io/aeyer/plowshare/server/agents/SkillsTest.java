@@ -259,7 +259,8 @@ class SkillsTest {
             (project, session) -> false);
     var catalog = resolver.forCaller(new DefinitionResolver.Caller(7L, "other"));
     assertEquals(
-        Set.of("diagnose-conversation", "information-discovery"), catalog.skills().keySet());
+        Set.of("diagnose-conversation", "goal", "information-discovery"),
+        catalog.skills().keySet());
     assertEquals(Tier.SHIPPED, catalog.skills().get("diagnose-conversation").definition().tier());
     var discovery = catalog.skills().get("information-discovery").definition();
     assertEquals(Tier.SHIPPED, discovery.tier());

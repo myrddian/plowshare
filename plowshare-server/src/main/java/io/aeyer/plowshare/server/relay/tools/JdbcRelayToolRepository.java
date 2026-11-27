@@ -5,6 +5,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayCausationCodec;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.sql.Timestamp;
 import java.util.Objects;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -118,11 +120,16 @@ public final class JdbcRelayToolRepository implements RelayToolRepository {
           var retained = locked(intent);
           if (inserted) {
             var topic = new Relay.TopicKey(intent.projectId(), intent.binding().requests());
-            relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
-            relay.registerTopic(
+            relay.registerOwnedTopic(
+                topic,
+                RelayPayload.Kind.TEXT,
+                Relay.Policy.systemDefault(),
+                RelayTopicOwnership.internal(Owner.HOSTED_TOOLS));
+            relay.registerOwnedTopic(
                 new Relay.TopicKey(intent.projectId(), intent.binding().results()),
                 RelayPayload.Kind.TEXT,
-                Relay.Policy.systemDefault());
+                Relay.Policy.systemDefault(),
+                RelayTopicOwnership.internal(Owner.HOSTED_TOOLS));
             relay.publish(
                 topic,
                 new Relay.Draft(

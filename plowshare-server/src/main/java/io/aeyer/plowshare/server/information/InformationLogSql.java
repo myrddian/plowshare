@@ -12,17 +12,24 @@ public final class InformationLogSql {
       String column, String account, InformationLogVisibility.Facts facts) {
     if (!Set.of("conversation", "i.conversation", "id", "c.id", "s.conversation_id")
         .contains(column)) throw new IllegalArgumentException("Unknown log column");
+    var denied = unreadable(account, facts);
+    return new InformationSql.Filter(column + " NOT IN (" + denied.sql() + ")", denied.arguments());
+  }
+
+  /** A reusable statement-local relation for reads that check more than one log reference. */
+  public static InformationSql.Filter unreadable(
+      String account, InformationLogVisibility.Facts facts) {
     return facts
         .blocked()
         .<InformationSql.Filter>map(
             logs ->
                 new InformationSql.Filter(
-                    column + " NOT IN (SELECT blocked FROM unnest(?::text[]) AS denied(blocked))",
+                    "SELECT log FROM unnest(?::text[]) AS denied(log)",
                     List.of(new SqlArrayValue("text", logs.toArray()))))
         .orElseGet(
             () ->
                 new InformationSql.Filter(
-                    column + " NOT IN (SELECT log FROM information_unreadable_logs(?))",
+                    "SELECT log FROM information_unreadable_logs(?)",
                     java.util.Collections.singletonList(account)));
   }
 }

@@ -41,6 +41,7 @@ class PersonalStarterTest {
     assertEquals(
         Set.of(
             "diagnose-conversation",
+            "goal",
             "information-discovery",
             "personal-capture",
             "personal-process-inbox",
@@ -54,7 +55,7 @@ class PersonalStarterTest {
         new AgentDefinition(
             "worker", "Worker", "reasoning", List.of(), List.of(), List.of(), 4, 8, "Role");
     assertTrue(personal.granted(worker).isEmpty());
-    assertEquals(9, personal.granted(worker.withSkills(List.of("*"))).size());
+    assertEquals(10, personal.granted(worker.withSkills(List.of("*"))).size());
     for (var skill : personal.skills().values()) {
       assertTrue(skill.definition().agentVisible());
       assertEquals(
@@ -80,7 +81,8 @@ class PersonalStarterTest {
     assertTrue(otherProject.granted(worker).isEmpty());
     var otherAccount = resolver.forCaller(new Caller(11L, null, "bob"));
     assertEquals(
-        Set.of("diagnose-conversation", "information-discovery"), otherAccount.skills().keySet());
+        Set.of("diagnose-conversation", "goal", "information-discovery"),
+        otherAccount.skills().keySet());
     assertEquals(
         io.aeyer.plowshare.server.agents.OrchestrationDefinition.Tier.SHIPPED,
         otherAccount.skills().get("diagnose-conversation").definition().tier());

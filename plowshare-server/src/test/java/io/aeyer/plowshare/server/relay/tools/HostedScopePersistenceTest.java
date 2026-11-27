@@ -266,8 +266,11 @@ class HostedScopePersistenceTest {
     // routes.
     when(f.ledger.find(project, OWNER, id, true))
         .thenAnswer(c -> ledger.find(project, OWNER, id, true));
-    when(f.relay.registerTopic(any(), any(), any()))
-        .thenAnswer(c -> relay.registerTopic(c.getArgument(0), c.getArgument(1), c.getArgument(2)));
+    when(f.relay.registerOwnedTopic(any(), any(), any(), any()))
+        .thenAnswer(
+            c ->
+                relay.registerOwnedTopic(
+                    c.getArgument(0), c.getArgument(1), c.getArgument(2), c.getArgument(3)));
     doAnswer(c -> relay.publish(c.getArgument(0), c.getArgument(1)))
         .when(f.relay)
         .publish(any(), any());

@@ -1,8 +1,10 @@
 package io.aeyer.plowshare.server.orchestrations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.aeyer.plowshare.protocol.Home;
@@ -14,9 +16,13 @@ import io.aeyer.plowshare.server.agents.Turn;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
+import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore.NewOrchestration;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.testing.AuthorityFixtures;
 import io.aeyer.plowshare.server.todos.StageRules;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -328,6 +334,87 @@ class DeliveryTest {
     ending(store.find(run.id()).orElseThrow());
     assertEquals(1, inbox.notices.size());
     assertNotNull(store.find(run.id()).orElseThrow().resultDeliveredAt());
+  }
+
+  @Test
+  void goal_owned_endings_remain_available_to_the_exact_receipt_and_skip_generic_delivery() {
+    var conversation = callerConversation();
+    var owner =
+        new GoalOrchestrations.Owner(conversation, "interlocutor", "enzo", UUID.randomUUID());
+    var key =
+        new GoalOrchestrationReceipts.Key(
+            owner, UUID.randomUUID(), "story", "code_implementation", "sha256:x");
+    var receipts =
+        new JdbcGoalOrchestrationReceipts(
+            jdbc,
+            new SqlWorkBudget() {
+              @Override
+              public <T> T within(Duration budget, Supplier<T> action) {
+                return action.get();
+              }
+            },
+            new SqlWorkBudgetProperties(Duration.ofSeconds(2), Duration.ofMillis(500), 1, 1, 8, 1));
+    var receipt =
+        work.inTransaction(
+            () ->
+                store.receiveStart(
+                    "enzo",
+                    key.invocation(),
+                    JdbcGoalOrchestrationReceipts.payload(key, "Do the work."),
+                    () -> run(conversation, "enzo")));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            work.inTransaction(
+                () ->
+                    store.receiveStart(
+                        "enzo",
+                        key.invocation(),
+                        JdbcGoalOrchestrationReceipts.payload(key, "Replace the original task."),
+                        () -> run(conversation, "enzo"))));
+    var active = receipts.active(key).orElseThrow();
+    assertEquals(receipt.id(), active.id());
+    var foreign =
+        new GoalOrchestrationReceipts.Key(
+            new GoalOrchestrations.Owner(
+                conversation, owner.agent(), owner.executor(), UUID.randomUUID()),
+            key.invocation(),
+            key.project(),
+            key.name(),
+            key.hash());
+    assertTrue(receipts.find(foreign).isEmpty());
+    assertTrue(
+        receipts
+            .find(
+                new GoalOrchestrationReceipts.Key(
+                    owner, key.invocation(), key.project(), key.name(), "sha256:changed"))
+            .isEmpty());
+
+    var run = store.find(receipt.id()).orElseThrow();
+    var question = asked(run);
+    delivery.questionAsked(run, question);
+    assertEquals(1, caller.spoken.size());
+    assertNotNull(deliveredAt(question));
+    assertTrue(store.answer(run.id(), "An answer", "enzo"));
+    String artifact = "text ".repeat(GoalOrchestrations.MAX_INLINE_RESULT / 5 + 10);
+    assertTrue(store.finish(run.id(), artifact));
+    var ended = store.find(run.id()).orElseThrow();
+    var ordinary = finished(run(conversation, "enzo"));
+    delivery.runEnded(ended);
+    delivery.drainCaller(conversation);
+    delivery.drainAll();
+
+    assertEquals(2, caller.spoken.size());
+    assertTrue(inbox.notices.isEmpty());
+    assertNull(store.find(ended.id()).orElseThrow().resultDeliveredAt());
+    assertNotNull(store.find(ordinary.id()).orElseThrow().resultDeliveredAt());
+    assertTrue(receipts.active(key).isEmpty());
+    var result = receipts.find(key).orElseThrow();
+    assertEquals(artifact, ended.result());
+    assertEquals(artifact.substring(0, GoalOrchestrations.MAX_INLINE_RESULT + 1), result.result());
+    assertTrue(receipts.stillTerminal(key, active, result.state(), result.endedAt()));
+    assertFalse(
+        receipts.stillTerminal(key, active, result.state(), result.endedAt().minusSeconds(1)));
   }
 
   @Test

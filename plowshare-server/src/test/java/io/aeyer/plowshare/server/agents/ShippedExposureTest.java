@@ -84,7 +84,8 @@ class ShippedExposureTest {
             "code_reviewer",
             "librarian",
             "close_reader",
-            "image_reader"),
+            "image_reader",
+            "goal_worker"),
         new AgentRegistry(shipped()).exportedNames());
   }
 
@@ -104,6 +105,14 @@ class ShippedExposureTest {
     assertFalse(agents.get(Scribe.AGENT).exported());
     assertFalse(agents.get(Learner.AGENT).exported());
     assertFalse(agents.get(Curator.AGENT).exported());
+  }
+
+  @Test
+  void shippedGoalWorkerFitsTheInterlocutorsHandoffGrants() {
+    var definitions = shipped();
+    var worker = definitions.get("goal_worker");
+    GoalTurn.requireAgent(worker);
+    assertTrue(AgentRegistry.permitsGoalHandoff(definitions.get("interlocutor"), worker));
   }
 
   /** Skills delegate to the Interlocutor; capability access remains explicit. */

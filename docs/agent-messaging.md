@@ -78,6 +78,16 @@ an ended task is refused; select a persistent address or create another task.
 
 ## Replies and outcomes
 
+An active persistent bot can request a correlated result when it starts a Goal
+through the handoff skill while handling a native message. `goal_start` takes
+`replyExpected: true` and returns the exact launch message ID. Goal outcomes,
+blockers and questions appear as passive replies to it. The original bot can
+read them with `goal_return_read` in a later turn using the launch ID in
+`message`. An optional `before` cursor pages older replies. Completion closes the
+launch with one final reply. An exact question accepts one explicit final
+reverse reply with `reply_to` and no new reply expectation. Closing the
+launch fences any later answer. [Goal notifications](conversation-goals-design.md#steering-and-notifications)
+
 Incoming message data contains its `id`, `from`, sender definition name,
 `return_address`, `from_project`, `to_project`, `body`, and `reply_expected`. Replies also carry `reply_to`,
 `final`, and `generated`; generated outcome replies include the actual `ending`.

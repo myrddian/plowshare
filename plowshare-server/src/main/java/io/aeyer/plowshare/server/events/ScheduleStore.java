@@ -4,6 +4,7 @@ import io.aeyer.plowshare.server.relay.Relay;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
@@ -40,7 +41,10 @@ public interface ScheduleStore {
    * publication scope. Joins the publisher's transaction; empty means a changed/paused/denied
    * schedule or a losing claimant. Projectless schedules explicitly use server scope.
    */
-  Optional<Relay.Scope> claimPublication(ScheduleRecord selected, Instant following);
+  Optional<Claim> claimPublication(ScheduleRecord selected, Instant following);
+
+  /** The optional Goal generation belongs to the same revision and transaction as the claim. */
+  record Claim(Relay.Scope scope, UUID goalGeneration) {}
 
   int rollForward(Instant olderThan, Function<ScheduleRecord, Instant> following);
 }

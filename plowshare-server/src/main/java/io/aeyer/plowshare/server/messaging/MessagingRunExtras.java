@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.messaging;
 
 import io.aeyer.plowshare.server.agents.AgentTool;
 import io.aeyer.plowshare.server.agents.RunExtras;
+import io.aeyer.plowshare.server.agents.SendMessageTool;
 import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.events.InboxAlertReadTool;
 import io.aeyer.plowshare.server.events.InboxStore;
@@ -9,6 +10,7 @@ import io.aeyer.plowshare.server.information.InformationJobs;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /** Messaging tools compose independently for account-owned project contexts and transport runs. */
@@ -33,12 +35,15 @@ public final class MessagingRunExtras implements RunExtras {
   public Extras forRun(Context context) {
     String conversation = context.conversationId();
     if (conversation == null) return Extras.NONE;
-    if (messages.isTransport(conversation)
+    var goalReturn = goalReturnReader(context);
+    if (goalReturn.isPresent()
+        || messages.isTransport(conversation)
         || (context.home() != null
             && !context.home().isGlobal()
             && conversations.ownerOf(conversation).isPresent())) {
       var tools = new ArrayList<AgentTool>();
       tools.add(messages.tool(context));
+      goalReturn.ifPresent(tools::add);
       messages
           .mailboxAlertFor(context)
           .ifPresent(
@@ -59,5 +64,19 @@ public final class MessagingRunExtras implements RunExtras {
       return new Extras(List.copyOf(tools), context.end(), false);
     }
     return Extras.NONE;
+  }
+
+  private Optional<AgentTool> goalReturnReader(Context context) {
+    if (context.definition() == null
+        || !context.definition().bot()
+        || !context.definition().tools().contains(SendMessageTool.NAME)
+        || context.home() == null
+        || context.home().isGlobal()
+        || context.callerHandle() == null) return Optional.empty();
+    var inputs = information.get();
+    if (inputs == null) return Optional.empty();
+    return messages.goalReturnReader(
+        context,
+        source -> inputs.inherit(source, context.conversationId(), context.callerHandle()));
   }
 }

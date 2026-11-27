@@ -65,6 +65,14 @@ public final class ScheduleActionAuthority implements ScheduleDefinitions.Author
                 .orElseThrow(() -> new CallerFault("No accessible message instance"));
         project = instance.project();
         agent = instance.agent();
+        if (messaging.goalScheduleTarget(instance)
+            && (!definition.action().kind().equals("agent")
+                || !instance.id().equals(target.to())
+                || target.route() != null
+                || !source.project().equals(project)
+                || target.project() != null && !source.project().equals(target.project())))
+          throw new CallerFault(
+              "A Goal schedule requires its exact project instance and an agent action");
       }
       if (!definition.action().agent().equals(agent))
         throw new CallerFault("The scheduled action agent must match the message destination");

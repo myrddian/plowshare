@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /** Per-activation binding. This object belongs to the root transcript and runtime only. */
 public final class GoalTurn {
@@ -57,6 +58,28 @@ public final class GoalTurn {
         boolean journalFailed,
         Runnable writeTurn);
   }
+
+  /** A declared Goal dependency tool needs the server's original call slot before dispatch. */
+  public interface WaitTool extends AgentTool {
+    void calledAt(TurnEnd end, Transcript.Spoken turn, int answer, String call);
+  }
+
+  /** Root Goal approval owner. The retained call and wait are committed in the same SQL unit. */
+  @FunctionalInterface
+  public interface ParkApproval {
+    void retain(String approval, int turn, int answer, String call, Runnable retainCall);
+  }
+
+  /** The exact recorded tool slot selected by the Goal scheduler. */
+  public record ApprovalContinuation(String id, String call, int turn, int answer) {}
+
+  /** Root-only dependency authority and the result selected for this activation, if any. */
+  public record Dependencies(
+      ParkApproval parkApproval,
+      ApprovalContinuation approval,
+      boolean ownerResult,
+      Runnable settled,
+      BooleanSupplier approvalParked) {}
 
   private static final Set<String> SUSPENDING_TOOLS =
       Set.of("run", "file_edit", "file_delete", "file_move", SearchTool.NAME, FetchTool.NAME);
@@ -102,21 +125,90 @@ public final class GoalTurn {
   private final String conversation;
   private final OperationAuthority.Admission authority;
   private final Settlement settlement;
+  private final List<AgentTool> listenerTools;
+  private final InputProvenance inputProvenance;
+  private final Dependencies dependencies;
   private final AtomicReference<Decision> decision = new AtomicReference<>();
   private final AtomicBoolean journalFailed = new AtomicBoolean();
+  private final AtomicBoolean parkedApproval = new AtomicBoolean();
 
   public GoalTurn(
       UUID id, String conversation, OperationAuthority.Admission authority, Settlement settlement) {
+    this(id, conversation, authority, settlement, List.of());
+  }
+
+  public GoalTurn(
+      UUID id,
+      String conversation,
+      OperationAuthority.Admission authority,
+      Settlement settlement,
+      List<AgentTool> listenerTools) {
+    this(id, conversation, authority, settlement, listenerTools, null);
+  }
+
+  public GoalTurn(
+      UUID id,
+      String conversation,
+      OperationAuthority.Admission authority,
+      Settlement settlement,
+      List<AgentTool> listenerTools,
+      InputProvenance inputProvenance) {
+    this(id, conversation, authority, settlement, listenerTools, inputProvenance, null);
+  }
+
+  public GoalTurn(
+      UUID id,
+      String conversation,
+      OperationAuthority.Admission authority,
+      Settlement settlement,
+      List<AgentTool> listenerTools,
+      InputProvenance inputProvenance,
+      Dependencies dependencies) {
     this.id = Objects.requireNonNull(id);
     this.conversation = Objects.requireNonNull(conversation);
     this.authority = Objects.requireNonNull(authority);
     this.settlement = Objects.requireNonNull(settlement);
+    this.listenerTools = List.copyOf(listenerTools);
+    this.inputProvenance = inputProvenance;
+    this.dependencies = dependencies;
   }
 
   public static void requireAgent(AgentDefinition agent) {
-    RetainedAgent.require(agent);
+    requireAgent(agent, false);
+  }
+
+  public static void requireAgent(AgentDefinition agent, boolean dedicated) {
+    RetainedAgent.require(agent, dedicated);
     if (agent.tools().stream().anyMatch(SUSPENDING_TOOLS::contains))
       throw new CallerFault("Choose an agent whose tools support unattended goal turns");
+  }
+
+  boolean retainsApprovals() {
+    return dependencies != null && dependencies.parkApproval() != null;
+  }
+
+  void retainApproval(String approval, int turn, int answer, String call, Runnable retainCall) {
+    dependencies.parkApproval().retain(approval, turn, answer, call, retainCall);
+  }
+
+  public ApprovalContinuation approval() {
+    return dependencies == null ? null : dependencies.approval();
+  }
+
+  boolean ownerResult() {
+    return dependencies != null && dependencies.ownerResult();
+  }
+
+  boolean continuing() {
+    return approval() != null || ownerResult();
+  }
+
+  boolean parkedApproval() {
+    return parkedApproval.get();
+  }
+
+  void dependencySettled() {
+    dependencies.settled().run();
   }
 
   public OperationAuthority.Admission authority() {
@@ -131,12 +223,27 @@ public final class GoalTurn {
     return new Speaker(Speaker.Kind.HARNESS, "goal " + id);
   }
 
+  InputProvenance inputProvenance() {
+    return inputProvenance;
+  }
+
   void journalFailed() {
     journalFailed.set(true);
   }
 
   void commit(String job, int ordinal, Outcome outcome, Runnable writeTurn) {
     settlement.commit(job, ordinal, outcome, decision.get(), journalFailed.get(), writeTurn);
+    if (dependencies != null && dependencies.approvalParked().getAsBoolean())
+      parkedApproval.set(true);
+  }
+
+  boolean intrinsic(String name) {
+    return UPDATE.equals(name)
+        || listenerTools.stream().anyMatch(tool -> tool.schema().name().equals(name));
+  }
+
+  List<AgentTool> listenerTools() {
+    return listenerTools;
   }
 
   AgentTool tool(TurnEnd end) {

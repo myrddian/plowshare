@@ -1,11 +1,16 @@
 package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.ScheduledWork;
+import io.aeyer.plowshare.server.archive.ArchiveUnavailableException;
 import io.aeyer.plowshare.server.archive.ProjectMembers;
 import io.aeyer.plowshare.server.archive.ProjectStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
+import io.aeyer.plowshare.server.reads.ReadUnavailableException;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 
 /** Files are desired configuration; the existing database owns execution and next-fire state. */
 public final class FileScheduleDefinitions implements ScheduleDefinitions {
@@ -347,6 +352,13 @@ public final class FileScheduleDefinitions implements ScheduleDefinitions {
   }
 
   private static String reason(RuntimeException failure) {
+    // A failed or uncertain SQL transaction cannot establish that the source is invalid.
+    // Propagate before the source fallback can write new refusals or discard earlier work.
+    if (failure instanceof ReadFailedException
+        || failure instanceof ReadUnavailableException
+        || failure instanceof ArchiveUnavailableException
+        || failure instanceof DataAccessException
+        || failure instanceof TransactionException) throw failure;
     String reason =
         failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage();
     return reason.length() > 1000 ? reason.substring(0, 1000) : reason;

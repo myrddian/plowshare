@@ -56,7 +56,7 @@ class RelayMessageReviewTest {
     when(projects.id("fixture")).thenReturn(1L);
     when(projects.personalOwner("fixture")).thenReturn(Optional.empty());
     when(members.mayWork(eq("fixture"), anyString())).thenReturn(true);
-    when(relay.topic(responseTopic)).thenReturn(topic(0));
+    when(relay.registerOwnedTopic(eq(responseTopic), any(), any(), any())).thenReturn(topic(0));
     when(relay.publish(any(), any()))
         .thenAnswer(
             call -> {

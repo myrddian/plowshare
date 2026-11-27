@@ -531,6 +531,36 @@ information report finalisations. The Board selector resolves the owning
 message. The information selector derives its topic through Information and
 checks access to the referenced revision before starting a skill. [Board and information selectors](personal-space.md#follow-board-posts-resolutions-and-finalised-reports)
 
+## Topic ownership and Goal feed eligibility
+
+Relay records topic ownership on the same row as its scoped key and generation.
+Topics created through ordinary project and application data paths may be
+general-purpose. Trusted subsystem registration declares an owner and can opt a
+new feed into Goal Agent discovery. The same owner declaration is idempotent.
+Conflicting declarations fail, and retiring the topic removes its classification.
+Registration, inspection, publication, and subscription keep their existing
+authority checks.
+
+Built-in topics remain internal to their owners. Backfilled ownership uses
+known typed feeds, exact scoped topic identities, or an authoritative binding
+such as the Messaging inbox registry. Legacy topics with inconclusive ownership
+stay ineligible. Trusted subsystem registrations can identify those topics as
+internal while preserving their current generation and retained history.
+
+The server registry selects eligible general-purpose topics and explicitly
+exposed feeds. It filters by scope, name prefix and payload kind before paging,
+and exact lookup requires the current generation. A caller must separately
+establish read and subscription authority. The Goal Agent listener uses the
+registry for both `goal.sources` and `message.listen`. The caller selects the exact generation, the server
+rechecks the retained admission, and the binding joins the Relay cursor
+registration transaction. Optional `batchCount` and `maxDelaySeconds` let
+the listener freeze a durable group at its count or age limit. The consumer
+offset advances with staged input. The admitted turn owns batch settlement.
+An owner can remove the binding with `message.unlisten`. Cursor retirement
+checks both the original topic generation and the exact subscription
+generation, leaving the shared feed available.
+[Goal Agent listeners](conversation-goals-design.md#listen-to-a-relay-topic)
+
 ## Inspection and clients
 
 Authenticated WebSocket operations are:

@@ -95,6 +95,41 @@ it('negotiates concurrent dispatch before publishing readiness or allowing appli
   stream.close();
 });
 
+it('classifies cancellation and expiry by physical submission without replay', async () => {
+  const stream = openEventStream({
+    session: 's',
+    onEvent: vi.fn(),
+    open,
+    dispatchMode: 'ordered',
+  });
+  await expect(stream.ask('goal.status')).rejects.toMatchObject({
+    delivery: 'NOT_SUBMITTED',
+  });
+  latest().open();
+
+  const aborted = new AbortController();
+  aborted.abort();
+  await expect(
+    stream.ask('goal.status', {}, { signal: aborted.signal }),
+  ).rejects.toMatchObject({ delivery: 'NOT_SUBMITTED' });
+  expect(latest().sent).toHaveLength(0);
+
+  const lifeline = new AbortController();
+  const pending = expect(
+    stream.ask('goal.status', {}, { signal: lifeline.signal }),
+  ).rejects.toMatchObject({ delivery: 'UNKNOWN' });
+  lifeline.abort();
+  await pending;
+
+  const timing = expect(
+    stream.ask('conversation.goal.pause', {}, { timeoutMs: 250 }),
+  ).rejects.toMatchObject({ delivery: 'UNKNOWN' });
+  await vi.advanceTimersByTimeAsync(250);
+  await timing;
+  expect(latest().sent).toHaveLength(2);
+  stream.close();
+});
+
 it('refused negotiation closes without an ordered fallback or application send', async () => {
   const stream = openEventStream({ session: 's', onEvent: vi.fn(), open });
   latest().open();

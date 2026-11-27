@@ -342,7 +342,7 @@ class ProjectRelayPortsTest {
         new RelayPort.Consume(
             "project", "tool.x", "filters", id, RelayPort.Start.OLDEST_RETAINED, 1, 0);
     for (int i = 0; i < 3; i++) scoped.consume("reviewer", query);
-    verify(relay, times(3)).registerTopic(any(), any(), any());
+    verify(relay, times(3)).registerOwnedTopic(any(), any(), any(), any());
   }
 
   @Test
@@ -422,8 +422,11 @@ class ProjectRelayPortsTest {
                 List.of()));
     scoped.consume("provider", query);
     verify(relay)
-        .registerTopic(
-            eq(new Relay.TopicKey(7L, binding.requests())), eq(RelayPayload.Kind.TEXT), any());
+        .registerOwnedTopic(
+            eq(new Relay.TopicKey(7L, binding.requests())),
+            eq(RelayPayload.Kind.TEXT),
+            any(),
+            eq(RelayTopicOwnership.internal(RelayTopicOwnership.Owner.HOSTED_TOOLS)));
     assertThrows(CallerFault.class, () -> scoped.consume("other", query));
     assertThrows(
         CallerFault.class,

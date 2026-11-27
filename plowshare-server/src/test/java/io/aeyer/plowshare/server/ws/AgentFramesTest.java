@@ -68,6 +68,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -847,10 +848,14 @@ class AgentFramesTest {
     for (JsonNode row : rows) {
       String name = row.path("name").asText();
       assertEquals(
-          name.equals("figure_reader") ? 0 : name.equals("aristoxenus") ? 3 : 1,
+          name.equals("figure_reader") ? 0 : name.equals("aristoxenus") ? 4 : 1,
           row.path("commands").size());
       if (!name.equals("figure_reader")) {
-        JsonNode review = row.path("commands").get(name.equals("aristoxenus") ? 2 : 0);
+        JsonNode review =
+            StreamSupport.stream(row.path("commands").spliterator(), false)
+                .filter(entry -> entry.path("command").asText().equals("/skill:review"))
+                .findFirst()
+                .orElseThrow();
         assertEquals("/skill:review", review.path("command").asText());
         assertEquals(name, review.path("executor").asText());
         assertTrue(row.path("withheld").toString().contains("broken"));
@@ -864,7 +869,7 @@ class AgentFramesTest {
     FrameParity.assertSameAnswer(http, outcome);
     for (JsonNode row : FrameJson.answering().readTree(http.getContentAsString())) {
       assertEquals(
-          row.path("name").asText().equals("aristoxenus") ? 2 : 0, row.path("commands").size());
+          row.path("name").asText().equals("aristoxenus") ? 3 : 0, row.path("commands").size());
     }
   }
 

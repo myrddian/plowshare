@@ -19,6 +19,7 @@ public final class HarnessRunApprovalContinuations implements RunApprovalContinu
   private final Supplier<ConductorContinuation> conductors;
   private final Supplier<Messaging> messaging;
   private final Consumer<RecoveryProblem> report;
+  private Supplier<GoalApprovalContinuations> goals = () -> GoalApprovalContinuations.NONE;
   private Consumer<RunApproval> recoveredDecision = approval -> {};
 
   /** Recovery repeats notification hooks only, never the command effect. */
@@ -43,11 +44,25 @@ public final class HarnessRunApprovalContinuations implements RunApprovalContinu
     this.report = Objects.requireNonNull(report);
   }
 
+  /** Keep a dedicated Goal's decisions inside its scheduler, including early answers. */
+  public void useGoalContinuations(Supplier<GoalApprovalContinuations> owner) {
+    goals = Objects.requireNonNull(owner);
+  }
+
   @Override
   public Optional<Resumed> resume(String id) {
     var retained = calls.find(id);
-    if (retained.isEmpty()) return Optional.empty();
+    if (retained.isEmpty()) {
+      // An operator may answer before the original call has committed. The Goal scheduler
+      // will observe the durable decision when the exact wait is parked.
+      return approvals
+          .find(id)
+          .filter(approval -> goals.get().ownsConversation(approval.conversation()))
+          .map(approval -> new Resumed(null, false, null));
+    }
     var call = retained.get();
+    if (goals.get().ownsConversation(call.conversation()))
+      return Optional.of(new Resumed(null, false, null));
     if (active.contains(id)
         || calls.pending(call.conversation()).stream()
             .noneMatch(pending -> pending.approval().equals(id)))

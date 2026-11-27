@@ -294,7 +294,7 @@ tools: [code_map, file_roots, file_glob, file_grep, file_read, file_stat, file_e
 #                  above -- it holds document_search and document_list, which
 #                  this agent holds too -- and document_search's comment holds
 #                  the whole of why, at the length the decision earned.
-calls: [code_reviewer, image_reader, close_reader, coder]
+calls: [code_reviewer, image_reader, close_reader, coder, goal_worker]
 # EXPORTED, and this is the agent the key was invented for: a person's whole
 # way into this server is a turn taken by this agent, so GET /v1/agents has to
 # offer it and POST /v1/agents/interlocutor/runs has to accept it.

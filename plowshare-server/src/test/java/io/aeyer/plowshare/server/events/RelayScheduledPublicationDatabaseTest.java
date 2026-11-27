@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.events;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.DurableRelay;
 import io.aeyer.plowshare.server.relay.JdbcRelayPayloadStore;
@@ -139,12 +140,17 @@ class RelayScheduledPublicationDatabaseTest {
                 "INSERT INTO schedule_sources(account,project_id,source) VALUES('operator',?,'workspace') RETURNING id",
                 Long.class,
                 project));
-    var managed = schedule("managed", "daily");
+    schedule("managed", "daily");
     var global = schedule("global", "daily");
     jdbc.update("UPDATE schedules SET file_managed=true WHERE name='managed'");
     jdbc.update(
         "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES(?,'managed','managed','{}'::jsonb,'active')",
         source);
+    var managed =
+        schedules.due(AT).stream()
+            .filter(selected -> selected.name().equals("managed"))
+            .findFirst()
+            .orElseThrow();
     trigger("listener", "daily", 1);
     var entrants = new CountDownLatch(2);
     var queued = spy(firings);
@@ -315,11 +321,12 @@ class RelayScheduledPublicationDatabaseTest {
                 "INSERT INTO schedule_sources(account,project_id,source) VALUES('operator',?,'workspace') RETURNING id",
                 Long.class,
                 project));
-    var selected = schedule("managed", "daily");
+    schedule("managed", "daily");
     jdbc.update("UPDATE schedules SET file_managed=true WHERE name='managed'");
     jdbc.update(
         "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES(?,'managed','managed','{}'::jsonb,'active')",
         source);
+    var selected = schedules.due(AT).getFirst();
     assertTrue(publisher(relay, intake).publish(selected, AT.plusSeconds(3600), AT));
     var topic = scheduled(project);
     assertEquals(1, relay.topic(topic).lastPosition());
@@ -328,6 +335,83 @@ class RelayScheduledPublicationDatabaseTest {
     jdbc.update("UPDATE schedule_files SET status='refused' WHERE source_id=?", source);
     assertFalse(publisher(relay, intake).publish(next, AT.plusSeconds(7200), AT.plusSeconds(3600)));
     assertEquals(1, relay.topic(topic).lastPosition());
+  }
+
+  @Test
+  void managed_claim_rechecks_generation_after_waiting_for_an_input_only_edit() throws Exception {
+    long project =
+        Objects.requireNonNull(
+            jdbc.queryForObject(
+                "INSERT INTO projects(name) VALUES('input-only') RETURNING id", Long.class));
+    var files = new JdbcScheduleDefinitionStore(jdbc, work, schedules, triggers, firings);
+    var source = files.register("operator", project, "server");
+    var old =
+        new ScheduledWork(
+            1,
+            CRON.cron(),
+            CRON.zone().getId(),
+            false,
+            new ScheduledWork.Action("agent", "worker", null, "Original instruction.", null),
+            new ScheduledWork.Target("mailbox", null, null, null, null),
+            null);
+    var replacement =
+        new ScheduledWork(
+            1,
+            old.cron(),
+            old.zone(),
+            false,
+            new ScheduledWork.Action("agent", "worker", null, "New instruction.", null),
+            old.target(),
+            old.limits());
+    files.apply(source, "edit", old, AT.minusSeconds(1));
+    var selected = schedules.due(AT).getFirst();
+    var editorReady = new CountDownLatch(1);
+    var finishEdit = new CountDownLatch(1);
+    var scheduled = publisher(relay, intake);
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var edit =
+          threads.submit(
+              () ->
+                  work.inTransaction(
+                      () -> {
+                        files.apply(source, "edit", replacement, AT);
+                        editorReady.countDown();
+                        try {
+                          if (!finishEdit.await(10, TimeUnit.SECONDS))
+                            throw new IllegalStateException("Editor release timed out");
+                        } catch (InterruptedException interrupted) {
+                          Thread.currentThread().interrupt();
+                          throw new IllegalStateException(interrupted);
+                        }
+                        return true;
+                      }));
+      assertTrue(editorReady.await(5, TimeUnit.SECONDS));
+      var stale = threads.submit(() -> scheduled.publish(selected, AT.plusSeconds(3600), AT));
+      boolean waiting = false;
+      try {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!waiting && System.nanoTime() < deadline) {
+          waiting =
+              Boolean.TRUE.equals(
+                  jdbc.queryForObject(
+                      """
+              SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid))>0
+                AND query LIKE '%schedules%' AND wait_event_type='Lock')
+              """,
+                      Boolean.class));
+          if (!waiting) Thread.sleep(10);
+        }
+      } finally {
+        finishEdit.countDown();
+      }
+      assertTrue(waiting, "stale claim waited behind the file editor");
+      assertTrue(edit.get(5, TimeUnit.SECONDS));
+      assertFalse(stale.get(5, TimeUnit.SECONDS));
+    }
+    var latest = schedules.due(AT).getFirst();
+    assertEquals(AT, latest.nextFireAt());
+    assertNotEquals(selected.fileGeneration(), latest.fileGeneration());
+    assertTrue(scheduled.publish(latest, AT.plusSeconds(3600), AT));
   }
 
   @Test

@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
+import io.aeyer.plowshare.server.access.IdentityRepository;
+import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.ApplicationResources;
 import io.aeyer.plowshare.server.agents.EventRuns;
 import io.aeyer.plowshare.server.agents.WorkCallers;
@@ -21,6 +23,8 @@ import io.aeyer.plowshare.server.orchestrations.GrantedOrchestrations;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStarts;
 import io.aeyer.plowshare.server.orchestrations.OrchestrationStore;
 import io.aeyer.plowshare.server.personal.PersonalWorkspaces;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.relay.tools.ApplicationToolRegistry;
 import io.aeyer.plowshare.server.session.ProjectPresences;
 import io.aeyer.plowshare.server.session.SessionOwners;
@@ -93,6 +97,24 @@ public class RelayConfiguration {
       RelayProperties properties,
       BlobRepository blobs) {
     return new JdbcRelayRepository(jdbc, transactions, payloads, properties.textLimit(), blobs);
+  }
+
+  @Bean
+  @DependsOnDatabaseInitialization
+  public RelayTopicRegistry relayTopicRegistry(
+      JdbcTemplate jdbc, SqlWorkBudget sql, SqlWorkBudgetProperties budgets) {
+    return new JdbcRelayTopicRegistry(jdbc, sql, budgets);
+  }
+
+  @Bean
+  public GoalRelaySources goalRelaySources(
+      OperationAuthority authority,
+      IdentityRepository identities,
+      ProjectMembers members,
+      ProjectWorkspaces projects,
+      RelayTopicRegistry registry) {
+    return new AuthorizedGoalRelaySources(
+        authority, identities, RelayProjectReadAccess.existing(members, projects), registry);
   }
 
   @Bean

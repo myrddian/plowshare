@@ -961,7 +961,7 @@ public final class JobStore
       TurnCap cap,
       RunAdmission admission) {
     if (admission.goal() == null) RetainedAgent.requireRoot(definition);
-    else GoalTurn.requireAgent(definition);
+    else GoalTurn.requireAgent(definition, admission.goal().retainsApprovals());
     admission.check().run();
     return submit(
         definition,
@@ -1111,7 +1111,11 @@ public final class JobStore
         new RunLimits(budget, under),
         conversation,
         conversationOrigin,
-        ended,
+        outcome -> {
+          ended.accept(outcome);
+          if (admission != null && admission.goal() != null && admission.goal().parkedApproval())
+            runtime.deliverApprovalQuestions(conversation);
+        },
         (watch, cancelled) -> {
           JobRuntime runner = admission == null ? runtime : runtime.forAdmittedTurn(admission);
           Supplier<Outcome> run =

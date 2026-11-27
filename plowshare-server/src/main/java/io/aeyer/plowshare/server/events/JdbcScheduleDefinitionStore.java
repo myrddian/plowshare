@@ -8,13 +8,16 @@ import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.information.InformationJson;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** One transaction projects an authenticated file into the existing durable scheduling runtime. */
 public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStore {
   private final JdbcTemplate jdbc;
   private final UnitOfWork work;
+  private final UnitOfWork scheduleWrites;
   private final ScheduleStore schedules;
   private final TriggerStore triggers;
   private final FiringStore firings;
@@ -45,8 +48,21 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
       FiringStore firings,
       ProjectionCache<Optional<FileSnapshot>> fileCache,
       ProjectionCache<List<ScheduledWork.File>> filesCache) {
+    this(jdbc, work, schedules, triggers, firings, fileCache, filesCache, work);
+  }
+
+  public JdbcScheduleDefinitionStore(
+      JdbcTemplate jdbc,
+      UnitOfWork work,
+      ScheduleStore schedules,
+      TriggerStore triggers,
+      FiringStore firings,
+      ProjectionCache<Optional<FileSnapshot>> fileCache,
+      ProjectionCache<List<ScheduledWork.File>> filesCache,
+      UnitOfWork scheduleWrites) {
     this.jdbc = jdbc;
     this.work = work;
+    this.scheduleWrites = scheduleWrites;
     this.schedules = schedules;
     this.triggers = triggers;
     this.firings = firings;
@@ -427,7 +443,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
     if (name.startsWith(".")) throw new IllegalArgumentException("Invalid schedule file name");
     java.util.Objects.requireNonNull(definition);
     java.util.Objects.requireNonNull(now);
-    return work.inTransaction(
+    return scheduleWrites.inTransaction(
         () -> {
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
@@ -453,6 +469,17 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                   .isPresent()) return old.get().effective();
           boolean unchanged = old.filter(f -> definition.equals(f.rawDefinition())).isPresent();
           var projected = unchanged ? old.orElseThrow().effectiveDefinition() : definition;
+          var affected =
+              definition.target().kind().equals("message")
+                      || old.filter(
+                              f ->
+                                  f.rawDefinition() != null
+                                      && f.rawDefinition().target().kind().equals("message"))
+                          .isPresent()
+                  ? lockGoals(source, internal, definition)
+                  : List.<GoalTarget>of();
+          if (affected.stream().anyMatch(goal -> goal.proposed() && goal.ended()))
+            throw new CallerFault("That Goal Agent has ended");
           var timing = CronSchedule.parse(definition.cron(), definition.zone());
           if (old.filter(f -> f.status().equals("refused")).isPresent()
               || schedules
@@ -485,23 +512,27 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
           if (projected.paused()) firings.refuseWaiting(internal, "schedule file paused");
           // RETURNING observes the persisted override decision, including equality of JSONB on
           // conflict. Publish only through the enclosing transaction's existing commit boundary.
-          return jdbc.queryForObject(
-              "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,paused_override=CASE WHEN schedule_files.definition=EXCLUDED.definition THEN schedule_files.paused_override ELSE NULL END,status='active',error=NULL RETURNING "
-                  + FILE_COLUMNS,
-              (row, index) -> snapshot(source, row).effective(),
-              source.id(),
-              name,
-              internal,
-              ScheduleDefinitionCodec.write(definition));
+          var applied =
+              jdbc.queryForObject(
+                  "INSERT INTO schedule_files(source_id,name,internal_name,definition,status) VALUES (?,?,?,?::jsonb,'active') ON CONFLICT(source_id,name) DO UPDATE SET definition=EXCLUDED.definition,paused_override=CASE WHEN schedule_files.definition=EXCLUDED.definition THEN schedule_files.paused_override ELSE NULL END,status='active',error=NULL RETURNING "
+                      + FILE_COLUMNS,
+                  (row, index) -> snapshot(source, row).effective(),
+                  source.id(),
+                  name,
+                  internal,
+                  ScheduleDefinitionCodec.write(definition));
+          reconcileGoalInputs(affected, internal);
+          return applied;
         });
   }
 
   public void reject(Source source, String name, String error) {
     FileSnapshot.validateError(error);
-    work.inTransaction(
+    scheduleWrites.inTransaction(
         () -> {
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
+          var affected = lockGoals(source, internal, null);
           if (schedules.find(internal).isPresent())
             schedules.pause(internal, true, source.account());
           if (triggers.find(internal).isPresent()) triggers.pause(internal, true, source.account());
@@ -512,19 +543,23 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
               name,
               internal,
               error);
+          reconcileGoalInputs(affected, internal);
           return null;
         });
   }
 
   public void remove(Source source, String name) {
-    work.inTransaction(
+    scheduleWrites.inTransaction(
         () -> {
           lock(source);
           String internal = "scheduled-" + source.id() + "-" + name;
-          firings.refuseWaiting(internal, "schedule file removed");
-          if (triggers.find(internal).isPresent()) triggers.forget(internal, source.account());
+          var affected = lockGoals(source, internal, null);
+          // The ticker holds the schedule before it can supersede queued firings.
           if (schedules.find(internal).isPresent()) schedules.forget(internal, source.account());
+          if (triggers.find(internal).isPresent()) triggers.forget(internal, source.account());
+          firings.refuseWaiting(internal, "schedule file removed");
           jdbc.update("DELETE FROM schedule_files WHERE source_id=? AND name=?", source.id(), name);
+          reconcileGoalInputs(affected, internal);
           return null;
         });
   }
@@ -534,7 +569,7 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
     ScheduledWork.identity(name, "file name");
     java.util.Objects.requireNonNull(expected);
     java.util.Objects.requireNonNull(now);
-    work.inTransaction(
+    scheduleWrites.inTransaction(
         () -> {
           lock(source);
           var file =
@@ -550,6 +585,10 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
                   .orElseThrow(() -> new CallerFault("The schedule runtime is unavailable"));
           if (triggers.find(file.internalName()).isEmpty())
             throw new CallerFault("The schedule trigger is unavailable");
+          var affected =
+              file.definition().target().kind().equals("message")
+                  ? lockGoals(source, file.internalName(), null)
+                  : List.<GoalTarget>of();
           if (!paused && schedule.paused())
             schedules.define(
                 file.internalName(),
@@ -565,8 +604,90 @@ public final class JdbcScheduleDefinitionStore implements ScheduleDefinitionStor
               paused,
               source.id(),
               name);
+          reconcileGoalInputs(affected, file.internalName());
           return null;
         });
+  }
+
+  private record GoalTarget(UUID id, boolean previous, boolean proposed, boolean ended) {}
+
+  private List<GoalTarget> lockGoals(Source source, String schedule, ScheduledWork proposed) {
+    if (source.projectId() == null) return List.of();
+    var target = proposed == null ? null : proposed.target();
+    boolean exact =
+        target != null
+            && proposed.action().kind().equals("agent")
+            && target.kind().equals("message")
+            && target.route() == null
+            && (target.project() == null || Objects.equals(source.project(), target.project()));
+    // Source writers serialize by source, then take all affected Goals in UUID order. Goal
+    // claims lock their Goal before its file, so a file lock or trigger cannot acquire Goals.
+    return jdbc.query(
+        """
+        WITH affected AS (
+          SELECT goal,TRUE AS previous,FALSE AS proposed FROM goal_schedule_bindings WHERE schedule=?
+          UNION ALL
+          SELECT g.id,FALSE,TRUE FROM conversation_goals g
+          JOIN message_instances i ON i.id=g.instance AND i.conversation=g.conversation
+          WHERE g.instance=? AND g.agent=? AND g.executor=? AND i.account=g.executor
+            AND i.agent=g.agent AND i.project=? AND i.lifetime='persistent' AND i.active
+        ), distinct_targets AS (
+          SELECT goal,bool_or(previous) AS previous,bool_or(proposed) AS proposed
+          FROM affected GROUP BY goal
+        )
+        SELECT g.id,a.previous,a.proposed,g.state IN ('STOPPING','CANCELLED','COMPLETE') AS ended
+        FROM distinct_targets a JOIN conversation_goals g ON g.id=a.goal
+        ORDER BY g.id FOR UPDATE OF g
+        """,
+        (row, index) ->
+            new GoalTarget(
+                row.getObject("id", UUID.class),
+                row.getBoolean("previous"),
+                row.getBoolean("proposed"),
+                row.getBoolean("ended")),
+        schedule,
+        exact ? target.to() : null,
+        exact ? proposed.action().agent() : null,
+        source.account(),
+        source.project());
+  }
+
+  private void reconcileGoalInputs(List<GoalTarget> affected, String schedule) {
+    for (var goal : affected) {
+      if (!goal.previous()) continue;
+      // Recheck the effective generation after writing the file. A claimed receipt belongs
+      // to its turn even when the schedule pauses, changes destination or disappears.
+      jdbc.update(
+          """
+          UPDATE goal_agent_inputs i SET settled=TRUE,disposition='STALE_SCHEDULE'
+          FROM firings due
+          WHERE i.goal=? AND NOT i.settled AND i.claimed_job IS NULL
+            AND due.id=i.schedule_firing AND due.schedule=?
+            AND NOT EXISTS (
+              SELECT 1 FROM goal_schedule_bindings b WHERE b.goal=i.goal
+                AND b.schedule=due.schedule AND b.generation=due.schedule_generation AND NOT b.paused)
+          """,
+          goal.id(),
+          schedule);
+      jdbc.update(
+          """
+          WITH closed AS (
+            UPDATE conversation_goals g SET state='COMPLETE',reason=NULL,version=version+1
+            WHERE g.id=? AND g.state IN ('IDLE','PAUSED') AND g.cycle IS NULL
+              AND NOT EXISTS (SELECT 1 FROM goal_schedule_bindings b WHERE b.goal=g.id)
+              AND NOT EXISTS (
+                SELECT 1 FROM goal_agent_listeners l WHERE l.goal=g.id AND l.removed_at IS NULL)
+              AND NOT EXISTS (
+                SELECT 1 FROM goal_agent_inputs i WHERE i.goal=g.id AND NOT i.settled
+                  AND i.claimed_job IS NULL AND i.message IS NOT NULL AND i.schedule_firing IS NULL)
+            RETURNING id
+          )
+          UPDATE goal_agent_inputs i SET settled=TRUE,disposition='GOAL_ENDED'
+          FROM closed g WHERE i.goal=g.id AND NOT i.settled AND i.claimed_job IS NULL
+            AND i.message IS NOT NULL
+          """,
+          goal.id());
+    }
   }
 
   private void lock(Source source) {

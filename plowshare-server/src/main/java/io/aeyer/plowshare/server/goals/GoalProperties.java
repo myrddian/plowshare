@@ -1,5 +1,6 @@
 package io.aeyer.plowshare.server.goals;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -10,7 +11,9 @@ record GoalProperties(
     @DefaultValue("40") int maxActivations,
     @DefaultValue("4") int concurrency,
     @DefaultValue("24") int scanSize,
-    @DefaultValue("3") int maxNoProgress) {
+    @DefaultValue("3") int maxNoProgress,
+    @DefaultValue("8") int cycleModelCalls,
+    @DefaultValue("PT1M") Duration automaticCycleInterval) {
   GoalProperties {
     if (defaultActivations < 1
         || maxActivations < defaultActivations
@@ -20,7 +23,11 @@ record GoalProperties(
         || scanSize < concurrency
         || scanSize > 128
         || maxNoProgress < 1
-        || maxNoProgress > maxActivations)
+        || maxNoProgress > maxActivations
+        || cycleModelCalls < 1
+        || cycleModelCalls > 1000
+        || automaticCycleInterval.compareTo(Duration.ofMillis(1)) < 0
+        || automaticCycleInterval.compareTo(Duration.ofDays(365)) > 0)
       throw new IllegalArgumentException("Invalid conversation goal limits");
   }
 }

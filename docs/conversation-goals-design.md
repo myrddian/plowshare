@@ -1,9 +1,9 @@
 # Goal Agents
 
-**Status** — This design describes dedicated Goal Agents, their launch skill
-and their wake sources. The working-tree prototype runs goals inside an
-existing conversation. See [the prototype](#current-prototype) for the
-available controls and its scope.
+Dedicated inboxes, caller-bound launch, recurring schedule wakes, durable Relay
+batching, retained waits, and authenticated returns are available behind
+`plowshare.goals.enabled`. The original conversation-goal controls remain
+available.
 
 ## Security starting point
 
@@ -15,9 +15,10 @@ and rechecks it before later conductor turns.
 [CallerOrchestrations.java](../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/CallerOrchestrations.java)
 · [Orchestrations.java](../plowshare-server/src/main/java/io/aeyer/plowshare/server/orchestrations/Orchestrations.java)
 
-Apply the same pattern to `goal_start`. Authorize the selected Goal Agent
-definition against the invoking bot's launch grant in the current scope.
-Use the exact server-retained admission for the invoking turn for both
+`goal_start` requires the calling agent's `skills:` grant for `goal` and an exact
+target in its `calls:` grants. The Goal Agent's tool, delegation and filesystem
+permissions must fit within that calling definition's grants. The server uses
+the admission of the invoking turn for both
 `skill_run` and a user command routed through that bot. A direct authenticated
 user launch establishes an admission through the ordinary user authorization
 path. Bots under the same account are checked against their own grants.
@@ -40,28 +41,26 @@ deliver inputs. Goal execution uses the retained admission.
 
 ## Launch skill
 
-Ship a `goal` skill in `DIRECT` mode. A user can invoke it explicitly in the
-current conversation. A bot with the skill grant and effective
-`agentVisible: true` can invoke the same skill with `skill_run` when a user
-asks it to hand off work.
+Use `/skill:goal` from an existing project conversation. A bot with the skill
+grant and effective `agentVisible: true` can invoke it through `skill_run`.
 
 ```text
-/skill:goal Review the pending release notes and message me with any gaps.
+/skill:goal Review the pending release notes and record any gaps with supporting file references.
 ```
 
-The skill takes an objective and any constraints the caller supplies. It uses
-the specified agent definition if eligible, or selects an eligible one through
-the agent directory. If the objective or target is ambiguous enough to prevent
-a valid start, the skill asks for clarification. Otherwise it calls the
-proposed `goal_start` tool and returns the goal ID, message address and initial
-status from the committed receipt. The skill's foreground work ends at that
-receipt. The Goal Agent decides later whether it needs a standing wake source.
+The DIRECT skill runs under the agent already speaking in the conversation.
+It lists eligible definitions with `goal_candidates`. Name an eligible target
+in the request or let the caller choose one. The shipped Interlocutor grants
+`goal_worker`, a bounded worker with workspace read access. If the handoff needs
+clarification, the skill keeps its invocation and original admission while it
+waits for the reply. The reply cannot substitute a different grant or a broader
+calling definition.
 
-Both invocation paths use the same typed start contract as the WebSocket and
-SDK operations and enforce the caller-bound authorization above. Launch and
-directory access require their own grants. Use the retained skill invocation
-identity to correlate its single start, so resuming or retrying the same
-invocation can recover the original goal without creating another one.
+`goal_start` returns the committed goal ID, message address and conversation.
+The server uses the retained skill invocation UUID as the launch request ID,
+so retries recover the same handoff. The dedicated instance keeps its own
+allowance. Later activations check the original admission and the calling
+definition's live handoff grant.
 [Skills and bound commands](skills-and-agent-rules.md#bound-commands)
 
 ## Handoff and ownership
@@ -95,60 +94,74 @@ assignment or cycle is done.
 **The agent decides whether it needs a schedule, a listener, or both.** Ad hoc
 is the default. Either recurring binding makes the goal standing. A one-off
 wait or the ability to receive user messages leaves that lifecycle unchanged.
-When the final binding is removed, an already admitted cycle can finish as ad
-hoc. If no work remains, close the assignment and retain its history. A paused
-binding remains registered and cannot admit a cycle until resumed.
+Removing the final binding lets an admitted cycle finish as ad hoc. Already
+queued direct messages remain eligible. A parked goal closes when that
+steering is handled. A paused schedule remains registered and stops admitting
+occurrences until resumed.
 
-The missing agent-facing capability is to request a durable wake binding for
-its own instance. The request names the desired schedule or Relay subscription.
-Plowshare resolves the destination from the invoking goal and applies the
-existing owner's rules. An authorized user or deployment can also attach a
-binding through the owning configuration path. Where that policy reserves
-control to a person, show the proposed binding for an authorized person to
-apply. The agent can continue its ad hoc assignment while registration is
-pending. Once the owner confirms the registration, the goal records the binding
-reference and derives its lifecycle and next-wake information from the owners'
-status. Schedule and Relay keep their own configuration and delivery state.
+The dedicated Goal Agent can propose a schedule with `goal_schedule` and
+attach an eligible Relay source with `message_listen`. Plowshare resolves the
+destination from the invoking goal and applies the owning subsystem's rules.
+An authorized user or deployment can also configure the binding through the
+same owner. The assignment can continue while a schedule proposal awaits a
+Manager. Schedule and Relay retain their configuration and delivery state.
 
 ## Schedule definitions
 
-Use Plowshare's existing JSON schedule files. A wake uses the normal `cron`
-and `zone` fields and a `message` target addressed to the goal instance. Save
-through `schedule.save` in the authorized source, under `schedules/` for
-server definitions or `.plowshare/schedules/` for a rooted workspace. The
-goal keeps the resulting schedule identity. The schedule owner advances the
-timer and records each firing and its delivery receipt.
+The `goal_schedule` tool takes six-field `cron`, `zone` and `input` and
+returns a `schedule.save` request for its exact Goal Agent. A project Manager
+can apply it while the Goal Agent is open if the schedule source executes as
+the account that owns the Goal mailbox. The proposal selects the server
+source and requests a new file. Managers can also use `schedule.save` or an
+authorized deployment to register matching definitions through their normal
+source.
+
+Use a plain `agent` action and a `message` target addressed to the exact
+persistent instance within its source account and project. The schedule owner
+advances the timer and records each firing with the definition generation.
+Edits, pause changes and deletion invalidate never-claimed occurrences of
+that generation. An admitted turn keeps its receipt and can settle. Pausing
+preserves standing membership and blocks delivery until resume. A valid occurrence uses the Goal Agent's retained authority, joins the
+same inbox as other input, and runs after queued direct messages. A settled
+cycle leaves a standing Goal Agent idle in its original conversation.
+
+The generation applies to firings admitted by the schedule owner after this
+change. Older queued firings require current evidence to reach a Goal inbox.
+Messages already accepted into that inbox keep their recorded input type.
 [Schedule files and monitoring](scheduling.md#folders-and-monitoring)
 · [Schedule destinations](scheduling.md#actions-and-destinations)
 
 ## Relay topic discovery
 
 Use the Relay scoped topic catalog as the source for the listener picker.
-Today `relay.topics` lists inspectable topics in a project or the system
-scope. Add a filtered discovery view that lists existing topics the goal is
-authorized to use as wake sources. Support narrowing by project, topic name
-or prefix, and supported payload kind. Apply source eligibility and current
-Relay access on the server before paging. Return the scope, name, payload kind
-and topic generation needed to select the source.
+`relay.topics` lists inspectable topics in a project or the system scope.
+`goal.sources` uses the goal's retained project scope and filters by topic
+prefix and supported payload kind. It applies source eligibility and current
+Relay access before paging and returns the project, topic name, payload kind,
+and exact generation needed to select the source.
 
 ### Topic ownership registry
 
-Extend Relay's durable topic registry so each subsystem records ownership
-when it registers a topic. Store the scoped topic key, topic generation and
-a server-assigned subsystem identifier in the same transaction as topic
-registration. Ordinary project and application topic registrations identify
-those topics as general-purpose. Only trusted server registration code can
-assign subsystem ownership or expose a subsystem feed for subscriptions.
+Relay now records a trusted subsystem owner and its Goal feed declaration on
+the topic row. The scoped key and current generation identify that registration.
+Ordinary project and application data topics are general-purpose. The topic
+owner can declare a feed eligible when creating its generation.
 
-Repeated registration by the same owner is idempotent. Conflicting ownership
-is refused. A recreated topic registers ownership for its new generation.
-Populate ownership for existing topics from authoritative subsystem bindings
-or registrations, such as the Messaging inbox registry. Discovery requires an
-established classification.
+Repeating an owning registration preserves its classification. Conflicting
+claims are refused. Retirement removes the classification along with the topic.
+The migration classifies existing native feeds from exact scoped identities and
+bindings, including the Messaging inbox registry. Ambiguous historical topics
+stay unclassified. A trusted owner can register such a topic as internal.
 
-The listener picker combines topic ownership with current Relay access. It
-includes eligible general-purpose topics and any feeds their subsystem owner
-explicitly exposes. Scope, name and payload kind remain search filters.
+The internal Goal source selector combines Relay registry eligibility with live
+Relay visibility and the retained Goal execution admission. It derives the
+numeric source scope from that admission, filters before paging, and locks the
+exact selected generation for a binding transaction. It rechecks Relay and
+execution authority after taking the lock. The listener picker and
+`message.listen` use this selector for discovery and registration.
+Built-in registrations currently keep their feeds internal. An explicitly
+exposed feed still needs a supported payload kind and an authorized consumer.
+Name prefix and payload kind are discovery filters within the retained scope.
 [Relay topic contract](../plowshare-protocol/src/main/java/io/aeyer/plowshare/protocol/RelayLog.java)
 · [Messaging inbox registry](../plowshare-server/src/main/java/io/aeyer/plowshare/server/messaging/MessageInboxRepository.java)
 
@@ -171,13 +184,33 @@ conversation checks.
 
 ## Listen to a Relay topic
 
-Use `message.listen` as the proposed name for attaching an authorized Relay
-topic to the current Goal Agent's persistent inbox. The request selects a
-topic and its generation from discovery and returns a durable binding
-reference when accepted. Plowshare resolves the destination from the
-invoking goal. Relay owns the subscription, cursor and delivery. Each
-eligible publication enters the goal's normal inbox as a typed wake with
-Relay provenance.
+`goal.start` creates the dedicated Goal Agent, a non-default persistent
+Messaging instance, and its retained conversation in one transaction. An
+identical launch request ID returns the original goal and inbox. Direct
+launch requires a human project account with the required live grants.
+
+`goal.sources` is the listener picker for a selected Goal Agent. It takes the
+goal ID and its returned conversation ID, and can filter by prefix, cursor and
+payload kind. It defaults to `TEXT` and also supports an explicit `EMPTY`
+selection. `message.listen` takes the same goal and conversation, plus the
+topic and generation from the picker. The response includes the binding UUID.
+Omit the batch fields for one wake per event. Supply both `batchCount` (2–16)
+and `maxDelaySeconds` (1–86400) to batch. The dedicated Goal Agent can use
+`goal_sources` and `message_listen` during its turns with the same source
+checks and options.
+
+The owner can use `message.unlisten` with `goal`, `conversation`, `binding`,
+the current goal `version`, and a `requestId`. An identical retry returns the
+retained removal receipt. Rebinding the same feed creates a new binding and
+starts reading at the current broker head. Cleanup retires only the removed
+listener's exact consumer group.
+
+Relay commits staged input and the consumer offset together. The goal
+rechecks current read authority, topic generation and consumer generation at
+admission. If the source changes or a retention gap opens, the listener stops.
+The goal surfaces the reason and any missing position range. Remove a failed
+listener before resuming the goal. Each inbox accepts up to 64 unsettled Relay
+events and 16 registered listeners.
 
 The existing `message.receive` receiver accepts a native message request
 through a configured Relay command channel. An addressed message can also
@@ -192,15 +225,16 @@ adds a further source of input that can wake the goal while it is idle.
 | Schedule | Reuse the existing `message` schedule target addressed to the goal's persistent instance. The schedule owner keeps cron, time zone and the per-firing delivery receipt. The goal recognizes the trusted firing and binding revision when admitting the message as a wake. |
 | Relay subscription | A `message.listen` binding connects the existing Relay subscription path to the goal's exact instance and feeds its normal message intake. |
 | User message | The normal addressed message path commits the message with its sender and wakes an eligible idle goal. During an active turn it queues for the next safe boundary in the same conversation. |
-| Specific dependency | A known child run, approval or other supported dependency wakes the exact wait, with its original invocation and outcome. The dependency owner still controls resumption and cancellation. |
+| Specific dependency | An exact file-read approval or a granted orchestration started with `goal_orchestrate` wakes its retained activation. Its owner keeps the invocation and outcome. |
 
 Use one wake per eligible Relay event by default. If a binding needs batching,
 apply it on the subscription delivery path. Queue a wake when `N` matching
 events have accumulated or `T` has elapsed since the first pending event,
-whichever happens first. Preserve that deadline and the staged references
-across restart. Freeze membership and give the batch a stable ID when queued.
-Later arrivals belong to a subsequent batch, including while the current one
-runs.
+whichever happens first. The first staged event sets the deadline. A bounded
+scan matures quiet batches after that deadline, including after restart.
+Membership freezes when the batch becomes eligible, and later arrivals go into
+a subsequent batch. Its stable ID and event positions accompany the input in
+the conversation's provenance.
 
 Advance the Relay consumer position only once Plowshare can recover the
 durably staged input independently of another delivery. Record successful
@@ -208,7 +242,9 @@ handling separately after the turn settles. Duplicate deliveries converge on
 the same staged event and batch. A retention gap or topic recreation stops
 admission for the binding and surfaces the missing range or source change to
 an authorized operator. Schedule wakes, Relay batches and user messages share
-one turn gate. Pending work holds no active provider slot.
+one turn gate. Direct messages take priority at every activation boundary.
+An ongoing cycle can accept steering while fresh automatic work waits for
+the next cycle. Pending input holds no provider slot.
 [Relay workers](relay.md#automatic-subscription-workers)
 
 Preserve the sender and the recorded body of user messages. Represent
@@ -218,6 +254,38 @@ to the model after compaction. Only reachable and authorized payloads enter
 the projection.
 [Conversation log and projection](../.agents/guides/runtime-and-inference.md#log-trajectory-and-model-projection)
 
+## Retained dependency waits
+
+A dedicated root enters `WAITING` after parking an existing file-read approval
+or starting a declared orchestration with `goal_orchestrate`. The tool takes
+the exact declared orchestration name and a request. Call it by itself. The
+orchestration start derives authority from the Goal's retained admission and
+has its own allowance. A bot launching a Goal through the skill must also
+hold every orchestration grant declared by that Goal definition. Ordinary
+conversation goals and synchronous delegates keep their original tool ceilings.
+
+The parked Goal releases the conversation and execution job. It keeps the
+original cycle, activation, invocation and wake source generation. A decision
+or terminal result that arrives before the park can be recovered by the
+scheduler. Approval recovery runs the original file read in its recorded tool
+slot after checking the Goal admission and source. Orchestration recovery reads
+the exact start receipt and terminal attempt, then records its outcome with
+the original invocation's provenance. The Goal inherits the result's
+information access requirements. Reopening a child before the Goal claims its
+result fences the old terminal attempt.
+
+Manual pause preserves the wait and delays admission until resume. Cancellation
+records cleanup for the exact owner and fences any later answer. If the original
+effect cannot be established, the Goal blocks for inspection. A continuation can
+settle its owner receipt with no remaining model calls. It uses the existing
+turn step cap, and creating another wait requires another charged model call.
+New automatic wakes remain queued during the wait. Queued steering can enter
+once the dependency is safe to reconcile and the cycle has model allowance.
+Addressed messages use the normal inbox and queue behind a parked dependency.
+`goal_ask` parks a dedicated Goal with an authenticated return route. The
+question is recorded in the Goal conversation before delivery. Only its exact
+authenticated answer can reopen the original cycle.
+
 ## Steering and notifications
 
 When a user messages a running Goal Agent, let the current turn or its owning
@@ -225,17 +293,41 @@ continuation reach a safe boundary. Process queued user steering before
 admitting fresh automatic work. Check for steering committed during the turn
 before closing an ad hoc goal. The next turn sees the messages, the existing
 objective, the current TODO list and any settled dependency result. The goal
-continues from that state. A direct message can wake an idle standing agent or
-answer an ad hoc question. Pause and cancel are explicit controls that remain
+continues from that state. A direct message can wake an idle standing agent.
+A question uses its exact authenticated answer route. Pause and cancel remain
 available while a turn is running.
 
-The Goal Agent can message the user with a result, a question, a blocker or a
-condition the user asked to hear about. Use the existing authorized return
-route to the user or initiating conversation. A bot that launches the goal can
-request a correlated outcome through the normal reply contract. Routine cycles
-can settle in the goal conversation and remain visible from the goal list.
-Status and message delivery have their own receipts. A failed delivery leaves
-the committed work and its result available to authorized readers.
+An authenticated `goal.start` or a person’s `/skill:goal` command in their
+active project conversation binds their account Inbox at launch. The Inbox
+receives a reference when an assignment completes, the Goal uses `goal_ask`,
+or the Goal records an explicit blocker. Open the Goal conversation to read
+the result or question with its evidence. Routine standing cycles settle
+silently in the Goal conversation.
+
+To answer an Inbox question, use `goal.answer` with the exact `goal`,
+`conversation`, `question`, a new `requestId`, and `answer`. The question
+UUID appears in the Inbox notice and the waiting status. The question must
+have a committed Inbox receipt. A retry with the same request ID and answer
+recovers the original receipt under current access. A different answer or a
+different question under that request ID is refused. An answer received
+during manual pause is retained until resume. Other messages remain steering
+for the next eligible turn.
+
+An active persistent bot handling an authenticated native message can opt in
+with `replyExpected: true` on `goal_start`. The caller must hold
+`send_message`. The skill returns a native launch message ID for the exact
+calling instance. In a later turn, that bot can use `goal_return_read` with
+the launch ID in `message`. An account operator can inspect its Messaging
+deliveries. A bot
+answers a question with one explicit final `send_message` reply to that
+question’s message ID. Goal returns to the bot are retained without starting
+another paid turn. A blocker is a non-final notice. Completion or
+cancellation closes the launch’s reply expectation.
+
+Goal status and return delivery have separate durable receipts. Publication
+rechecks the Goal’s current authority and the retained destination. A
+withdrawn route or superseded blocker can withhold a return while the
+committed conversation and result remain available to authorized readers.
 [Agent and bot messaging](agent-messaging.md)
 
 ## Admission, recovery and limits
@@ -270,38 +362,46 @@ work.
   results can close their own receipts without starting another goal turn.
 - Bound each active assignment or cycle with finite activation, step and
   model-call limits. A standing registration can outlive a work cycle. Each
-  later cycle draws from the owner's authorized budget and configured rate
-  limits. Continuing a cycle preserves consumed allowances. Repeated
-  no-progress turns pause with a diagnostic. Bound active and queued work with
-  the existing capacity policies.
+  automatic cycle draws from the owner's finite retained allowance. The
+  `plowshare.goals.cycle-model-calls` setting defaults to 8, bounded
+  by the agent definition and remaining canonical calls. The
+  `plowshare.goals.automatic-cycle-interval` setting defaults to `PT1M` and
+  sets the minimum interval between automatic claims within the same goal.
+  Direct steering can wake a parked goal during that interval. Continuing a
+  cycle preserves earlier spending. Repeated no-progress turns pause the goal.
+  Queued work remains subject to the existing capacity policies.
   [Backpressure](backpressure.md)
   · [Budget continuation](decisions/0073-agent-budget-consent-and-continuation.md)
 
 ## Discovery and controls
 
-Expose a **Goal Agents** list in Plowshare, separate from the general agent
-directory. The directory helps the bot find definitions and addressable
-instances. The goal list shows each authorized goal's objective, instance
-address, lifecycle, current state, registered wakes, next scheduled wake or
-pending Relay batch, latest result and any reason that work is paused or
-blocked. Opening an entry leads to the goal's conversation and TODO list.
-The goal record keeps the same ID when its lifecycle changes.
+The browser Console's **Goal Agents** view lists dedicated goals in the
+selected project. It shows the authorized objective, instance address,
+lifecycle, current state, registered wakes, next scheduled wake, pending Relay
+batch, latest result and any reason that work is paused or blocked. A
+readable entry offers a link to the exact conversation's read-only history,
+Trajectory and TODOs. Metadata-only entries expose lifecycle and state without
+opening conversation content. The goal keeps the same ID when its lifecycle
+changes.
 
 Provide typed WebSocket and SDK operations to start, list, inspect, pause,
 resume and cancel Goal Agents. Use existing messaging for direct conversation
 and existing schedule and Relay owners for binding controls. A start carries a
 caller-supplied request ID and returns the original handle on an identical
 retry. Changed arguments under the same ID are refused. Mutations target the
-exact goal and expected version. A client can look up the original receipt
-after uncertain delivery and read current status after reconnect. Apply
-current read authority to status, payloads and conversation history.
+exact goal and expected version. After uncertain launch delivery, read
+`goal.receipt` with the original project and request ID to recover the launch
+handle and its initial version. Read `goal.status` for the current version
+before issuing a control. An uncertain control can be checked by its original
+request ID through `conversation.goal.get` and compared with current status.
+The server checks current read authority for discovery and conversation history.
 [Transport and SDK guide](../.agents/guides/transport-sdks.md)
 
 ## Delivery sequence and verification
 
 1. **Dedicated ad hoc instances.** Reuse existing persistent instances,
    addressed messages and ordinary TODOs, plus the prototype's activation
-   and settlement seams. Add the launch skill and goal discovery. Verify
+   and settlement seams. Add the launch skill. Verify
    that an explicit user command and a bot skill call reach the same start
    contract, denied callers create no instance, and retrying either
    invocation returns the same goal. Test two bots under the same account
@@ -321,16 +421,24 @@ current read authority to status, payloads and conversation history.
    missed wakes and retention gaps. Revoke one bot's supporting grant while
    a cron or Relay wake is queued. Verify that the wake stays fenced across
    restart and the other bot's authorized goals can still run.
-3. **Retained waits.** Wire each supported dependency through its owning
-   continuation contract. Verify early, duplicate and late results, authority
-   withdrawal, cancellation while waiting and recovery after an uncertain
-   effect. Reserve PostgreSQL tests for durable claim races, uniqueness and
-   transaction boundaries.
+3. **Retained waits.** Use the exact approval call journal and orchestration
+   receipt. Verify early decisions, duplicate and late results, stale terminal
+   attempts, source withdrawal, cancellation while waiting and recovery after an
+   uncertain effect. Use PostgreSQL tests for durable claims and transaction
+   boundaries.
+4. **Authenticated returns.** Retain a human Inbox or exact native Messaging
+   audience at launch. Commit return intent with Goal settlement, then let the
+   owner publish it. Verify exact question answers, pause and restart recovery,
+   revoked destinations, non-final blockers, and silent routine standing cycles.
+5. **Goal Agent discovery.** Verify project-scoped pagination, metadata-only
+   disclosure, latest result retention, and recovery of uncertain controls and
+   launches. Check that Console history and TODOs open the selected conversation.
 
 ## Current prototype
 
-The working-tree prototype gates its conversation goal loop behind
-`plowshare.goals.enabled`. It admits a direct user account with an existing
+The working-tree prototype gates both goal paths behind
+`plowshare.goals.enabled`. The original conversation goal loop admits a direct
+user account with an existing
 active project conversation and a server-resolved exported agent with finite
 allowances. Its default goal limit is eight activations and its default
 scheduler concurrency is four.
@@ -350,5 +458,40 @@ The prototype admits turns into the supplied conversation and records a
 committed settlement, model-call spend and explicit completion evidence.
 Supported synchronous tools and delegates run through the confined runtime.
 A started activation without a committed settlement blocks for inspection.
-Dedicated instances, the launch skill, standing wakes and retained dependency
-waits are target capabilities described above.
+Dedicated instances use `goal.start`, persisted addressed messaging and
+Relay listeners. Run `plowshare goal start --payload -` with the project,
+agent, objective and launch request ID. The browser Console **Goal Agents**
+view provides the project list, status details, controls and read-only
+conversation history with TODOs. The CLI accepts JSON on stdin for these reads.
+
+| Command | JSON fields |
+| --- | --- |
+| `plowshare goal list --payload -` | Required `project`, optional `after` and `limit`. Use the returned `next` as the next page's `after`. |
+| `plowshare goal status --payload -` | Required `project` and `goal`. Use the current status version for controls. |
+| `plowshare goal receipt --payload -` | Required `project` and the original launch `requestId`. Returns the original start response. |
+
+V296 retains the latest explicit completion from newly committed dedicated
+Goal settlements. The result includes its job, turn, summary and evidence.
+Older completions without an exact retained result stay absent after upgrade.
+
+Pass the launch handle's goal and conversation to
+`plowshare goal sources --payload -`. Include a returned topic and its
+generation with the same goal and conversation in
+`plowshare message listen --payload -`. The `/skill:goal` command also launches
+a dedicated instance from an existing project conversation. Apply schedule proposals through the existing schedule
+owner controls. Read the current goal version before removing a listener.
+Missing Relay groups from older versions require binding removal before
+resuming.
+
+Use optional `maxModelCalls` on a dedicated `conversation.goal.resume` request
+to authorize an absolute positive allowance up to 1,000,000 calls. The owner
+can increase the total or explicitly extend an exhausted active cycle within
+its already authorized remaining allowance. Previously spent calls still count.
+Change a Goal cycle's allowance through resume. Resuming a parked goal restores
+its idle state.
+
+When upgrading from V292, the server cannot recover the exact inbox item
+claimed by an interrupted old turn. Pending inputs for those interrupted turns
+are recorded as uncertain. Old paused rows keep their previous resume
+behavior because their storage did not distinguish a parked cycle from an
+active one. The new cycle record preserves that distinction.

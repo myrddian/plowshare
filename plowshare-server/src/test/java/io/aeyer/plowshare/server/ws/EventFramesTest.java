@@ -26,8 +26,11 @@ import io.aeyer.plowshare.server.events.ScheduleStore;
 import io.aeyer.plowshare.server.events.TriggerRecord;
 import io.aeyer.plowshare.server.events.TriggerStore;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -80,7 +83,8 @@ class EventFramesTest {
                 "daily",
                 false,
                 Instant.parse("2026-09-14T09:00:00Z"),
-                "enzo"));
+                "enzo",
+                UUID.randomUUID()));
     Outcome outcome =
         route(
             FrameTypes.SCHEDULE_DEFINE,
@@ -88,6 +92,10 @@ class EventFramesTest {
             SIGNED_IN);
     assertEquals(Code.OK, outcome.code());
     verify(schedules).define(eq("nine"), any(), eq("daily"), eq("enzo"), eq(FIXED));
+    var fields = new HashSet<String>();
+    FrameJson.answering().valueToTree(outcome.payload()).fieldNames().forEachRemaining(fields::add);
+    assertEquals(
+        Set.of("name", "cron", "zone", "emits", "paused", "nextFireAt", "definedBy"), fields);
   }
 
   @Test

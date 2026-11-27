@@ -1,6 +1,7 @@
 package plowshare
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -318,37 +319,26 @@ func TestApplicationCredentialsStayRedactedAndCorrelated(t *testing.T) {
 	}
 }
 
-func TestHostedCoordinatesAndSecretDiagnostics(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(os.Getenv("PLOWSHARE_SDK_DTO_FIXTURES")), "hosted-scope-correlations.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Operation string          `json:"operation"`
-		Request   json.RawMessage `json:"request"`
-		Reply     json.RawMessage `json:"reply"`
-		Valid     bool            `json:"valid"`
-	}
-	if err = json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	groupData, err := os.ReadFile(filepath.Join(filepath.Dir(os.Getenv("PLOWSHARE_SDK_DTO_FIXTURES")), "relay-group-correlations.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var groupCases []struct {
-		Operation string          `json:"operation"`
-		Request   json.RawMessage `json:"request"`
-		Reply     json.RawMessage `json:"reply"`
-		Valid     bool            `json:"valid"`
-	}
-	if err = json.Unmarshal(groupData, &groupCases); err != nil {
-		t.Fatal(err)
-	}
-	cases = append(cases, groupCases...)
-	for _, row := range cases {
-		if deploymentMatches(row.Operation, row.Request, row.Reply) != row.Valid {
-			t.Fatalf("Hosted coordinate mismatch: %s", row.Operation)
+func TestReceiptCoordinatesAndSecretDiagnostics(t *testing.T) {
+	directory := filepath.Dir(os.Getenv("PLOWSHARE_SDK_DTO_FIXTURES"))
+	for _, filename := range []string{"hosted-scope-correlations.json", "relay-group-correlations.json", "goal-listener-correlations.json", "goal-answer-correlations.json", "goal-discovery-correlations.json"} {
+		var cases []struct {
+			Operation string          `json:"operation"`
+			Request   json.RawMessage `json:"request"`
+			Reply     json.RawMessage `json:"reply"`
+			Valid     bool            `json:"valid"`
+		}
+		data, err := os.ReadFile(filepath.Join(directory, filename))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(data, &cases); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range cases {
+			if deploymentMatches(row.Operation, row.Request, row.Reply) != row.Valid {
+				t.Fatalf("Receipt coordinate mismatch: %s", row.Operation)
+			}
 		}
 	}
 	value := HostedToolCredentialDto{Value: "fixture-private-secret"}
@@ -356,6 +346,43 @@ func TestHostedCoordinatesAndSecretDiagnostics(t *testing.T) {
 		if strings.Contains(diagnostic, value.Value) {
 			t.Fatal("Hosted secret leaked")
 		}
+	}
+}
+
+func TestGoalAnswerRejectsInvalidUTF8BeforeSubmission(t *testing.T) {
+	client := drainClient(t)
+	request := GoalAnswerRequest{
+		Goal:         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		Conversation: "cnv_Goal",
+		Question:     "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		RequestId:    "cccccccc-cccc-cccc-cccc-cccccccccccc",
+		Answer:       "data\xffset",
+	}
+	if _, err := client.GoalAnswer(context.Background(), request); err != contractError {
+		t.Fatalf("invalid UTF-8 answer returned %v", err)
+	}
+	assertTransportIdle(t, client)
+}
+
+func TestGoalListenerReceiptCorrelatesExactWireKeys(t *testing.T) {
+	const goal = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	const foreign = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	const binding = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	const requestID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+	request := []byte(fmt.Sprintf(`{"goal":%q,"conversation":"cnv_Goal","binding":%q,"requestId":%q,"version":3}`, goal, binding, requestID))
+	for _, test := range []struct {
+		name, goal, extension string
+		valid                 bool
+	}{
+		{name: "foreign wire goal", goal: foreign, extension: goal},
+		{name: "foreign extension", goal: goal, extension: foreign, valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reply := []byte(fmt.Sprintf(`{"goal":%q,"binding":%q,"requestId":%q,"version":4,"Goal":%q,"future":1e1000}`, test.goal, binding, requestID, test.extension))
+			if deploymentMatches("message.unlisten", request, reply) != test.valid {
+				t.Fatal("receipt correlation used the extension in place of the wire goal")
+			}
+		})
 	}
 }
 

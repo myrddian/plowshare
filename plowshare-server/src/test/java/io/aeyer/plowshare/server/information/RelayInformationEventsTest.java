@@ -14,6 +14,8 @@ import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.RelayConsumption;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -79,7 +81,7 @@ class RelayInformationEventsTest {
     assertTrue(refused.getMessage().contains("GLOBAL_KNOWLEDGE"));
     // No topic brought into being, no publication, no history row, no hint. A refusal that
     // published to some other audience first would be worse than the defect it reports.
-    verify(relay, never()).registerTopic(any(), any(), any());
+    verify(relay, never()).registerOwnedTopic(any(), any(), any(), any());
     verify(relay, never()).publish(any(), any());
     verify(records, never()).append(any());
     verifyNoInteractions(consumption);
@@ -112,7 +114,13 @@ class RelayInformationEventsTest {
 
     var order = inOrder(records, relay);
     order.verify(records).resolve(REVISION);
-    order.verify(relay).registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    order
+        .verify(relay)
+        .registerOwnedTopic(
+            topic,
+            RelayPayload.Kind.TEXT,
+            Relay.Policy.systemDefault(),
+            RelayTopicOwnership.internal(Owner.INFORMATION));
     order.verify(relay).publish(eq(topic), any());
     verify(records)
         .append(

@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.protocol.ScheduledWork;
+import io.aeyer.plowshare.server.events.FiringRecord.GoalSchedule;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -129,6 +130,10 @@ public interface MessageIngress {
       String schedule,
       String firing,
       ScheduledWork definition);
+
+  /** Accept only a scheduler-backed occurrence for the exact dedicated Goal instance. */
+  Task receiveGoalSchedule(
+      String account, String sourceProject, GoalSchedule firing, ScheduledWork definition);
 
   Task task(String account, String project, String channel, String client, UUID id);
 

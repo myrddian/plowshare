@@ -340,8 +340,8 @@
   "evidence": {
     "sources": {
       "test-support/contracts/legacy-cli-baseline.json": "57483661334a470cef344b7b6b046446560bfcbb645e1b78a961b1ecc8e311c7",
-      "sdk/typescript/src/operations/catalog.ts": "b9b4473dc937b5b886fbac78d8f2c4f21c1468beb2913e02ffb0937dc10e7ccd",
-      "sdk/typescript/src/operations/direct.ts": "ac8d835bdcf300bd8e3d76188d602396b528d6372ede1457b89a1b7fba753170",
+      "sdk/typescript/src/operations/catalog.ts": "8b86a01239047d2cb7d954af82bfd7f521fccf33fa87e2ac471c3ec5a270f681",
+      "sdk/typescript/src/operations/direct.ts": "9b2cff8b8f3dee1ee54e8381a8007187f0c54d0f19d882c48472140038f77012",
       "plowshare-cli/src/run.ts": "deae7dcf58c7244e6fde1887e8c6505057443990c60e2ed128094329f05faeab"
     },
     "runtime": [

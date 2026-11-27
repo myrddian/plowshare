@@ -13,6 +13,8 @@ import io.aeyer.plowshare.server.data.DataLayout;
 import io.aeyer.plowshare.server.files.SessionChannel;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.messaging.ProjectMessageRouting;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.session.PresenceRegistry;
 import io.aeyer.plowshare.server.session.SessionRegistry;
 import java.util.Set;
@@ -31,7 +33,9 @@ public class ScheduleDefinitionConfig {
       ScheduleStore schedules,
       TriggerStore triggers,
       FiringStore firings,
-      ProjectionCaches caches) {
+      ProjectionCaches caches,
+      SqlWorkBudget sql,
+      SqlWorkBudgetProperties budgets) {
     return new JdbcScheduleDefinitionStore(
         jdbc,
         work,
@@ -39,7 +43,10 @@ public class ScheduleDefinitionConfig {
         triggers,
         firings,
         caches.create("schedule-file-v1", Set.of(Domain.SCHEDULES, Domain.AUTHORITY)),
-        caches.create("schedule-files-v1", Set.of(Domain.SCHEDULES, Domain.AUTHORITY)));
+        caches.create("schedule-files-v1", Set.of(Domain.SCHEDULES, Domain.AUTHORITY)),
+        // Schedule file mutations own their SQL scope. Source registration can also join an
+        // existing Application deployment transaction and retains that caller's boundary.
+        sql.transactions(work, budgets.queryCeiling()));
   }
 
   @Bean

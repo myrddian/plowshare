@@ -202,7 +202,8 @@ public final class JdbcSuspendedRunCalls
   @Override
   public List<Call> pending(String conversation) {
     return read(
-        "c.conversation = ? AND c.acknowledged_at IS NULL ORDER BY c.sequence", conversation);
+        "c.conversation = ? AND c.acknowledged_at IS NULL AND c.owner_retired_at IS NULL ORDER BY c.sequence",
+        conversation);
   }
 
   @Override
@@ -212,11 +213,13 @@ public final class JdbcSuspendedRunCalls
 
   @Override
   public List<Call> recoverable() {
-    return read("c.acknowledged_at IS NULL AND a.state <> 'asked' ORDER BY c.sequence", null);
+    return read(
+        "c.acknowledged_at IS NULL AND c.owner_retired_at IS NULL AND a.state <> 'asked' ORDER BY c.sequence",
+        null);
   }
 
   private List<Call> read(String predicate, String value) {
-    String sql =
+    String statement =
         "SELECT c.*, a.state AS decision, a.answered_by, a.denial_reason"
             + " FROM suspended_run_calls c JOIN run_approvals a ON a.id = c.approval"
             + " WHERE "
@@ -247,16 +250,37 @@ public final class JdbcSuspendedRunCalls
               receipt,
               FileReadWindowCodec.read(row.getString("file_window")));
         };
-    return value == null ? jdbc.query(sql, mapper) : jdbc.query(sql, mapper, value);
+    return sql.within(
+        queryDeadline,
+        () -> value == null ? jdbc.query(statement, mapper) : jdbc.query(statement, mapper, value));
+  }
+
+  @Override
+  public void retireGoalCall(String conversation, String approval) {
+    sql.within(
+        queryDeadline,
+        () ->
+            jdbc.update(
+                """
+        UPDATE suspended_run_calls SET owner_retired_at=CURRENT_TIMESTAMP
+        WHERE conversation=? AND approval=? AND owner_retired_at IS NULL AND acknowledged_at IS NULL
+        """,
+                conversation,
+                approval));
   }
 
   @Override
   public boolean claim(String approval) {
-    return jdbc.update(
-            "UPDATE suspended_run_calls c SET state = 'started' WHERE approval = ?"
-                + " AND state = 'waiting' AND released AND EXISTS (SELECT 1 FROM run_approvals a"
-                + " WHERE a.id = c.approval AND a.state = 'allowed')",
-            approval)
+    return sql.within(
+            queryDeadline,
+            () ->
+                jdbc.update(
+                    """
+            UPDATE suspended_run_calls c SET state='started'
+            WHERE approval=? AND state='waiting' AND owner_retired_at IS NULL AND released
+              AND EXISTS (SELECT 1 FROM run_approvals a WHERE a.id=c.approval AND a.state='allowed')
+            """,
+                    approval))
         == 1;
   }
 
@@ -306,22 +330,33 @@ public final class JdbcSuspendedRunCalls
 
   @Override
   public void release(String approval) {
-    jdbc.update(
-        "UPDATE suspended_run_calls c SET released = TRUE WHERE approval = ?"
-            + " AND EXISTS (SELECT 1 FROM run_approvals a WHERE a.id = c.approval AND a.state <> 'asked')",
-        approval);
+    sql.within(
+        queryDeadline,
+        () ->
+            jdbc.update(
+                """
+            UPDATE suspended_run_calls c SET released=TRUE
+            WHERE approval=? AND owner_retired_at IS NULL
+              AND EXISTS (SELECT 1 FROM run_approvals a WHERE a.id=c.approval AND a.state<>'asked')
+            """,
+                approval));
   }
 
   @Override
   public void complete(String approval, String result) {
     if (result == null || result.isBlank())
       throw new IllegalArgumentException("A result is required");
-    if (jdbc.update(
-            "UPDATE suspended_run_calls SET state = 'completed', result = ?"
-                + " WHERE invocation_id = ? AND state IN ('waiting', 'started')",
-            result,
-            approval)
-        != 1) throw new IllegalStateException("Suspended call is already completed");
+    if (sql.within(
+            queryDeadline,
+            () ->
+                jdbc.update(
+                    """
+            UPDATE suspended_run_calls SET state='completed', result=?
+            WHERE invocation_id=? AND state IN ('waiting','started') AND owner_retired_at IS NULL
+            """,
+                    result,
+                    approval))
+        != 1) throw new IllegalStateException("Suspended call is already completed or retired");
   }
 
   @Override
@@ -346,10 +381,16 @@ public final class JdbcSuspendedRunCalls
 
   @Override
   public void acknowledged(String approval) {
-    if (jdbc.update(
-            "UPDATE suspended_run_calls SET acknowledged_at = CURRENT_TIMESTAMP"
-                + " WHERE invocation_id = ? AND state = 'completed' AND acknowledged_at IS NULL",
-            approval)
+    if (sql.within(
+            queryDeadline,
+            () ->
+                jdbc.update(
+                    """
+            UPDATE suspended_run_calls SET acknowledged_at=CURRENT_TIMESTAMP
+            WHERE invocation_id=? AND state='completed' AND acknowledged_at IS NULL
+              AND owner_retired_at IS NULL
+            """,
+                    approval))
         != 1) throw new IllegalStateException("Suspended result is not awaiting acknowledgement");
   }
 }

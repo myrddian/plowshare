@@ -122,6 +122,14 @@ public final class CallerOrchestrations implements GrantedOrchestrations {
     return granted;
   }
 
+  @Override
+  public Optional<OrchestrationDefinition> granted(
+      AgentDefinition agent, DefinitionResolver.Caller caller, String name) {
+    return agent.orchestrations().contains(name)
+        ? Optional.ofNullable(resolver.forCaller(caller).get(name))
+        : Optional.empty();
+  }
+
   private Actions actions(
       RunExtras.Context context, Map<String, OrchestrationDefinition> definitions) {
     return new Actions() {

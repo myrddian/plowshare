@@ -2140,6 +2140,7 @@ public final class Compaction implements SkillSummaries {
   public final class TurnTranscript implements Transcript {
     private InputProvenance inputProvenance;
     private ScheduledTask scheduledTask;
+    private final Map<Integer, ChatMessage> goalApprovalAnswers = new HashMap<>();
 
     @Override
     public void prepareScheduledTask(ScheduledTask task) {
@@ -2597,12 +2598,19 @@ public final class Compaction implements SkillSummaries {
         if (spoken.isEmpty()) {
           return List.of();
         }
-        return goal == null
-            ? messages(conversationId, definition)
-            : projected(
-                entries.thatProjectFor(conversationId, goal.speaker()),
-                definition,
-                Projection.Superseded.HIDES_A_ROW);
+        if (goal == null) return messages(conversationId, definition);
+        var goalLog = entries.thatProjectFor(conversationId, goal.speaker());
+        if (goal.approval() == null)
+          return projected(goalLog, definition, Projection.Superseded.HIDES_A_ROW);
+        return Projection.of(
+            whatWasSaidAndWhatTheRunLearned(
+                ApprovalProjection.settledResults(goalLog),
+                goal.approval().turn(),
+                goal.approval().turn(),
+                definition.canRedeem()),
+            definition.canList(),
+            Projection.Superseded.HIDES_A_ROW,
+            goalApprovalAnswers);
       } catch (RuntimeException failed) {
         // A goal must see its prior evidence before it is allowed to take another action.
         if (goal != null) throw failed;
@@ -2624,6 +2632,11 @@ public final class Compaction implements SkillSummaries {
      *
      * <p>The largest wins; see this class's javadoc for why it is the largest and not the first.
      */
+    @Override
+    public ChatMessage projectedAnswer(int ordinal) {
+      return goalApprovalAnswers.get(ordinal);
+    }
+
     @Override
     public void promptMeasured(int promptTokens) {
       if (promptTokens > longestPrompt) {
@@ -3746,7 +3759,9 @@ public final class Compaction implements SkillSummaries {
         // consent is only a harness status: it must not become another model-visible question.
         // Never classify a model/tool-requested question merely by its display wording.
         record(
-            !outcome.requested() && outcome.text().startsWith("Waiting for command approval [")
+            goal != null && goal.retainsApprovals()
+                    || !outcome.requested()
+                        && outcome.text().startsWith("Waiting for command approval [")
                 ? LoggedEntry.diagnostic(outcome.text())
                 : LoggedEntry.answer(outcome.text(), List.of()));
       } else if (outcome.ending() != Outcome.Ending.ANSWERED) {
@@ -3792,8 +3807,13 @@ public final class Compaction implements SkillSummaries {
       if (!confined) told();
       // A retry needs its original unresolved delegation and completed tool results. Folding a
       // transiently failed turn could hide that evidence before the person requests recovery.
+      // Keep the parked declaration available by ordinal when owner recovery builds the
+      // continuation. Normal folding can resume after that exact slot has settled.
       if (outcome.ending() != Outcome.Ending.UNAVAILABLE
-          && outcome.ending() != Outcome.Ending.SUB_AGENT_FAILED) foldWhenTheTurnIsOver();
+          && outcome.ending() != Outcome.Ending.SUB_AGENT_FAILED
+          && !(goal != null
+              && goal.retainsApprovals()
+              && outcome.ending() == Outcome.Ending.AWAITING)) foldWhenTheTurnIsOver();
       // log.close, last: a machine log takes no more turns once its run ends on anything
       // but AWAITING, which a person's answer continues (spec 2026-09-28-hooks-reach-the-log
       // §3). At most once per log, and never throws: LogStages' contract. Lower case, as every

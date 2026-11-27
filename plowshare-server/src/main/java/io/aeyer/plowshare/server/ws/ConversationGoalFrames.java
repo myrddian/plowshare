@@ -30,7 +30,12 @@ final class ConversationGoalFrames implements FrameArea {
   record Control(String conversation, String requestId, String goal, int version) {}
 
   record Resume(
-      String conversation, String requestId, String goal, int version, Integer maxActivations) {}
+      String conversation,
+      String requestId,
+      String goal,
+      int version,
+      Integer maxActivations,
+      Integer maxModelCalls) {}
 
   @Override
   public Map<String, FrameHandler> frames() {
@@ -90,9 +95,13 @@ final class ConversationGoalFrames implements FrameArea {
   }
 
   private Outcome resume(Map<String, Object> payload, Asking asking) {
+    if (payload.containsKey("maxModelCalls") && payload.get("maxModelCalls") == null)
+      throw new CallerFault("maxModelCalls must be an integer");
     var input =
         Payloads.exact(
-            optional(payload, "maxActivations"), Resume.class, FrameTypes.CONVERSATION_GOAL_RESUME);
+            optional(payload, "maxActivations", "maxModelCalls"),
+            Resume.class,
+            FrameTypes.CONVERSATION_GOAL_RESUME);
     return Outcome.ok(
         goals.control(
             asking.requireHandle(FrameTypes.CONVERSATION_GOAL_RESUME),
@@ -102,7 +111,8 @@ final class ConversationGoalFrames implements FrameArea {
                 uuid(input.requestId()),
                 uuid(input.goal()),
                 input.version(),
-                input.maxActivations())));
+                input.maxActivations(),
+                input.maxModelCalls())));
   }
 
   // Exact decoding rejects every unknown field and coercion. Only documented optional fields

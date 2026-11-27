@@ -33,6 +33,8 @@ import io.aeyer.plowshare.server.goals.ConversationGoals.Reason;
 import io.aeyer.plowshare.server.goals.ConversationGoals.Start;
 import io.aeyer.plowshare.server.goals.ConversationGoals.State;
 import io.aeyer.plowshare.server.goals.ConversationGoals.Status;
+import io.aeyer.plowshare.server.messaging.MessageService.InstanceView;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -171,7 +173,8 @@ class GoalServiceTest {
   }
 
   private GoalService service() {
-    return new GoalService(store, runtime, new GoalProperties(true, 3, 10, 1, 5, 2));
+    return new GoalService(
+        store, runtime, new GoalProperties(true, 3, 10, 1, 5, 2, 8, Duration.ofMinutes(1)));
   }
 
   private Status start(int limit) {
@@ -202,6 +205,22 @@ class GoalServiceTest {
   }
 
   private final class Runtime implements GoalExecution {
+    @Override
+    public List<GoalHandoffs.Candidate> handoffCandidates(GoalHandoffs.Caller caller) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public AgentDefinition handoffTarget(GoalHandoffs.Caller caller, String agent) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Prepared prepareHandoff(
+        GoalHandoffs.Caller caller, InstanceView instance, AgentDefinition target) {
+      throw new UnsupportedOperationException();
+    }
+
     private final Budget budget = Budget.of(8);
     private final Home home = Home.of("project");
     private final ConversationRecord conversation =
@@ -259,6 +278,11 @@ class GoalServiceTest {
     public Prepared restore(GoalRepository.Binding binding) {
       if (revoked) throw new CallerFault("Revoked");
       return new Prepared(conversation, agent, authority);
+    }
+
+    @Override
+    public Prepared prepareDedicated(String executor, InstanceView inbox) {
+      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -367,10 +391,10 @@ class GoalServiceTest {
     }
 
     @Override
-    public void settle(UUID id, String job, Runnable writeTurn, Function<Goal, Progress> next) {
+    public void settle(UUID id, String job, Runnable writeTurn, Function<Goal, Settlement> next) {
       assertEquals(job, goal.progress().job());
       writeTurn.run();
-      change(goal, next.apply(goal)).orElseThrow();
+      change(goal, next.apply(goal).progress()).orElseThrow();
     }
 
     @Override

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,7 +24,7 @@ public class JdbcFiringStore implements FiringStore {
   private static final String COLUMNS =
       "id, event, data::text AS data, schedule, fire_at,"
           + " trigger, target, status, superseded_by, reason, job_id, arrived_at, started_at,"
-          + " finished_at, COALESCE(topic,message_instance) AS topic";
+          + " finished_at, COALESCE(topic,message_instance) AS topic, schedule_generation";
 
   private final JdbcTemplate jdbc;
 
@@ -120,6 +121,27 @@ public class JdbcFiringStore implements FiringStore {
     return arrive(event, data, schedule, fireAt, trigger, at, () -> MemoryIds.mint(PREFIX, at));
   }
 
+  @Override
+  public Optional<FiringRecord> arriveGoalSchedule(
+      String event,
+      EventPayload.Scheduled data,
+      TriggerRecord trigger,
+      Instant at,
+      UUID generation) {
+    Objects.requireNonNull(generation, "Goal schedule generation");
+    if (!data.schedule().equals(trigger.name()))
+      throw new IllegalArgumentException("A Goal schedule occurrence requires its own trigger");
+    return arrive(
+        event,
+        data,
+        data.schedule(),
+        data.fireAt(),
+        trigger,
+        at,
+        generation,
+        () -> MemoryIds.mint(PREFIX, at));
+  }
+
   /** Package-private overload for testing: allows custom ID supplier to test collision retry. */
   Optional<FiringRecord> arrive(
       String event,
@@ -128,6 +150,18 @@ public class JdbcFiringStore implements FiringStore {
       Instant fireAt,
       TriggerRecord trigger,
       Instant at,
+      Supplier<String> ids) {
+    return arrive(event, data, schedule, fireAt, trigger, at, null, ids);
+  }
+
+  private Optional<FiringRecord> arrive(
+      String event,
+      EventPayload data,
+      String schedule,
+      Instant fireAt,
+      TriggerRecord trigger,
+      Instant at,
+      UUID generation,
       Supplier<String> ids) {
     Objects.requireNonNull(at, "arrival time");
     EventPayloadCodec.require(event, null, schedule, fireAt, data);
@@ -139,7 +173,7 @@ public class JdbcFiringStore implements FiringStore {
       var inserted =
           jdbc.query(
               "INSERT INTO firings (id, event, data, schedule, fire_at, trigger, target,"
-                  + " status, arrived_at) VALUES (?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING "
+                  + " status, arrived_at, schedule_generation) VALUES (?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING "
                   + COLUMNS,
               JdbcFiringStore::row,
               id,
@@ -150,7 +184,8 @@ public class JdbcFiringStore implements FiringStore {
               trigger == null ? null : trigger.name(),
               trigger == null ? null : trigger.target(),
               trigger == null ? "unmatched" : "queued",
-              ts(at));
+              ts(at),
+              generation);
       if (!inserted.isEmpty()) return Optional.of(inserted.getFirst());
       if (schedule != null
           && Boolean.TRUE.equals(
@@ -450,6 +485,7 @@ public class JdbcFiringStore implements FiringStore {
         instant(rs, "arrived_at"),
         instant(rs, "started_at"),
         instant(rs, "finished_at"),
-        rs.getString("topic"));
+        rs.getString("topic"),
+        rs.getObject("schedule_generation", UUID.class));
   }
 }

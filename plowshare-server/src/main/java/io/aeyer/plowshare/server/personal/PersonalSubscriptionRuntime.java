@@ -43,6 +43,8 @@ import io.aeyer.plowshare.server.relay.RelayForwardingHistory;
 import io.aeyer.plowshare.server.relay.RelayPayload;
 import io.aeyer.plowshare.server.relay.RelayRetirementRepository;
 import io.aeyer.plowshare.server.relay.RelayTopicMissingException;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -237,8 +239,11 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
           store.activate(project, draft.revision());
           var mailbox =
               desired.stream().anyMatch(spec -> spec.relayTopic() == null)
-                  ? relay.registerTopic(
-                      topic(project), RelayPayload.Kind.LIFECYCLE, Relay.Policy.systemDefault())
+                  ? relay.registerOwnedTopic(
+                      topic(project),
+                      RelayPayload.Kind.LIFECYCLE,
+                      Relay.Policy.systemDefault(),
+                      RelayTopicOwnership.internal(Owner.PERSONAL))
                   : null;
           if (!desired.isEmpty()) {
             Instant enabledAt = store.now();
@@ -524,13 +529,25 @@ final class PersonalSubscriptionRuntime implements PersonalEventSubscriptions {
 
   private Relay.Topic requireTopic(String owner, Spec spec) {
     requireSource(owner, spec);
-    if (spec.sourceType().nativeTopic())
-      return relay.registerTopic(
+    if (spec.sourceType().nativeTopic()) {
+      var sourceOwner =
+          switch (spec.sourceType()) {
+            case APPLICATION_INBOX -> Owner.APPLICATIONS;
+            case ATTENTION_COPY -> Owner.PERSONAL;
+            case JOB -> Owner.JOBS;
+            case ORCHESTRATION -> Owner.ORCHESTRATIONS;
+            case BOARD -> Owner.BOARD;
+            case INFORMATION -> Owner.INFORMATION;
+            case MAILBOX, RELAY -> throw new IllegalStateException("Native Relay source required");
+          };
+      return relay.registerOwnedTopic(
           spec.relayTopic(),
           spec.sourceType() == SourceType.INFORMATION
               ? RelayPayload.Kind.TEXT
               : RelayPayload.Kind.LIFECYCLE,
-          Relay.Policy.systemDefault());
+          Relay.Policy.systemDefault(),
+          RelayTopicOwnership.internal(sourceOwner));
+    }
     Relay.Topic topic;
     try {
       topic = relay.topic(spec.relayTopic());

@@ -45,6 +45,64 @@ await test('provider validation redacts stdin material and online put refuses ar
   assert.equal(output.join('').includes(payload.secret), false);
 });
 
+await test('goal answer accepts its typed payload from stdin', async () => {
+  const payload = {
+    goal: '11111111-1111-1111-1111-111111111111',
+    conversation: 'cnv_Goal',
+    question: '22222222-2222-2222-2222-222222222222',
+    requestId: '33333333-3333-3333-3333-333333333333',
+    answer: '  Use the approved dataset.\n',
+  };
+  let output = '';
+  const io = {
+    env: {},
+    stdout: (value: string) => {
+      output += value;
+    },
+    stderr: (value: string) => assert.fail(value),
+    stdin: () => Promise.resolve(JSON.stringify(payload)),
+  };
+  assert.equal(
+    await run(['goal', 'answer', '--payload', '-', '--validate', '--json'], io),
+    0,
+  );
+  const result = json(output);
+  assert.equal(field(result, ['executed']), false);
+  assert.equal(field(result, ['operation']), 'goal.answer');
+  assert.equal(field(result, ['mutation']), true);
+  assert.deepEqual(field(result, ['payload']), payload);
+});
+
+await test('Goal Agent reads validate without submitting and retain the original receipt request ID', async () => {
+  const project = 'research';
+  const goal = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const requestId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  for (const [verb, payload] of [
+    ['list', { project, after: goal, limit: 5 }],
+    ['status', { project, goal }],
+    ['receipt', { project, requestId }],
+  ] as const) {
+    let output = '';
+    const io = {
+      env: {},
+      stdout: (value: string) => {
+        output += value;
+      },
+      stderr: (value: string) => assert.fail(value),
+      stdin: () => Promise.resolve(JSON.stringify(payload)),
+    };
+    assert.equal(
+      await run(['goal', verb, '--payload', '-', '--validate', '--json'], io),
+      0,
+    );
+    const result = json(output);
+    assert.equal(field(result, ['executed']), false);
+    assert.equal(field(result, ['operation']), `goal.${verb}`);
+    assert.equal(field(result, ['mutation']), false);
+    assert.deepEqual(field(result, ['payload']), payload);
+  }
+});
+
 await test('explicit scope overrides the environment and leaves payload scope to shared parsing', () => {
   const env = { PLOWSHARE_PROJECT: 'inherited' };
   assert.equal(

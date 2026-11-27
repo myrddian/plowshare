@@ -406,6 +406,21 @@ class OrchestrationsTest {
     String payload = "{\"request\":\"build the login page\"}";
     assertTrue(operations.conversation(chat.id()).isEmpty());
     assertThrows(CallerFault.class, () -> engine.start(request));
+    assertThrows(
+        CallerFault.class,
+        () ->
+            engine.startFromRun(
+                request,
+                turn,
+                key,
+                payload,
+                work,
+                () -> {
+                  assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                  throw new CallerFault("The Goal no longer owns this start");
+                }));
+    assertTrue(store.startReceipt("enzo", key).isEmpty());
+    assertTrue(voice.calls.isEmpty());
 
     var launched = engine.startFromRun(request, turn, key, payload);
     var retained = operations.conversation(launched.conductorConversation()).orElseThrow();

@@ -9,6 +9,9 @@ import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
 import io.aeyer.plowshare.server.allowances.AllowanceRepository;
 import io.aeyer.plowshare.server.allowances.JdbcAllowanceRepository;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalMessagePurpose;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalReturn;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalReturnKind;
 import io.aeyer.plowshare.server.messaging.MessageService.Instance;
 import io.aeyer.plowshare.server.messaging.MessageService.Route;
 import io.aeyer.plowshare.server.relay.RelayCausationCodec;
@@ -17,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -76,7 +80,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
     return jdbc
         .query(
             "SELECT message, sender, recipient, reply_to, reply_expected, final,"
-                + " generated, ending, handled_at IS NOT NULL,relay_causation FROM message_routes WHERE message = ?",
+                + " generated, ending, handled_at IS NOT NULL,relay_causation,call_id FROM message_routes WHERE message = ?",
             (rs, n) ->
                 new Route(
                     rs.getString(1),
@@ -88,7 +92,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                     rs.getBoolean(7),
                     rs.getString(8),
                     rs.getBoolean(9),
-                    RelayCausationCodec.read(rs.getString(10))),
+                    RelayCausationCodec.read(rs.getString(10)),
+                    GoalMessagePurpose.of(rs.getString(11))),
             message)
         .stream()
         .findFirst();
@@ -106,7 +111,7 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                   connection.prepareStatement(
                       """
           SELECT r.message,r.sender,r.recipient,r.reply_to,r.reply_expected,r.final,r.generated,
-                 r.ending,r.handled_at,r.relay_causation,CASE WHEN r.message=ANY(?) THEN m.body END AS inline_body,
+                 r.ending,r.handled_at,r.relay_causation,r.call_id,CASE WHEN r.message=ANY(?) THEN m.body END AS inline_body,
                  i.account,i.project,i.agent,i.conversation,i.lifetime,i.active
           FROM message_routes r JOIN message_records m ON m.id=r.message
           JOIN message_instances i ON i.id=r.recipient WHERE r.message=ANY(?)
@@ -137,7 +142,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                         row.getBoolean("generated"),
                         row.getString("ending"),
                         row.getTimestamp("handled_at") != null,
-                        RelayCausationCodec.read(row.getString("relay_causation"))),
+                        RelayCausationCodec.read(row.getString("relay_causation")),
+                        GoalMessagePurpose.of(row.getString("call_id"))),
                     new Instance(
                         row.getString("recipient"),
                         row.getString("account"),
@@ -247,6 +253,71 @@ public final class JdbcMessagingRepository implements MessagingRepository {
         "SELECT message FROM (SELECT r.message,b.posted_at FROM message_routes r JOIN message_records b ON b.id=r.message WHERE r.reply_to=? ORDER BY b.posted_at DESC,r.message DESC LIMIT 200) recent ORDER BY posted_at,message",
         String.class,
         message);
+  }
+
+  @Override
+  public Optional<GoalReplyPage> goalReturnReplies(GoalReturn binding, String before, int limit) {
+    if (limit < 1 || limit > 6) throw new IllegalArgumentException("Invalid Goal reply page");
+    if (before != null) MessagePayload.identifier(before, "bdm_");
+    return jdbc.query(
+        """
+        SELECT request.handled_at IS NOT NULL AS request_handled,request.ending AS request_ending,
+               reply.*
+        FROM message_routes request
+        LEFT JOIN LATERAL (
+          SELECT r.message,r.reply_to,r.call_id,r.handled_at IS NOT NULL AS handled,
+                 r.reply_expected,r.ending,m.body
+          FROM message_routes r JOIN message_records m ON m.id=r.message
+          WHERE r.reply_to=request.message AND r.sender=request.recipient
+            AND r.recipient=request.sender AND NOT r.generated
+            AND (r.call_id LIKE 'goal-return:question:%' OR r.call_id LIKE 'goal-return:notice:%'
+                 OR r.call_id LIKE 'goal-return:terminal:%')
+            AND (CAST(? AS text) IS NULL OR r.message<?)
+          ORDER BY r.message DESC LIMIT ?
+        ) reply ON true
+        WHERE request.message=? AND request.sender=? AND request.recipient=?
+          AND request.call_id LIKE 'goal-return:launch:%'
+        ORDER BY reply.message DESC
+        """,
+        rows -> {
+          if (!rows.next()) return Optional.empty();
+          boolean handled = rows.getBoolean("request_handled");
+          String ending = rows.getString("request_ending");
+          var replies = new ArrayList<GoalReturnReply>();
+          do {
+            String id = rows.getString("message");
+            if (id != null) replies.add(goalReturnReply(rows, id));
+          } while (rows.next());
+          return Optional.of(new GoalReplyPage(handled, ending, replies));
+        },
+        before,
+        before,
+        limit,
+        binding.message(),
+        binding.sender(),
+        binding.recipient());
+  }
+
+  private static GoalReturnReply goalReturnReply(ResultSet row, String id) throws SQLException {
+    String ending = row.getString("ending");
+    var kind =
+        switch (GoalMessagePurpose.of(row.getString("call_id"))) {
+          case QUESTION -> GoalReturnKind.QUESTION;
+          case NOTICE -> GoalReturnKind.BLOCKED;
+          case TERMINAL ->
+              Outcome.Ending.CANCELLED.name().equals(ending)
+                  ? GoalReturnKind.CANCELLED
+                  : GoalReturnKind.RESULT;
+          default -> throw new IllegalStateException("Invalid native Goal reply purpose");
+        };
+    return new GoalReturnReply(
+        id,
+        row.getString("reply_to"),
+        kind,
+        row.getBoolean("handled"),
+        row.getBoolean("reply_expected"),
+        ending,
+        row.getString("body"));
   }
 
   public int lastTurn(String conversation) {
@@ -678,7 +749,8 @@ public final class JdbcMessagingRepository implements MessagingRepository {
                         row.getBoolean("generated"),
                         row.getString("ending"),
                         row.getTimestamp("handled_at") != null,
-                        RelayCausationCodec.read(row.getString("relay_causation"))),
+                        RelayCausationCodec.read(row.getString("relay_causation")),
+                        GoalMessagePurpose.of(row.getString("call_id"))),
                     deliveryInstance(row, "sender"),
                     deliveryInstance(row, "recipient"),
                     new DeliveryState(

@@ -4,6 +4,7 @@ import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.archive.Conversations;
 import io.aeyer.plowshare.server.faults.CallerFault;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +28,15 @@ public final class ConversationFollowHandler implements FrameHandler {
    * @param watchers where a session's follow is recorded
    * @param rules the service {@code conversation.trajectory} asks the existence question of
    */
+  private final GoalConversationAccess goalAccess;
+
   public ConversationFollowHandler(Watchers watchers, Conversations rules) {
+    this(watchers, rules, null);
+  }
+
+  ConversationFollowHandler(
+      Watchers watchers, Conversations rules, GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
     this.watchers = Objects.requireNonNull(watchers, "watchers");
     this.rules = Objects.requireNonNull(rules, "rules");
   }
@@ -66,6 +75,7 @@ public final class ConversationFollowHandler implements FrameHandler {
       }
       // Validate the entire snapshot before replacing any follows. A stale
       // view must not discard subscriptions to the client's other logs.
+      if (goalAccess != null) goalAccess.requireLogs(asking.handle(), List.copyOf(conversations));
       for (String conversation : conversations) {
         rules.requireExistsOrThereIsNo(conversation, "log to follow");
       }
@@ -81,6 +91,7 @@ public final class ConversationFollowHandler implements FrameHandler {
     // Refused as the trajectory a follower reads is, and in the same door's words: an id
     // nothing opened would otherwise be followed silently, and a client restoring a stale
     // one would wait on pushes for a log that never grows.
+    if (goalAccess != null) goalAccess.requireLog(asking.handle(), conversation);
     rules.requireExistsOrThereIsNo(conversation, "log to follow");
     watchers.follows(session, conversation);
     return Outcome.ok();

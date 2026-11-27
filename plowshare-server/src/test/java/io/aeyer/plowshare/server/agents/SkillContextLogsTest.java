@@ -14,6 +14,7 @@ class SkillContextLogsTest {
     assertEquals(1, log.through());
     assertTrue(log.complete());
     assertEquals("alice", log.entries().getFirst().speakerName());
+    assertNull(log.entries().getFirst().fileWindow());
     assertEquals(log, SkillContextLogs.read(SkillContextLogs.write(log)));
     assertThrows(UnsupportedOperationException.class, () -> log.entries().clear());
   }
@@ -28,7 +29,13 @@ class SkillContextLogsTest {
           ROW.replace("\"content\":\"History\"", "\"content\":null"),
           ROW.replace("\"speaker\":\"person\"", "\"speaker\":\"system\""),
           ROW.replace("\"speaker_name\":\"alice\"", "\"speaker_name\":\"alice\\nforged\""),
-          ROW.replace("\"speaker_name\":\"alice\"", "\"arbitrary_payload\":{}")
+          ROW.replace("\"speaker_name\":\"alice\"", "\"arbitrary_payload\":{}"),
+          ROW.replace(
+              "\"speaker_name\":\"alice\"",
+              """
+              "file_window":{"offset":0,"linesRead":1,"totalLines":1,"byteLength":7,
+                "limit":1,"requestedLimit":1,"stoppedBy":"end"}
+              """)
         }) {
       assertThrows(IllegalStateException.class, () -> SkillContextLogs.read("[" + invalid + "]"));
     }

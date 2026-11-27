@@ -3,6 +3,8 @@ package io.aeyer.plowshare.server.messaging;
 import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.allowances.AllowanceId;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalReturn;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalReturnKind;
 import io.aeyer.plowshare.server.messaging.MessageService.Instance;
 import io.aeyer.plowshare.server.messaging.MessageService.Route;
 import java.time.Instant;
@@ -136,6 +138,29 @@ public interface MessagingRepository {
       String recipient);
 
   List<String> replies(String message);
+
+  /** A retained native Goal reply with its request lifecycle and preserved body. */
+  record GoalReturnReply(
+      String id,
+      String replyTo,
+      GoalReturnKind kind,
+      boolean handled,
+      boolean replyExpected,
+      String ending,
+      String body) {}
+
+  /**
+   * Newest native Goal replies to this exact authorized request. Includes one extra row for an
+   * older reply cursor. The keyset never names a new parent or participant.
+   */
+  Optional<GoalReplyPage> goalReturnReplies(GoalReturn binding, String before, int limit);
+
+  /** The original request's status and this reply page share one database snapshot. */
+  record GoalReplyPage(boolean handled, String ending, List<GoalReturnReply> replies) {
+    public GoalReplyPage {
+      replies = List.copyOf(replies);
+    }
+  }
 
   int lastTurn(String conversation);
 

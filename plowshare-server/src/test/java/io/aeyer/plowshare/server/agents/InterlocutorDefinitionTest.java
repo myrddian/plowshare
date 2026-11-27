@@ -351,7 +351,9 @@ class InterlocutorDefinitionTest {
    */
   @Test
   void the_shipped_interlocutor_delegates_to_the_reviewer_and_three_others() {
-    assertEquals(List.of(REVIEWER, "image_reader", "close_reader", "coder"), shipped().calls());
+    assertEquals(
+        List.of(REVIEWER, "image_reader", "close_reader", "coder", "goal_worker"),
+        shipped().calls());
   }
 
   /**

@@ -238,6 +238,16 @@ current permissions. A changed-request refusal reports the original invocation's
 state and warns against bypassing it with a fresh UUID. These messages do not
 extend skill constraints into a later run or automatically resume work.
 
+## Goal handoff
+
+In a project conversation, use `/skill:goal <objective>` to hand off to a
+dedicated Goal Agent. The calling definition must grant the `goal` skill and
+name the target in `calls:`. The target's permissions must fit the caller's
+grants. The command returns the goal ID, message address and dedicated
+conversation after they commit. If the caller needs clarification, reply in
+the same conversation to continue the retained invocation.
+[Goal Agent launch](conversation-goals-design.md#launch-skill)
+
 ## Skill grants
 
 An agent or Bot has no skill access unless its definition declares it:

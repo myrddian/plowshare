@@ -19,6 +19,10 @@ import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.faults.Fault;
 import io.aeyer.plowshare.server.faults.Faults;
+import io.aeyer.plowshare.server.goals.ConversationGoals;
+import io.aeyer.plowshare.server.goals.GoalAgents;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess.Disclosure;
 import io.aeyer.plowshare.server.personal.PersonalAccess;
 import io.aeyer.plowshare.server.personal.PersonalScope;
 import io.aeyer.plowshare.server.personal.PersonalScopeDecoder;
@@ -312,6 +316,13 @@ public final class FrameRouter {
     this.personalAccess = access;
   }
 
+  private GoalConversationAccess goalAccess;
+
+  @Autowired(required = false)
+  public void useGoalAccess(GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
+  }
+
   public Outcome route(Envelope request, Asking asking) {
     try {
       return routeAsync(request, asking, false).toCompletableFuture().join();
@@ -442,6 +453,12 @@ public final class FrameRouter {
         if (personalAccess != null)
           personalAccess.check(scope, asking.handle(), asking.sessionId());
       }
+      if (goalAccess != null
+          && (request.type().equals(FrameTypes.CONVERSATION_CONTEXT_COUNT)
+              || request.type().equals(FrameTypes.CONVERSATION_CONTEXT_SNAPSHOT))
+          && request.payload() != null
+          && request.payload().get("conversation") instanceof String conversation)
+        goalAccess.requireLog(asking.handle(), conversation);
       Asking admitted = admission == null ? asking : asking.withExternalAdmission(admission);
       var completion =
           disclosureFence && !ExternalConversationRequestWork.external(request.type())
@@ -464,6 +481,7 @@ public final class FrameRouter {
                       request.type(),
                       AccessRequestDecoder.decode(request.type(), request.payload()),
                       asking.handle());
+                if (disclosureFence) requireCurrentGoalDisclosure(request, asking, answer);
                 return authorization == null
                     ? answer
                     : new ProjectListingFilter(authorization)
@@ -553,6 +571,7 @@ public final class FrameRouter {
           && !ProcFrames.OPERATIONS.contains(request.type()))
         personalAccess.check(
             PersonalScopeDecoder.decode(request.payload()), asking.handle(), asking.sessionId());
+      requireCurrentGoalDisclosure(request, asking, answer);
       if (authorization != null) {
         Outcome filtered =
             new ProjectListingFilter(authorization)
@@ -566,6 +585,60 @@ public final class FrameRouter {
     } catch (IOException invalid) {
       throw new CallerFault("Invalid reply authority context", invalid);
     }
+  }
+
+  private static final Set<String> GOAL_PROTECTED_CONVERSATION_READS =
+      Set.of(
+          FrameTypes.CONVERSATION_TURNS, FrameTypes.CONVERSATION_CHAT,
+          FrameTypes.CONVERSATION_TRAJECTORY, FrameTypes.CONVERSATION_CONTEXT,
+          FrameTypes.CONVERSATION_CONTEXT_COUNT, FrameTypes.CONVERSATION_CONTEXT_SNAPSHOT,
+          FrameTypes.CONVERSATION_PROJECTION, FrameTypes.CONVERSATION_COMPACTIONS,
+          FrameTypes.CONVERSATION_TOOL_TRACE, FrameTypes.TODOS_READ);
+
+  private static final Set<String> GOAL_PROTECTED_REPLIES =
+      Set.of(
+          FrameTypes.GOAL_START,
+          FrameTypes.CONVERSATION_GOAL_GET,
+          FrameTypes.CONVERSATION_GOAL_PAUSE,
+          FrameTypes.CONVERSATION_GOAL_RESUME,
+          FrameTypes.CONVERSATION_GOAL_CANCEL);
+
+  boolean requiresGoalDisclosure(String type) {
+    return goalAccess != null
+        && (GOAL_PROTECTED_CONVERSATION_READS.contains(type)
+            || GOAL_PROTECTED_REPLIES.contains(type));
+  }
+
+  boolean permitsGoalGrowth(String conversation, String account) {
+    if (goalAccess == null) return true;
+    try {
+      goalAccess.requireLog(account, conversation);
+      return true;
+    } catch (RuntimeException unavailable) {
+      // A droppable growth notification cannot bypass a withheld or unavailable authority check.
+      return false;
+    }
+  }
+
+  private void requireCurrentGoalDisclosure(Envelope request, Asking asking, Outcome answer) {
+    if (goalAccess == null || answer.payload() == null || request.payload() == null) return;
+    String account = asking.handle();
+    if (request.payload().get("project") instanceof String project) {
+      if (answer.payload() instanceof GoalAgents.Page page) {
+        goalAccess.requireDisclosure(
+            account, project, page.goals().stream().map(Disclosure::forStatus).toList());
+      } else if (answer.payload() instanceof GoalAgents.Status status) {
+        goalAccess.requireDisclosure(account, project, List.of(Disclosure.forStatus(status)));
+      } else if (answer.payload() instanceof GoalAgents.Started started) {
+        goalAccess.requireDisclosure(
+            account, project, List.of(new Disclosure(started.goal(), false, List.of())));
+      }
+    }
+    if (answer.payload() instanceof ConversationGoals.Status status
+        && !status.objective().isEmpty()) goalAccess.requireLog(account, status.conversation());
+    if (GOAL_PROTECTED_CONVERSATION_READS.contains(request.type())
+        && request.payload().get("conversation") instanceof String conversation)
+      goalAccess.requireLog(account, conversation);
   }
 
   private static boolean serverAdministration(String type) {

@@ -14,6 +14,7 @@ import io.aeyer.plowshare.server.approvals.ApprovalDelivery;
 import io.aeyer.plowshare.server.approvals.BudgetExtension;
 import io.aeyer.plowshare.server.approvals.ConductorContinuation;
 import io.aeyer.plowshare.server.approvals.FileApproval;
+import io.aeyer.plowshare.server.approvals.GoalApprovalContinuations;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.approvals.RunApprovalStore;
 import io.aeyer.plowshare.server.approvals.WebApproval;
@@ -39,6 +40,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class ApprovalFrames implements FrameArea {
   private BudgetRequests budgetRequests = BudgetRequests.NONE;
+  private GoalApprovalContinuations goalApprovals = GoalApprovalContinuations.NONE;
+
+  @Autowired
+  public void useGoalApprovals(ObjectProvider<GoalApprovalContinuations> goals) {
+    goalApprovals = goals.getIfAvailable(() -> GoalApprovalContinuations.NONE);
+  }
 
   @Autowired
   public void useBudgetRequests(ObjectProvider<BudgetRequests> requests) {
@@ -541,6 +548,8 @@ public class ApprovalFrames implements FrameArea {
                 resumed.get().busy(),
                 resumed.get().note()));
     }
+    if (goalApprovals.ownsConversation(approval.conversation()))
+      return Outcome.ok(new Answered(approval.id(), state, null, false, null));
     try {
       // The approval as this answer left it, not as it was read before: the engine speaks
       // an answer to a run's own check in words of its own, which differ by the decision.

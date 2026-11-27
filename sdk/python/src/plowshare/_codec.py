@@ -219,7 +219,75 @@ def decode_push(value: object) -> contracts.ServerPush:
 
 
 def deployment_matches(operation: str, request: object, result: object) -> bool:
-    """A structural reply cannot certify a different project's retained receipt."""
+    """Certify that a structurally valid receipt belongs to the request."""
+    if operation == "goal.receipt":
+        request_id = _object(request).get("requestId")
+        return (
+            isinstance(result, contracts.GoalAgentStartedDto)
+            and isinstance(request_id, str)
+            and request_id.lower() == result.request_id
+        )
+    if operation == "goal.status":
+        asked = _object(request)
+        goal = asked.get("goal")
+        return (
+            isinstance(result, contracts.GoalStatusDto)
+            and isinstance(goal, str)
+            and goal.lower() == result.goal
+            and asked.get("project") == result.project
+        )
+    if operation == "goal.list":
+        asked = _object(request)
+        if not isinstance(result, contracts.GoalPageDto):
+            return False
+        limit = asked.get("limit", 20)
+        after = asked.get("after")
+        seen = set()
+        if not isinstance(limit, (int, float)) or len(result.goals) > limit:
+            return False
+        for goal_status in result.goals:
+            if (
+                goal_status.project != asked.get("project")
+                or (isinstance(after, str) and goal_status.goal == after.lower())
+                or goal_status.goal in seen
+            ):
+                return False
+            seen.add(goal_status.goal)
+        return result.next is None or (
+            bool(result.goals) and result.next == result.goals[-1].goal
+        )
+    if operation == "goal.answer":
+        asked = _object(request)
+        return (
+            isinstance(result, contracts.GoalAnswerReceiptDto)
+            and result.conversation == asked.get("conversation")
+            and all(
+                isinstance(value := asked.get(key), str) and value.lower() == expected
+                for key, expected in (
+                    ("goal", result.goal),
+                    ("question", result.question),
+                    ("requestId", result.request_id),
+                )
+            )
+        )
+    if operation == "message.unlisten":
+        asked = _object(request)
+        if not isinstance(result, contracts.GoalAgentUnlistenReceiptDto):
+            return False
+        version = asked.get("version")
+        return (
+            isinstance(version, (int, float))
+            and not isinstance(version, bool)
+            and result.version == version + 1
+            and all(
+                isinstance(value := asked.get(key), str) and value.lower() == expected
+                for key, expected in (
+                    ("goal", result.goal),
+                    ("binding", result.binding),
+                    ("requestId", result.request_id),
+                )
+            )
+        )
     if operation == "relay.group.inspect":
         asked = _object(_wire(request))
         return isinstance(result, contracts.RelayGroupStateDto) and (

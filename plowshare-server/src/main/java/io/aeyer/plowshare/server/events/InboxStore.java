@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Specialist persistence contract. SQL, row decoding and guarded transitions belong to its JDBC
@@ -54,6 +55,18 @@ public interface InboxStore {
    * Concurrent attempts cannot reserve the same interval. Read and settlement state is preserved.
    */
   boolean claimQuestionAlert(String handle, String id, Instant at, Duration retryInterval);
+
+  /** Immutable reference receipt and whether this delivery created the Inbox item. */
+  record GoalNotice(String id, boolean inserted) {}
+
+  /**
+   * Insert or recover one Goal Intent in the named account's Inbox under its current log access.
+   */
+  GoalNotice goalNotice(
+      String account, UUID goal, String conversation, UUID intent, GoalInbox.Kind kind, Instant at);
+
+  /** Settles only this account's exact Goal question. */
+  boolean settleGoalQuestion(String account, UUID goal, UUID intent, Instant at);
 
   List<String> settle(String about, Instant at);
 

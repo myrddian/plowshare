@@ -29,7 +29,7 @@ import java.util.function.Supplier;
  * is never reached.
  */
 public final class ReadTierRelayConsumption implements RelayConsumption {
-  private final ProjectMembers members;
+  private final RelayProjectReadAccess readAccess;
   private final ProjectWorkspaces projects;
   private final Relay relay;
   private final RelayConsumerRepository consumers;
@@ -50,7 +50,7 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
       RelaySubscriptionAuthority authority,
       Duration maximumAge,
       Supplier<Instant> clock) {
-    this.members = Objects.requireNonNull(members, "members");
+    this.readAccess = RelayProjectReadAccess.existing(members, projects);
     this.projects = Objects.requireNonNull(projects, "projects");
     this.relay = Objects.requireNonNull(relay, "relay");
     this.consumers = Objects.requireNonNull(consumers, "consumers");
@@ -157,9 +157,7 @@ public final class ReadTierRelayConsumption implements RelayConsumption {
   private Relay.SubscriptionKey readable(String account, Request request) {
     RelayValues.identity(account, "account");
     Objects.requireNonNull(request, "request");
-    var owner = projects.personalOwner(request.project());
-    if (owner.isPresent() && !owner.get().equals(account)
-        || !members.mayUse(request.project(), account))
+    if (!readAccess.mayRead(account, request.project()))
       throw new CallerFault("Relay topic is unavailable to this account");
     var id = projects.id(request.project());
     if (id == null || id < 1) throw new CallerFault("Relay topic is unavailable to this account");

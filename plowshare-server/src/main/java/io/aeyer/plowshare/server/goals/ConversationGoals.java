@@ -7,6 +7,8 @@ public interface ConversationGoals {
   enum State {
     READY,
     RUNNING,
+    IDLE,
+    WAITING,
     PAUSING,
     PAUSED,
     BLOCKED,
@@ -43,7 +45,17 @@ public interface ConversationGoals {
       Integer maxActivations) {}
 
   record Control(
-      String conversation, UUID requestId, UUID goal, int version, Integer maxActivations) {}
+      String conversation,
+      UUID requestId,
+      UUID goal,
+      int version,
+      Integer maxActivations,
+      Integer maxModelCalls) {
+    public Control(
+        String conversation, UUID requestId, UUID goal, int version, Integer maxActivations) {
+      this(conversation, requestId, goal, version, maxActivations, null);
+    }
+  }
 
   record Status(
       UUID goal,

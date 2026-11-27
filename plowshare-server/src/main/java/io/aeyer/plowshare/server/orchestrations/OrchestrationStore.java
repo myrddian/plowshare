@@ -1091,13 +1091,38 @@ public class OrchestrationStore {
         == 1;
   }
 
-  /** Every terminal run whose ending nobody has been told about yet. */
+  // This names only the Goal's own start receipt, leaving normal MESSAGE and other root
+  // deliveries intact. Questions use their own receipt and delivery route.
+  private static final String GENERIC_ENDING =
+      " AND NOT EXISTS (SELECT 1 FROM orchestration_start_receipts receipt"
+          + " WHERE receipt.run_id=orchestrations.id AND receipt.payload->>'source'=?)";
+
+  /** Reads the exact pending attempt under the normal ending delivery owner. */
+  Optional<OrchestrationRecord> undeliveredEnding(String id, String parent, Instant endedAt) {
+    return jdbc
+        .query(
+            SELECT_ORCHESTRATIONS
+                + " WHERE id=? AND parent IS NOT DISTINCT FROM ? AND ended_at=?"
+                + " AND result_delivered_at IS NULL"
+                + GENERIC_ENDING,
+            ORCHESTRATION_ROW_MAPPER,
+            id,
+            parent,
+            utc(endedAt),
+            GoalOrchestrationReceipts.SOURCE)
+        .stream()
+        .findFirst();
+  }
+
+  /** Every terminal run with an ending pending in the normal delivery path. */
   public List<OrchestrationRecord> undeliveredEndings() {
     return jdbc.query(
         SELECT_ORCHESTRATIONS
             + " WHERE ended_at IS NOT NULL AND result_delivered_at IS NULL"
+            + GENERIC_ENDING
             + " ORDER BY ended_at, id",
-        ORCHESTRATION_ROW_MAPPER);
+        ORCHESTRATION_ROW_MAPPER,
+        GoalOrchestrationReceipts.SOURCE);
   }
 
   /** Every run that has not ended. */

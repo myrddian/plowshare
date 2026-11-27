@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.relay;
 
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.util.Objects;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Topic-first locking matches publication, lease acquisition and operator removal. */
@@ -34,6 +35,41 @@ public final class JdbcRelayRetirementRepository implements RelayRetirementRepos
               scope,
               topic,
               owner.subscriber());
+          return null;
+        });
+  }
+
+  @Override
+  public void retireGoalCursor(
+      Relay.SubscriptionKey owner, UUID topicGeneration, UUID subscriptionGeneration) {
+    Objects.requireNonNull(topicGeneration);
+    Objects.requireNonNull(subscriptionGeneration);
+    if (!(owner.topic().scope() instanceof Relay.ProjectScope)
+        || !owner.subscriber().matches("goal\\.[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"))
+      throw new IllegalArgumentException("Not a Goal Agent cursor");
+    work.inTransaction(
+        () -> {
+          String scope = RelayScopeCodec.write(owner.topic());
+          String topic = owner.topic().name();
+          if (!jdbc.queryForList(
+                  """
+              SELECT name FROM relay_topics WHERE scope_key=? AND name=? AND generation=? FOR UPDATE
+              """,
+                  String.class,
+                  scope,
+                  topic,
+                  topicGeneration)
+              .isEmpty()) {
+            jdbc.update(
+                """
+                DELETE FROM relay_subscriptions
+                WHERE scope_key=? AND topic=? AND subscriber=? AND generation=? AND reader_account IS NULL
+                """,
+                scope,
+                topic,
+                owner.subscriber(),
+                subscriptionGeneration);
+          }
           return null;
         });
   }

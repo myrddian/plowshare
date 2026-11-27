@@ -65,6 +65,22 @@ class HarnessRunApprovalContinuationsTest {
   }
 
   @Test
+  void an_early_or_retried_goal_decision_never_reaches_a_generic_starter() {
+    continuations.useGoalContinuations(() -> conversation -> conversation.equals("cnv_1"));
+    when(approvals.find("apr_1")).thenReturn(Optional.of(approval()));
+    assertNull(continuations.resume("apr_1").orElseThrow().job());
+
+    var retained = call("cnv_1", true);
+    when(calls.find("apr_1")).thenReturn(Optional.of(retained));
+    when(calls.recoverable()).thenReturn(List.of(retained));
+    assertNull(continuations.resume("apr_1").orElseThrow().job());
+    continuations.recover();
+    verifyNoInteractions(starter);
+    verify(calls, never()).pending(any());
+    assertTrue(problems.isEmpty());
+  }
+
+  @Test
   void a_live_stack_never_starts_another_model_turn() {
     when(calls.find("apr_1")).thenReturn(Optional.of(call("cnv_1", true)));
     active.entered("apr_1", "cnv_1");

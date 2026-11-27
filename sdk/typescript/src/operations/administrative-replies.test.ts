@@ -601,7 +601,10 @@ describe('complete administrative WS replies', () => {
         `(?:public\\s+)?record ${name}\\(([^)]*)\\)`,
         's',
       ).exec(java.replace(/@[\w.]+\([^)]*\)/g, ''))![1]!;
-      const fields = raw.split(',').map((part) => {
+      const exposed = raw
+        .split(',')
+        .filter((part) => !/^\s*@JsonIgnore\b/u.test(part));
+      const fields = exposed.map((part) => {
         const [wireType, key] = part.trim().split(/\s+/);
         function mapped(raw: string): string {
           const list = /^(?:List|Set)<(.+)>$/.exec(raw);

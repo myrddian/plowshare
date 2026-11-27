@@ -5,11 +5,16 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import io.aeyer.plowshare.protocol.Home;
+import io.aeyer.plowshare.protocol.Span;
+import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.server.archive.ConversationStore;
+import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.Origin;
+import io.aeyer.plowshare.server.files.FileReadWindow;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.llm.accounting.UsageLineage;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -132,27 +137,32 @@ class SkillExecutionsTest {
 
   @Test
   void context_copy_is_stable_and_old_result_handles_remain_scoped_to_the_child() {
-    var entries =
-        new io.aeyer.plowshare.server.archive.EntryStore(
-            jdbc, (java.util.function.Supplier<Instant>) Instant::now);
+    var entries = new EntryStore(jdbc);
     entries.append(parent, 1, LoggedEntry.utterance("Original context", Speaker.person("alice")));
-    var call = new io.aeyer.plowshare.protocol.ToolCall("read", "file_read", "{}");
+    var call = new ToolCall("read", "file_read", "{}");
     entries.append(parent, 1, LoggedEntry.answer("", List.of(call)));
-    var result = entries.append(parent, 1, LoggedEntry.toolResult("read", "Evidence payload"));
-    Transcript transcript = org.mockito.Mockito.mock(Transcript.class);
-    org.mockito.Mockito.when(transcript.conversationId()).thenReturn(parent);
-    var contexts =
-        new SkillContexts(entries, org.mockito.Mockito.mock(SkillSummaries.class), executions);
+    String evidence = "Evidence π\r\n";
+    var window =
+        new FileReadWindow(
+            0, 1, 3, evidence.getBytes(StandardCharsets.UTF_8).length, 1, 1, Span.LINES);
+    var result =
+        entries.append(parent, 1, LoggedEntry.toolResult("read", evidence).windowed(window));
+    Transcript transcript = mock(Transcript.class);
+    when(transcript.conversationId()).thenReturn(parent);
+    var contexts = new SkillContexts(entries, mock(SkillSummaries.class), executions);
     var snapshot =
         contexts.prepare(SkillDefinition.Mode.INHERITED, transcript, "alice", () -> false);
+    assertEquals(window, snapshot.snapshot().entries().getLast().fileWindow());
+    assertEquals(
+        snapshot.snapshot(), SkillContextLogs.read(SkillContextLogs.write(snapshot.snapshot())));
     UUID id = UUID.randomUUID();
     assertTrue(
         executions.claim(
             "alice", id, "input", parent, "interlocutor", skill, SkillDefinition.Mode.INHERITED));
     contexts.pin("alice", id, snapshot);
     executions.running("alice", id, child);
-    Transcript childTranscript = org.mockito.Mockito.mock(Transcript.class);
-    org.mockito.Mockito.when(childTranscript.conversationId()).thenReturn(child);
+    Transcript childTranscript = mock(Transcript.class);
+    when(childTranscript.conversationId()).thenReturn(child);
     contexts.seed(childTranscript, snapshot);
     entries.append(
         parent, 2, LoggedEntry.utterance("Later parent context", Speaker.person("alice")));
@@ -161,9 +171,9 @@ class SkillExecutionsTest {
     assertTrue(copied.getFirst().content().contains("Original context"));
     assertFalse(copied.getFirst().content().contains("Later parent context"));
     assertTrue(copied.getFirst().content().contains("speaker_name"));
-    assertEquals(
-        "Evidence payload",
-        executions.contextResult("alice", child, result.handle()).orElseThrow());
+    assertTrue(copied.getFirst().content().contains("\"file_window\""));
+    assertFalse(copied.getFirst().content().contains("retained_invocation"));
+    assertEquals(evidence, executions.contextResult("alice", child, result.handle()).orElseThrow());
     assertTrue(executions.contextResult("bob", child, result.handle()).isEmpty());
     assertTrue(executions.contextResult("alice", parent, result.handle()).isEmpty());
     assertTrue(executions.contextResult("alice", child, UUID.randomUUID()).isEmpty());
@@ -190,7 +200,7 @@ class SkillExecutionsTest {
                 Map.of("review", new SkillResolver.Resolved(direct, mock(SkillSource.class))),
                 Map.of()));
     var modelRuntime = mock(JobRuntime.class);
-    when(modelRuntime.knownTools()).thenReturn(Set.of("file_read"));
+    when(modelRuntime.knownTools(authority.projectId())).thenReturn(Set.of("file_read"));
     var skillRuntime =
         new SkillRuntime(resolver, callers, executions, modelRuntime, ImageStore.NONE);
     var commands =

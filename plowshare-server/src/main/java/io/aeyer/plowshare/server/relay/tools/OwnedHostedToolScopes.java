@@ -13,6 +13,8 @@ import io.aeyer.plowshare.server.auth.AdminStore;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.providers.*;
 import io.aeyer.plowshare.server.relay.*;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.*;
 import java.util.*;
 import java.util.function.Supplier;
@@ -767,7 +769,11 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
             completion = Optional.of(new VerifiedResult(original, result));
           }
           var key = new Relay.TopicKey(projects.id(b.project()), publication.topic());
-          relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+          relay.registerOwnedTopic(
+              key,
+              RelayPayload.Kind.TEXT,
+              Relay.Policy.systemDefault(),
+              RelayTopicOwnership.internal(Owner.HOSTED_TOOLS));
           var pub =
               relay.publish(
                   key,
@@ -802,7 +808,11 @@ public final class OwnedHostedToolScopes implements HostedToolScopes {
     String name = topic.substring(prefix.length(), topic.length() - ".request".length());
     var t = tool(b, l, name);
     var key = new Relay.TopicKey(projects.id(project), t.requests());
-    relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    relay.registerOwnedTopic(
+        key,
+        RelayPayload.Kind.TEXT,
+        Relay.Policy.systemDefault(),
+        RelayTopicOwnership.internal(Owner.HOSTED_TOOLS));
     return key;
   }
 
