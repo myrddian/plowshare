@@ -1,3 +1,4 @@
+import { GOALS_COMMAND, goalUsage } from './goal-command.ts';
 import type { Answer } from 'plowshare-client-ts/operations/response';
 import { isList } from 'plowshare-client-ts/binding/values';
 import { projectLabel } from 'plowshare-client-ts/operations/project-label';
@@ -780,6 +781,7 @@ export const COMMANDS: readonly string[] = [
   '/conversation',
   '/memory',
   INBOX_COMMAND,
+  GOALS_COMMAND,
   SCHEDULE_COMMAND,
   FIRE_COMMAND,
   FIRINGS_COMMAND,
@@ -869,6 +871,8 @@ export function describeArguments(command: string): string {
       return ' <name> | create|define|member-add|member-remove <JSON>';
     case CD_COMMAND:
       return ' <path>';
+    case GOALS_COMMAND:
+      return goalUsage.slice(GOALS_COMMAND.length);
     case SCHEDULE_COMMAND:
       return ' <sentence> | list | pause|resume|forget <name>';
     case FIRE_COMMAND:
@@ -953,6 +957,8 @@ export function describeCommand(command: string): string {
       return 'what is open in the home you are in';
     case INBOX_COMMAND:
       return 'what scheduled runs left for you';
+    case GOALS_COMMAND:
+      return 'list, inspect, pause, resume or cancel Goal Agents in the current project';
     case SCHEDULE_COMMAND:
       return (
         'schedule something in a sentence; save/sync JSON and files manage monitored definitions; list shows your schedules and who each one' +

@@ -1685,6 +1685,9 @@ $('#relay-open').addEventListener('click', () => {
   localStorage.removeItem(applicationRelayScopeKey);
   action({ action: 'relay' });
 });
+$('#goals-open').addEventListener('click', () =>
+  action({ action: 'activity', view: 'goals' }),
+);
 $('#schedules-open').addEventListener('click', () => {
   localStorage.removeItem(applicationScheduleProjectKey);
   action({ action: 'activity', view: 'schedules' });
@@ -2084,6 +2087,7 @@ async function runWorkspaceCommand(name: string, argument: string) {
       '/trajectory': '#trajectory-open',
       '/inbox': '#inbox-open',
       '/runs': '#runs-open',
+      '/goals': '#goals-open',
       '/schedule': '#schedules-open',
       '/memory': '#memories-open',
       '/board': '#board-open',
@@ -2991,6 +2995,7 @@ function renderBreadcrumb() {
           Runs: 'runs-open',
           Definitions: 'studio-open',
           'Orchestration builder': 'studio-open',
+          'Goal Agents': 'goals-open',
           'Scheduled work': 'schedules-open',
           Memories: 'memories-open',
           Library: 'library-open',

@@ -11016,3 +11016,188 @@ describe('failed run recovery', () => {
     expect(prompt.said.join('\n')).toContain('resumed');
   });
 });
+
+function goalRequestId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object' || !('requestId' in payload))
+    return undefined;
+  return typeof payload.requestId === 'string' ? payload.requestId : undefined;
+}
+
+describe('Goal Agents in the current project', () => {
+  it('pages, inspects and controls an exact version, reconciling a withheld reply without replay', async () => {
+    const fake = await scriptedPlowshare([]);
+    const goal = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const other = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const conversation = 'cnv_GoalA';
+    let version = 4;
+    let state = 'IDLE';
+    const status = () => ({
+      goal,
+      project: 'plowshare',
+      conversation,
+      instance: 'ins_GoalA',
+      agent: 'goal_worker',
+      objective: 'Check the **retained** report',
+      lifecycle: 'STANDING',
+      state,
+      version,
+      readable: true,
+      reason: null,
+      detail: null,
+      latestResult: null,
+      nextScheduleAt: null,
+      schedules: [],
+      relayListeners: [],
+      moreSchedules: false,
+      moreRelayListeners: false,
+    });
+    const receipt = () => ({
+      goal,
+      conversation,
+      agent: 'goal_worker',
+      objective: 'Check the report',
+      criteria: null,
+      state,
+      version,
+      activations: 2,
+      maxActivations: 24,
+      lastJob: null,
+      lastTurn: null,
+      reason: null,
+      detail: null,
+      modelCallsSpent: 5,
+      modelCallLimit: 40,
+    });
+    fake.script('goal.list', (payload) => {
+      const after =
+        payload && typeof payload === 'object' && 'after' in payload;
+      return {
+        code: 'OK',
+        payload: after
+          ? { goals: [], next: null }
+          : { goals: [status()], next: goal },
+      };
+    });
+    fake.script('goal.status', (payload) => {
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        'goal' in payload &&
+        payload.goal === other
+      )
+        return {
+          code: 'OK',
+          payload: {
+            ...status(),
+            goal: other,
+            conversation: 'cnv_Restricted',
+            instance: 'ins_Restricted',
+            readable: false,
+            agent: null,
+            objective: null,
+          },
+        };
+      return { code: 'OK', payload: status() };
+    });
+    fake.script('conversation.goal.pause', () => {
+      version += 1;
+      state = 'PAUSED';
+      return { code: 'BAD_REQUEST', said: 'Control reply withheld' };
+    });
+    fake.script('conversation.goal.get', () => ({
+      code: 'OK',
+      payload: receipt(),
+    }));
+    fake.script('conversation.goal.resume', () => {
+      version += 1;
+      state = 'IDLE';
+      return { code: 'OK', payload: receipt() };
+    });
+    const prompt = scripted([
+      '/goals',
+      `/goals list ${goal}`,
+      `/goals status ${goal}`,
+      `/goals pause ${goal}`,
+      `/goals resume ${goal} calls=40 activations=24`,
+      `/goals cancel ${other}`,
+    ]);
+    const talking = talkingTo(fake, prompt);
+    await converse({
+      ...talking,
+      project: 'plowshare',
+      door: {
+        ...talking.door,
+        deadline: {
+          milliseconds: 10_000,
+          schedule: (expired, milliseconds) => {
+            const timer = setTimeout(expired, milliseconds);
+            return () => clearTimeout(timer);
+          },
+        },
+      },
+    });
+
+    const frames = fake.heard.frames;
+    expect(
+      frames
+        .filter(({ type }) => type === 'goal.list')
+        .map(({ payload }) => payload),
+      prompt.said.join('\n'),
+    ).toEqual([
+      { project: 'plowshare', limit: 25 },
+      { project: 'plowshare', limit: 25, after: goal },
+    ]);
+    const pause = frames.filter(
+      ({ type }) => type === 'conversation.goal.pause',
+    );
+    const [pauseFrame] = pause;
+    const pauseId = goalRequestId(pauseFrame?.payload);
+    expect(pauseId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(pause).toEqual([
+      {
+        type: 'conversation.goal.pause',
+        payload: { goal, conversation, version: 4, requestId: pauseId },
+      },
+    ]);
+    expect(
+      frames.filter(({ type }) => type === 'conversation.goal.get'),
+    ).toEqual([
+      {
+        type: 'conversation.goal.get',
+        payload: { conversation, requestId: pauseId },
+      },
+    ]);
+    const resume = frames.filter(
+      ({ type }) => type === 'conversation.goal.resume',
+    );
+    const [resumeFrame] = resume;
+    const resumeId = goalRequestId(resumeFrame?.payload);
+    expect(resumeId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(resumeId).not.toBe(pauseId);
+    expect(resume).toEqual([
+      {
+        type: 'conversation.goal.resume',
+        payload: {
+          goal,
+          conversation,
+          version: 5,
+          requestId: resumeId,
+          maxActivations: 24,
+          maxModelCalls: 40,
+        },
+      },
+    ]);
+    expect(
+      frames.some(
+        ({ type }) =>
+          type === 'conversation.goal.cancel' || type === 'agent.run',
+      ),
+    ).toBe(false);
+    const said = prompt.said.join('\n');
+    expect(said).toContain('Check the **retained** report');
+    expect(said).toContain('No Goal Agents on this page.');
+    expect(said).toContain(`/trajectory ${conversation}`);
+    expect(said).toContain('Goal Agent control confirmed.');
+    expect(said).toContain('That control is unavailable');
+  });
+});

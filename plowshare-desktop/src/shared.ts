@@ -1,3 +1,11 @@
+import type {
+  GoalControl,
+  GoalLimits,
+} from 'plowshare-client-ts/operations/goal-controls';
+import type {
+  GoalPage,
+  GoalStatus,
+} from 'plowshare-client-ts/operations/replies';
 import type { RuntimeSetting } from './runtime-configuration.ts';
 import type { ImportRecovery } from './import-recovery-contract.ts';
 import type { NativeCommandResult } from 'plowshare-mcp-integration';
@@ -314,8 +322,31 @@ export interface DesktopState {
     | undefined;
 }
 export type ActivityView =
-  'inbox' | 'runs' | 'definitions' | 'schedules' | 'builder';
+  'inbox' | 'runs' | 'definitions' | 'schedules' | 'builder' | 'goals';
+export interface GoalActivity {
+  project?: string;
+  page?: GoalPage;
+  previous: boolean;
+  selected?: GoalStatus;
+  pending?: 'submitting' | 'pending' | 'missing';
+  loading?: boolean;
+  error?: string;
+}
+export type GoalActivityRequest =
+  | { action: 'goal-project'; project: string }
+  | { action: 'goal-page'; direction: 'previous' | 'next' }
+  | { action: 'goal-inspect'; goal: string }
+  | {
+      action: 'goal-control';
+      goal: string;
+      version: number;
+      control: GoalControl;
+      limits?: GoalLimits;
+    }
+  | { action: 'goal-clear'; goal: string; version: number }
+  | { action: 'goal-trajectory'; goal: string; version: number };
 export interface AccountActivity {
+  goals?: GoalActivity;
   view?: ActivityView | undefined;
   inbox: {
     items: InboxItem[];
@@ -794,7 +825,8 @@ export type Request =
   | ProviderManagementCall
   | { action: 'provider-management-pending' }
   | { action: 'provider-management-recover'; intent: ManagementIntent }
-  | { action: 'information-import-recovery-save'; recovery: ImportRecovery };
+  | { action: 'information-import-recovery-save'; recovery: ImportRecovery }
+  | GoalActivityRequest;
 export interface Reply {
   toolTrace?: ToolTraceView;
   approvalPolicy?: ApprovalPolicyView;

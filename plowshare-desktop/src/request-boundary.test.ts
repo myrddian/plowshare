@@ -288,3 +288,22 @@ await test('candidate buckets retain nested value, prototype and depth guards', 
     assert.throws(() => decode(bucket, value), /contract/);
   }
 });
+
+await test('Goal Agent controls require an exact displayed version and a known control', () => {
+  const request = {
+    action: 'goal-control',
+    goal: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    version: 4,
+    control: 'resume',
+    limits: { maxModelCalls: 40 },
+  };
+  assert.deepEqual(decodeDesktopRequest(request), request);
+  for (const invalid of [
+    { ...request, version: '4' },
+    { ...request, control: 'launch' },
+    { ...request, limits: { maxModelCalls: 40, authority: 'admin' } },
+    { ...request, conversation: 'cnv_Foreign' },
+  ]) {
+    assert.throws(() => decodeDesktopRequest(invalid));
+  }
+});

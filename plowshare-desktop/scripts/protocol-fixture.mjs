@@ -24,6 +24,8 @@ export async function protocolFixture(options = {}) {
   const applicationSources = new Map();
   const sourceRevision = text => createHash('sha256').update(text).digest('hex');
   const projectRows = new Map([['Empty workspace', { name: 'Empty workspace' }]]);
+  const goalStatuses = (options.goals ?? []).map((status) => ({ ...status }));
+  const goalReceipts = new Map();
   const board = demoBoard();
   // Display demos omit this nullable server field; the WS fixture carries the full DTO.
   for (const topic of new Set([...board.topics.value.map(row => row.topic), ...board.swarm.value.topics.map(row => row.topic), ...Object.values(board.details).flatMap(detail => [detail.value.topic, detail.value.root])])) {topic.quietNotifiedAt = null; if(options.boardProject)topic.project=options.boardProject;}
@@ -573,6 +575,51 @@ export async function protocolFixture(options = {}) {
         }
         case 'conversation.open': {
           const row = conversationWire(`fixture-${conversations.length + 1}`, { project: payload.project ?? null }); conversations.push(row); entries.set(row.id, []); result.payload = row; break;
+        }
+        case 'goal.list': {
+          const matching = goalStatuses.filter((status) => status.project === payload.project);
+          const after = matching.findIndex((status) => status.goal === payload.after);
+          const goals = matching.slice(after + 1, after + 2);
+          result.payload = { goals, next: after + 2 < matching.length ? goals[0].goal : null };
+          break;
+        }
+        case 'goal.status': {
+          const status = goalStatuses.find((row) => row.project === payload.project && row.goal === payload.goal);
+          result = status ? { code: 'OK', payload: status } : { code: 'NOT_FOUND' };
+          break;
+        }
+        case 'conversation.goal.get': {
+          const receipt = goalReceipts.get(payload.requestId);
+          result = receipt?.conversation === payload.conversation ? { code: 'OK', payload: receipt } : { code: 'NOT_FOUND' };
+          break;
+        }
+        case 'conversation.goal.pause':
+        case 'conversation.goal.resume':
+        case 'conversation.goal.cancel': {
+          const status = goalStatuses.find((row) => row.readable && row.goal === payload.goal && row.conversation === payload.conversation);
+          if (!status || status.version !== payload.version) {
+            result = { code: 'CONFLICT', said: 'Goal version changed' };
+            break;
+          }
+          const states = {
+            'conversation.goal.pause': 'PAUSED',
+            'conversation.goal.resume': 'IDLE',
+            'conversation.goal.cancel': 'CANCELLED',
+          };
+          status.state = states[frame.type];
+          status.version += 1;
+          const receipt = {
+            goal: status.goal, conversation: status.conversation, agent: status.agent,
+            objective: status.objective, criteria: null, state: status.state, version: status.version,
+            activations: 2, maxActivations: payload.maxActivations ?? 10,
+            lastJob: null, lastTurn: null, reason: null, detail: null,
+            modelCallsSpent: 3, modelCallLimit: payload.maxModelCalls ?? 32,
+          };
+          goalReceipts.set(payload.requestId, receipt);
+          result = frame.type === 'conversation.goal.pause'
+            ? { code: 'BAD_REQUEST', said: 'Control reply withheld' }
+            : { code: 'OK', payload: receipt };
+          break;
         }
         case 'conversation.trajectory': {
           const log = entries.get(payload.conversation) ?? [];

@@ -82,7 +82,12 @@ import {
   openFiles,
   SignInRefused,
 } from 'plowshare-client-ts/binding/auth';
-import type { Connection } from 'plowshare-client-ts/binding/connection';
+import {
+  ConnectionFault,
+  type Connection,
+} from 'plowshare-client-ts/binding/connection';
+import { GoalAgentClient } from 'plowshare-client-ts/operations/goal-controls';
+import { GoalActivityClient } from './goals.ts';
 import type { CheckedAnswer as Outcome } from 'plowshare-client-ts/operations/response';
 import type {
   Operation,
@@ -462,6 +467,31 @@ export class DesktopClient {
   readonly activity = new ActivityClient(
     () => this.state,
     (ask) => this.sendActivity(ask),
+    () => this.emit(),
+  );
+  readonly goals = new GoalActivityClient(
+    () => this.state,
+    new GoalAgentClient(
+      checkedTransport({
+        ask: async (type, payload, options) => {
+          const connection = this.connection;
+          if (!connection || !this.state.connected)
+            throw new ConnectionFault(
+              'NOT_SUBMITTED',
+              'Connect to the server first.',
+            );
+          const generation = this.generation;
+          const answer = await connection.ask(type, payload, options);
+          if (generation !== this.generation)
+            throw new ConnectionFault(
+              'RESPONSE_LOST',
+              'The connection changed.',
+            );
+          return answer;
+        },
+      }),
+      randomUUID,
+    ),
     () => this.emit(),
   );
   readonly applicationFiles = new ApplicationFilesClient(
@@ -1059,6 +1089,7 @@ export class DesktopClient {
     this.peer = undefined;
     this.closeFiles();
     this.activity.reset();
+    this.goals.close();
     this.runs.reset();
     this.schedules.reset();
     this.applicationFiles.reset();
@@ -1092,6 +1123,7 @@ export class DesktopClient {
     this.peer = undefined;
     this.closeFiles();
     this.activity.reset();
+    this.goals.close();
     this.runs.reset();
     this.schedules.reset();
     this.applicationFiles.reset();
@@ -1364,6 +1396,7 @@ export class DesktopClient {
         this.lifecycle.reset();
         this.tickets.clear();
         this.activity.reset(true);
+        this.goals.resetAccount();
         this.views.clear();
         this.state = demoState();
         break;
@@ -1688,6 +1721,7 @@ export class DesktopClient {
           this.views.clear();
           this.approvalSnapshots.clear();
           this.activity.reset(true);
+          this.goals.resetAccount();
         }
         this.state =
           previous.mode === 'live' &&
@@ -1873,6 +1907,7 @@ export class DesktopClient {
         // navigation or independent Mailbox/run reads behind slow approval scopes.
         this.background(this.refresh().then(() => this.emit()));
         await this.activity.open(request.view);
+        if (request.view === 'goals') await this.goals.refresh();
         if (!this.activity.isOpen('runs') && !this.activity.isOpen('builder'))
           this.runs.pause();
         if (request.view === 'definitions' && this.state.connected)
@@ -1884,12 +1919,22 @@ export class DesktopClient {
         this.background(this.refresh().then(() => this.emit()));
         const view = request.view ?? this.state.activity.view;
         await this.activity.refresh(view);
+        if (view === 'goals') await this.goals.refresh();
         if (view === 'definitions' && this.state.connected)
           await this.runs.definitions(this.state.activity.definitions?.project);
         if (view === 'schedules' && this.state.connected)
           await this.schedules.refresh();
         break;
       }
+      case 'goal-project':
+      case 'goal-page':
+      case 'goal-inspect':
+      case 'goal-control':
+      case 'goal-clear':
+        await this.goals.handle(request);
+        break;
+      case 'goal-trajectory':
+        throw new Error('Open goal history from Goal Agents.');
       case 'question-refresh':
         await this.activity.refresh();
         break;

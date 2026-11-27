@@ -51,11 +51,20 @@ available for other work.
 
 ## Inspect work and read the result
 
-In the browser Console, open **Work → Goal Agents**, select the project, then
-choose **Inspect Goal Agent**. The entry shows its state, wake sources, next
-scheduled wake or pending Relay batch, latest result and any blocker. Select
-**Open conversation history and TODOs** to read the exact Goal conversation,
-Trajectory and task list. History and TODOs require current read access.
+- **Console:** Open **Work → Goal Agents**, select the project, then choose
+  **Inspect Goal Agent**. **Open conversation history and TODOs** opens the
+  exact Goal conversation, Trajectory and task list.
+- **Desktop:** Open **Goal Agents** in the workspace sidebar or enter
+  `/goals` in the composer. Select the project, then select a Goal Agent.
+  **Open conversation history** opens its read-only Trajectory.
+- **TUI:** Select the project with `/project <name>`. Run `/goals` for the first
+  page, `/goals list <cursor>` for the next page and `/goals status <goal>`
+  for the details. Use the `/trajectory` command shown in the details to read
+  the exact Goal conversation.
+
+The details show the Goal's state, wake sources, next scheduled wake or pending
+Relay batch, latest result and any blocker. History and TODOs require current
+read access.
 
 ```sh
 plowshare goal list '{"project":"release-review","limit":10}'
@@ -207,7 +216,11 @@ it completes.
 
 ## Pause, resume, cancel and recover receipts
 
-Use the controls in the Console's Goal entry or the corresponding CLI commands.
+In Console and Desktop, select a Goal Agent and use the available controls in
+its details. In the TUI, use `/goals pause <goal>`, `/goals resume <goal>` or
+`/goals cancel <goal>` in the Goal's project. To raise a limit when resuming
+in the TUI, append `activations=N` or `calls=N`. The CLI operations below
+take the same limits in their request payloads.
 
 | Control | What happens |
 | --- | --- |
@@ -243,6 +256,12 @@ An idle standing Goal waits for input and can be quiet between cycles.
 `BLOCKED`, inspect the reason before resuming or granting more work. If the
 server could not confirm an earlier effect, inspect the original conversation
 and the dependency owner's receipt before taking further action.
+
+If a control outcome is pending in Desktop, use **Refresh** to check its
+receipt. In the TUI, run `/goals status <goal>`. If the client reports a
+missing receipt, review current status before choosing **Clear pending
+control** or running `/goals clear <goal>`. The marker is local to that
+client session.
 
 If the start response was lost, look up the original launch by project and
 request ID. For an uncertain control, look up the original control receipt by

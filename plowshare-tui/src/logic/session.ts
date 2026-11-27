@@ -121,6 +121,7 @@ import {
   listingAgents,
 } from 'plowshare-client-ts/operations/session';
 export * from 'plowshare-client-ts/operations/session';
+import { goalCommand, type GoalCommand } from './goal-command.ts';
 import { retrievalCommand, retrievalWords } from './retrieval.ts';
 import type { RetrievalCommand } from './retrieval.ts';
 import { parse } from './markdown.ts';
@@ -1136,6 +1137,7 @@ export type Typed =
    * old, too new or too broken to answer anything else.
    */
   | { readonly kind: 'help' }
+  | { readonly kind: 'goals'; readonly command: GoalCommand }
   /** Refresh the selected agent's human command catalog without starting work. */
   | {
       readonly kind: 'command-catalog';
@@ -1504,6 +1506,8 @@ export function typed(
   commandAliases: readonly string[] = [],
 ): Typed {
   const text = line.trim();
+  const goal = goalCommand(text);
+  if (goal) return { kind: 'goals', command: goal };
   if (text === '/admin') return { kind: 'retrieval-error', text: ADMIN_USAGE };
   if (text === '/approval-mode')
     return {

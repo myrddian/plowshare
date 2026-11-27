@@ -114,6 +114,19 @@ export class DesktopWorkspace {
   get activity() {
     return this.control.activity;
   }
+  closeGoalAgents(): void {
+    this.control.goals.close();
+  }
+  goalConversation(goal: string, version: number): string {
+    this.requireLive();
+    const status = this.control.goals.target(goal, version);
+    this.control.retainInspection({
+      id: status.conversation,
+      project: status.project,
+      title: status.agent ?? status.conversation,
+    });
+    return status.conversation;
+  }
   get board() {
     return this.control.board;
   }
@@ -892,6 +905,8 @@ export class DesktopWorkspace {
         login = await this.control.login(request);
       } catch (error) {
         this.transitioning = false;
+        if (previousBase !== request.base || previousHandle !== request.handle)
+          this.control.goals.resetAccount();
         this.control.state = emptyConnectionState(request.base, request.handle);
         this.control.state.connection = 'Authentication required';
         this.emit();

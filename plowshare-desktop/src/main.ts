@@ -112,6 +112,7 @@ const activityLabels: Record<ActivityView, string> = {
   definitions: 'Definitions',
   schedules: 'Scheduled work',
   builder: 'Orchestration builder',
+  goals: 'Goal Agents',
 };
 let activePage: WorkspacePage | undefined;
 let workspaceRoute: WorkspaceRoute = { kind: 'chat', label: 'Conversation' };
@@ -334,7 +335,11 @@ function openActivity(tab: ActivityView, project?: string) {
     if (project) await client.dispatch({ action: 'run-definitions', project });
     await client.dispatch({ action: 'activity-view', view: tab });
   };
-  if (!['inbox', 'runs', 'definitions', 'schedules', 'builder'].includes(tab))
+  if (
+    !['inbox', 'runs', 'definitions', 'schedules', 'builder', 'goals'].includes(
+      tab,
+    )
+  )
     throw new Error('Choose an Activity view.');
   const group = activityGroup(tab);
   let activity = activities.get(group);
@@ -357,6 +362,7 @@ function openActivity(tab: ActivityView, project?: string) {
     if (activities.get(group)?.window !== page) return;
     activities.delete(group);
     client.activity.close(activity.view);
+    if (activity.view === 'goals') client.closeGoalAgents();
     if (!client.activity.isOpen('runs') && !client.activity.isOpen('builder'))
       client.runs.pause();
     if (group === 'runs' || group === 'studio') {
@@ -967,6 +973,12 @@ background(
           return client.dispatch(request);
         if (
           ![
+            'goal-project',
+            'goal-page',
+            'goal-inspect',
+            'goal-control',
+            'goal-clear',
+            'goal-trajectory',
             'builder-outputs',
             'builder-trajectory',
             'builder-prepare',
@@ -999,6 +1011,14 @@ background(
           activityGroup(request.view) !== account.group
         )
           throw new Error('Open this section from the workspace sidebar.');
+        if (request.action.startsWith('goal-') && account.view !== 'goals')
+          throw new Error('Open Goal Agents to manage project goals.');
+        if (request.action === 'goal-trajectory') {
+          openTrajectory(
+            client.goalConversation(request.goal, request.version),
+          );
+          return { state: client.state };
+        }
         if (request.action === 'delegate-trajectory') {
           const roots = Object.values(client.state.activity.details)
             .flatMap((detail) => [
@@ -1209,6 +1229,12 @@ background(
       }
       if (
         [
+          'goal-project',
+          'goal-page',
+          'goal-inspect',
+          'goal-control',
+          'goal-clear',
+          'goal-trajectory',
           'builder-outputs',
           'builder-trajectory',
           'builder-prepare',

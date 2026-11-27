@@ -18,6 +18,7 @@ export const desktopCommands = [
   ['/trajectory', 'Open conversation trajectory'],
   ['/inbox', 'Open mailbox'],
   ['/runs', 'Open runs'],
+  ['/goals', 'Open Goal Agents'],
   ['/schedule', 'Open scheduled work'],
   ['/memory', 'Open memories'],
   ['/board', 'Open board'],

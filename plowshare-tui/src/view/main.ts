@@ -1,3 +1,4 @@
+import { cleaned } from '../logic/clean.ts';
 import { approvalModeCommand } from '../logic/approval-policy.ts';
 import { changeApprovalMode } from './approval-policy.ts';
 import {
@@ -38,6 +39,9 @@ import {
   managementRequest,
   redactedManagementValue,
 } from 'plowshare-client-ts/operations/provider-management';
+import type { RequestOptions } from 'plowshare-client-ts/binding/acting';
+import { GoalAgentClient } from 'plowshare-client-ts/operations/goal-controls';
+import { runGoalCommand } from './goals.ts';
 import { checkedTransport } from 'plowshare-client-ts/operations/transport';
 import { background } from './background.ts';
 import { parseCommand as parseScheduleFileCommand } from 'plowshare-client-ts/operations/commands';
@@ -1356,11 +1360,12 @@ export async function converse(talking: Talking): Promise<void> {
     async ask<K extends Operation>(
       type: K,
       payload: Payloads[K],
+      options?: RequestOptions,
     ): Promise<Outcome> {
       const epoch = jobs.generation,
         current = wire;
       const request = decodeRequest(type, payload);
-      const outcome = await current.ask(request.type, request.payload);
+      const outcome = await current.ask(request.type, request.payload, options);
       if (!jobs.current(epoch)) throw new Dropped();
       if (VALIDATED_OPERATIONS.includes(request.type)) {
         const result = resultOf(request, outcome);
@@ -1393,6 +1398,10 @@ export async function converse(talking: Talking): Promise<void> {
         talking.credentials?.configurationRoot,
     );
   let tokens = openedSocket.tokens;
+  const goalAgents = new GoalAgentClient(
+    checkedTransport(connection),
+    randomUUID,
+  );
   const providerManagement = new ProviderManagementClient(
     checkedTransport(connection),
     new ProviderManagementIntents(
@@ -5406,6 +5415,19 @@ export async function converse(talking: Talking): Promise<void> {
           },
           (now.who.commands ?? []).flatMap((command) => command.aliases),
         );
+        if (line.kind === 'goals') {
+          try {
+            const lines = await runGoalCommand(
+              goalAgents,
+              now.project,
+              line.command,
+            );
+            showPlain('client', lines);
+          } catch (failure) {
+            showPlain('trouble', [cleaned(errorMessage(failure))]);
+          }
+          continue;
+        }
         if (line.kind === 'projects') {
           await list(line.ask, projects, describeProjects);
           continue;
