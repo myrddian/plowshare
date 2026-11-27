@@ -2,6 +2,7 @@ import type {
   GoalPage,
   GoalStatus,
 } from '../../../sdk/typescript/src/operations/replies.ts';
+import { goalStatusAfterReceipt } from '../../../sdk/typescript/src/operations/goal-controls.ts';
 import type { checkedTransport } from '../../../sdk/typescript/src/operations/transport.ts';
 import { ConnectionFault } from '../../../sdk/typescript/src/binding/connection.ts';
 import { background } from '../background.ts';
@@ -145,6 +146,8 @@ export function createGoalAgents(options: {
   let loading = false;
   let page: GoalPage | null = null;
   let cursors: (string | undefined)[] = [undefined];
+  // The inspection target persists while protected details wait for receipt reconciliation.
+  let inspectedGoal: string | null = null;
   let selected: GoalStatus | null = null;
   let writing = false;
   const pending = new Map<string, Intent>();
@@ -161,7 +164,7 @@ export function createGoalAgents(options: {
     projectChoice.value = project;
   }
 
-  function beginRead(): {
+  function beginRead(goal: string | null = null): {
     readonly mine: number;
     readonly signal: AbortSignal;
   } {
@@ -169,6 +172,7 @@ export function createGoalAgents(options: {
     reading = new AbortController();
     readingHistory?.abort();
     history.replaceChildren();
+    inspectedGoal = goal;
     return { mine: ++revision, signal: reading.signal };
   }
 
@@ -360,9 +364,9 @@ export function createGoalAgents(options: {
     const tier = project;
     if (tier === null) return;
 
-    const { mine, signal } = beginRead();
+    const { mine, signal } = beginRead(goal);
     selected = null;
-    alert.textContent = notice;
+    alert.textContent = '';
     draw();
     try {
       const reply = await operations.ask<'goal.status'>(
@@ -373,17 +377,20 @@ export function createGoalAgents(options: {
       if (!current(mine)) return;
       if (reply.code !== 'OK' || !reply.payload)
         throw new Error(reply.said ?? 'Unable to read Goal Agent status.');
-      const status = reply.payload;
-      // Replace stale previews too when the status read narrows disclosure.
+      const intent = pending.get(goal);
+      const status =
+        reply.payload.readable && intent
+          ? await reconcile(reply.payload, intent, signal, mine)
+          : reply.payload;
+      if (!current(mine)) return;
+      if (status.readable && !alert.textContent) alert.textContent = notice;
+      // Replace stale previews when either the status or receipt narrows disclosure.
       if (page)
         page = {
           ...page,
           goals: page.goals.map((row) => (row.goal === goal ? status : row)),
         };
       selected = status;
-      const intent = pending.get(goal);
-      if (status.readable && intent)
-        await reconcile(status, intent, signal, mine);
     } catch (error) {
       if (!current(mine)) return;
       if (page)
@@ -408,7 +415,7 @@ export function createGoalAgents(options: {
     intent: Intent,
     signal: AbortSignal,
     mine: number,
-  ) {
+  ): Promise<GoalStatus> {
     try {
       intent.receiptMissing = false;
       const receipt = await operations.ask<'conversation.goal.get'>(
@@ -419,15 +426,18 @@ export function createGoalAgents(options: {
         },
         { signal, timeoutMs },
       );
-      if (!current(mine)) return;
+      if (!current(mine)) return status;
       if (
         receipt.code === 'OK' &&
         receipt.payload?.goal === status.goal &&
-        receipt.payload.version === intent.version + 1 &&
-        status.version >= receipt.payload.version
-      )
-        pending.delete(status.goal);
-      else if (receipt.code === 'NOT_FOUND') intent.receiptMissing = true;
+        receipt.payload.conversation === status.conversation &&
+        receipt.payload.version === intent.version + 1
+      ) {
+        if (status.version >= receipt.payload.version)
+          pending.delete(status.goal);
+        return goalStatusAfterReceipt(status, receipt.payload);
+      }
+      if (receipt.code === 'NOT_FOUND') intent.receiptMissing = true;
     } catch (error) {
       if (current(mine))
         alert.textContent = problemText(
@@ -435,6 +445,7 @@ export function createGoalAgents(options: {
           'Unable to check the control receipt.',
         );
     }
+    return status;
   }
 
   async function change(
@@ -453,7 +464,6 @@ export function createGoalAgents(options: {
       pending.has(status.goal)
     )
       return;
-    const mine = revision;
     const requestId = globalThis.crypto.randomUUID();
     const payload = {
       goal: status.goal,
@@ -509,7 +519,7 @@ export function createGoalAgents(options: {
       if (
         !closed &&
         project === status.project &&
-        (current(mine) || selected?.goal === status.goal)
+        inspectedGoal === status.goal
       )
         await inspect(status.goal, notice);
       else if (!closed) draw();

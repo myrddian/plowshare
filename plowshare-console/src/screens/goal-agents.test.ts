@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestOptions } from '../../../sdk/typescript/src/binding/acting.ts';
 import { ConnectionFault } from '../../../sdk/typescript/src/binding/connection.ts';
-import type { GoalStatus } from '../../../sdk/typescript/src/operations/replies.ts';
+import type {
+  ConversationGoalStatus,
+  GoalStatus,
+} from '../../../sdk/typescript/src/operations/replies.ts';
 import type { Answer } from '../../../sdk/typescript/src/operations/response.ts';
 import { checkedTransport } from '../../../sdk/typescript/src/operations/transport.ts';
 import { createGoalAgents } from './goal-agents';
@@ -54,6 +57,23 @@ const first: GoalStatus = {
   ],
   moreSchedules: false,
   moreRelayListeners: false,
+};
+const pauseReceipt: ConversationGoalStatus = {
+  goal: first.goal,
+  conversation: first.conversation,
+  agent: 'goal_worker',
+  objective: 'Check the report',
+  state: 'PAUSED',
+  version: 5,
+  activations: 1,
+  maxActivations: 8,
+  lastJob: 'job_GoalA',
+  lastTurn: 8,
+  reason: 'OPERATOR_PAUSED',
+  detail: null,
+  criteria: null,
+  modelCallsSpent: 1,
+  modelCallLimit: 8,
 };
 const restricted: GoalStatus = {
   ...first,
@@ -289,23 +309,7 @@ describe('Goal Agents screen', () => {
           );
         case 'conversation.goal.get':
           return availableReceipt
-            ? ok({
-                goal: first.goal,
-                conversation: first.conversation,
-                agent: 'goal_worker',
-                objective: 'Check the report',
-                state: 'PAUSED',
-                version: 5,
-                activations: 1,
-                maxActivations: 8,
-                lastJob: 'job_GoalA',
-                lastTurn: 8,
-                reason: 'OPERATOR_PAUSED',
-                detail: null,
-                criteria: null,
-                modelCallsSpent: 1,
-                modelCallLimit: 8,
-              })
+            ? ok(pauseReceipt)
             : Promise.resolve({ code: 'NOT_FOUND' });
         default:
           return Promise.reject(new Error(`Unexpected request ${type}`));
@@ -344,5 +348,180 @@ describe('Goal Agents screen', () => {
       ask.mock.calls.filter(([type]) => type === 'conversation.goal.pause'),
     ).toHaveLength(1);
     screen.destroy();
+  });
+
+  it.each([4, 5])(
+    'redacts the list and details when a receipt restricts access after status version %i',
+    async (statusVersion) => {
+      const sensitiveNotice = 'Private refusal detail';
+      let submitted = false;
+      let accessRestored = false;
+      const { root, ask, screen, control } = fixture((type) => {
+        switch (type) {
+          case 'goal.list':
+            return ok({ goals: [first], next: null });
+          case 'goal.status':
+            if (!submitted) return ok(first);
+            return ok({
+              ...first,
+              state:
+                statusVersion === 4 && !accessRestored ? 'WAITING' : 'PAUSED',
+              version: accessRestored ? 5 : statusVersion,
+            });
+          case 'conversation.goal.pause':
+            submitted = true;
+            if (statusVersion === 4)
+              return Promise.resolve({
+                code: 'BAD_REQUEST',
+                said: sensitiveNotice,
+              });
+            return Promise.reject(
+              new ConnectionFault('RESPONSE_LOST', 'Control reply lost'),
+            );
+          case 'conversation.goal.get':
+            return ok(
+              accessRestored
+                ? pauseReceipt
+                : {
+                    ...pauseReceipt,
+                    agent: '',
+                    objective: '',
+                    lastJob: null,
+                    lastTurn: null,
+                  },
+            );
+          default:
+            throw new Error(`Unexpected operation ${type}`);
+        }
+      });
+      try {
+        await screen.load();
+        control('.goal-open').click();
+        await vi.waitFor(() =>
+          expect(control('.goal-pause').disabled).toBe(false),
+        );
+        expect(root.textContent).toContain(first.objective);
+        expect(root.textContent).toContain('Result evidence');
+
+        control('.goal-pause').click();
+        await vi.waitFor(() =>
+          expect(
+            root.textContent?.match(/Conversation content is restricted\./gu),
+          ).toHaveLength(2),
+        );
+        for (const text of [
+          first.objective,
+          first.detail,
+          first.latestResult?.summary,
+          first.latestResult?.evidence[0],
+          first.schedules[0]?.schedule,
+          first.relayListeners[0]?.topic,
+          sensitiveNotice,
+          'Control outcome pending',
+        ]) {
+          if (text) expect(root.textContent).not.toContain(text);
+        }
+        expect(
+          root.querySelector(
+            '.goal-conversation,.goal-pause,.goal-resume,.goal-cancel',
+          ),
+        ).toBeNull();
+        const pause = ask.mock.calls.find(
+          ([type]) => type === 'conversation.goal.pause',
+        )?.[1];
+        if (!pause || typeof pause !== 'object' || !('requestId' in pause))
+          throw new Error('Expected the original control request ID');
+        expect(ask).toHaveBeenCalledWith(
+          'conversation.goal.get',
+          {
+            conversation: first.conversation,
+            requestId: pause.requestId,
+          },
+          expect.anything(),
+        );
+
+        accessRestored = true;
+        control('.goal-status').click();
+        await vi.waitFor(() =>
+          expect(control('.goal-resume').disabled).toBe(false),
+        );
+        expect(
+          ask.mock.calls.filter(([type]) => type === 'conversation.goal.get'),
+        ).toHaveLength(statusVersion === 4 ? 2 : 1);
+        expect(
+          ask.mock.calls.filter(([type]) => type === 'conversation.goal.pause'),
+        ).toHaveLength(1);
+      } finally {
+        screen.destroy();
+      }
+    },
+  );
+
+  it('refreshes the same goal when a control settles during receipt inspection', async () => {
+    let committed = false;
+    let resolveControl: (answer: Answer) => void = () => {
+      throw new Error('No pending control');
+    };
+    let resolveReceipt: (answer: Answer) => void = () => {
+      throw new Error('No pending receipt');
+    };
+    const controlReply = new Promise<Answer>((resolve) => {
+      resolveControl = resolve;
+    });
+    const staleReceipt = new Promise<Answer>((resolve) => {
+      resolveReceipt = resolve;
+    });
+    const { ask, screen, control } = fixture((type) => {
+      switch (type) {
+        case 'goal.list':
+          return ok({ goals: [first], next: null });
+        case 'goal.status':
+          return ok(
+            committed ? { ...first, state: 'PAUSED', version: 5 } : first,
+          );
+        case 'conversation.goal.pause':
+          return controlReply;
+        case 'conversation.goal.get':
+          return staleReceipt;
+        default:
+          throw new Error(`Unexpected operation ${type}`);
+      }
+    });
+    try {
+      await screen.load();
+      control('.goal-open').click();
+      await vi.waitFor(() =>
+        expect(control('.goal-pause').disabled).toBe(false),
+      );
+      control('.goal-pause').click();
+      control('.goal-open').click();
+      await vi.waitFor(() =>
+        expect(
+          ask.mock.calls.filter(([type]) => type === 'conversation.goal.get'),
+        ).toHaveLength(1),
+      );
+
+      committed = true;
+      resolveControl({ code: 'OK', payload: pauseReceipt });
+      await vi.waitFor(() =>
+        expect(
+          ask.mock.calls.filter(([type]) => type === 'goal.status'),
+        ).toHaveLength(3),
+      );
+      expect(
+        ask.mock.calls.find(([type]) => type === 'conversation.goal.get')?.[2]
+          ?.signal?.aborted,
+      ).toBe(true);
+      resolveReceipt({ code: 'OK', payload: pauseReceipt });
+      await staleReceipt;
+      await vi.waitFor(() =>
+        expect(control('.goal-resume').disabled).toBe(false),
+      );
+      expect(
+        ask.mock.calls.filter(([type]) => type === 'conversation.goal.pause'),
+      ).toHaveLength(1);
+    } finally {
+      screen.destroy();
+    }
   });
 });

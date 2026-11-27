@@ -1,7 +1,11 @@
 import type { RequestSignal } from '../binding/acting.ts';
 import { succeeded } from '../binding/codes.ts';
 import { ConnectionFault } from '../binding/connection.ts';
-import type { GoalPage, GoalStatus } from './replies.ts';
+import type {
+  ConversationGoalStatus,
+  GoalPage,
+  GoalStatus,
+} from './replies.ts';
 import { decodeRequest } from './schema.ts';
 import type { checkedTransport } from './transport.ts';
 
@@ -49,7 +53,13 @@ interface Intent {
 
 const readOptions = { timeoutMs: 2000 };
 
-function restrictedStatus(status: GoalStatus): GoalStatus {
+/** An exact receipt can carry a newer disclosure decision than the status.
+ * The server blanks both fields on a restricted receipt. */
+export function goalStatusAfterReceipt(
+  status: GoalStatus,
+  receipt: ConversationGoalStatus,
+): GoalStatus {
+  if (receipt.agent !== '' || receipt.objective !== '') return status;
   const {
     goal,
     project,
@@ -171,10 +181,7 @@ export class GoalAgentClient {
       receipt.payload.version === intent.version + 1
     ) {
       if (status.version >= receipt.payload.version) this.intents.delete(key);
-      // The server blanks both fields on a restricted receipt. That newer
-      // disclosure decision supersedes even a status that predates the effect.
-      if (receipt.payload.agent === '' && receipt.payload.objective === '')
-        return restrictedStatus(status);
+      return goalStatusAfterReceipt(status, receipt.payload);
     } else if (receipt?.code === 'NOT_FOUND') {
       intent.state = 'missing';
     }
