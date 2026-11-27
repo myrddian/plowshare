@@ -26,6 +26,7 @@ Publishing the website or restarting the server does not update that snapshot.
 | Work safely with local or server files | [Projects and workspaces](05-projects-and-workspaces.md) |
 | Develop a personal wiki, memory and research collection | [Knowledge and research](06-knowledge-and-research.md) |
 | Delegate, exchange messages or convene a swarm | [Coordination and workflows](07-coordination-and-workflows.md) |
+| Hand off an objective or run recurring work in a dedicated inbox | [Use Goal Agents](16-goal-agents.md) |
 | Run recurring work or connect external services | [Automation and integrations](08-automation-and-integrations.md) |
 | Operate, update and recover a server | [Server administration](09-server-administration.md) |
 | Diagnose a refusal, stalled job or missing result | [Troubleshooting and reference](10-troubleshooting-and-reference.md) |

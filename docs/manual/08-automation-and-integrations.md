@@ -12,6 +12,9 @@ through equivalent Java, TypeScript/Node, Python, Go and .NET SDK interfaces.
 
 ## Recurring work on the server
 
+To keep one objective, conversation and task list across recurring schedule or
+Relay wakes, follow [Use Goal Agents](16-goal-agents.md).
+
 Schedules, triggers, events, firings and inbox deliveries connect ongoing work to
 the same server projects and accounts. A schedule describes timing; a trigger
 defines what an emitted event starts; a firing records an occurrence and its

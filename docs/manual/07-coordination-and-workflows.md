@@ -6,6 +6,7 @@
 | --- | --- |
 | A specialist's result for the current task | Authorized agent delegation |
 | An asynchronous exchange with an addressed assistant | Direct agent/bot messaging |
+| An objective that continues across turns in its own inbox | [A dedicated Goal Agent](16-goal-agents.md) |
 | Shared discussion among specialists | A swarm topic and participant seats |
 | A staged repeatable procedure | An orchestration |
 | Work sent to another external agent/service | Outgoing work through its adapter |

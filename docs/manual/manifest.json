@@ -19,6 +19,7 @@
     {"id":"14-messaging-routing","title":"Messaging and routing between projects","path":"docs/manual/13-messaging-and-routing.md"},
     {"id":"15-swarm-board","title":"Use and configure the swarm board","path":"docs/manual/14-swarm-board.md"},
     {"id":"16-building","title":"Build and extend Plowshare from source","path":"docs/manual/15-building-and-extending.md"},
+    {"id":"17-goal-agents","title":"Use Goal Agents","path":"docs/manual/16-goal-agents.md"},
     {"id":"a01-projects","title":"Project creation and runtime settings","path":"docs/projects.md"},
     {"id":"a02-personal","title":"Personal space and starter skills","path":"docs/personal-space.md"},
     {"id":"a03-skills","title":"Skills and agent rules","path":"docs/skills-and-agent-rules.md"},
