@@ -102,7 +102,7 @@ export async function runGoalCommand(
     if (!pending) lines.push('Goal Agent control confirmed.');
     try {
       status = await goals.inspect(project, command.goal);
-      if (pending && !goals.pending(status))
+      if (pending && status.readable && !goals.pending(status))
         lines.push('Goal Agent control confirmed by receipt.');
     } catch {
       if (!pending)
@@ -116,11 +116,12 @@ export async function runGoalCommand(
   lines.push(...statusLines(status));
   if (status.readable) {
     const pending = goals.pending(status);
+    if (pending?.notice) lines.push(pending.notice);
     if (pending)
       lines.push(
         `Control outcome pending · ${GOALS_COMMAND} status ${status.goal}`,
       );
-    if (pending === 'missing')
+    if (pending?.state === 'missing')
       lines.push(
         `No receipt found. Review the status before running ${GOALS_COMMAND} clear ${status.goal}`,
       );

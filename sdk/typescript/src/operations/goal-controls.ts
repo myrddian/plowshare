@@ -1,4 +1,5 @@
 import type { RequestSignal } from '../binding/acting.ts';
+import { succeeded } from '../binding/codes.ts';
 import { ConnectionFault } from '../binding/connection.ts';
 import type { GoalPage, GoalStatus } from './replies.ts';
 import { decodeRequest } from './schema.ts';
@@ -33,14 +34,53 @@ export function goalControls(status: GoalStatus): readonly GoalControl[] {
 }
 
 type ReceiptState = 'submitting' | 'pending' | 'missing';
+export interface PendingGoalControl {
+  readonly state: ReceiptState;
+  readonly notice?: string;
+}
+
 type Target = Pick<GoalStatus, 'project' | 'goal' | 'conversation'>;
 interface Intent {
   readonly requestId: string;
   readonly version: number;
   state: ReceiptState;
+  notice?: string;
 }
 
 const readOptions = { timeoutMs: 2000 };
+
+function restrictedStatus(status: GoalStatus): GoalStatus {
+  const {
+    goal,
+    project,
+    conversation,
+    instance,
+    lifecycle,
+    state,
+    version,
+    reason,
+  } = status;
+  return {
+    goal,
+    project,
+    conversation,
+    instance,
+    lifecycle,
+    state,
+    version,
+    reason,
+    readable: false,
+    agent: null,
+    objective: null,
+    detail: null,
+    latestResult: null,
+    nextScheduleAt: null,
+    schedules: [],
+    relayListeners: [],
+    moreSchedules: false,
+    moreRelayListeners: false,
+  };
+}
 
 /** One authenticated client's Goal Agent controls and unsettled request identities.
  * Reads can reconcile a control. They never resubmit it. */
@@ -66,8 +106,11 @@ export class GoalAgentClient {
     this.intents.clear();
   }
 
-  pending(target: Target): ReceiptState | undefined {
-    return this.intents.get(this.key(target))?.state;
+  pending(status: GoalStatus): PendingGoalControl | undefined {
+    const intent = this.intents.get(this.key(status));
+    if (!status.readable || !intent) return undefined;
+    const { state, notice } = intent;
+    return { state, ...(notice === undefined ? {} : { notice }) };
   }
 
   forget(status: GoalStatus): void {
@@ -125,10 +168,13 @@ export class GoalAgentClient {
       receipt?.code === 'OK' &&
       receipt.payload?.goal === status.goal &&
       receipt.payload.conversation === status.conversation &&
-      receipt.payload.version === intent.version + 1 &&
-      status.version >= receipt.payload.version
+      receipt.payload.version === intent.version + 1
     ) {
-      this.intents.delete(key);
+      if (status.version >= receipt.payload.version) this.intents.delete(key);
+      // The server blanks both fields on a restricted receipt. That newer
+      // disclosure decision supersedes even a status that predates the effect.
+      if (receipt.payload.agent === '' && receipt.payload.objective === '')
+        return restrictedStatus(status);
     } else if (receipt?.code === 'NOT_FOUND') {
       intent.state = 'missing';
     }
@@ -182,6 +228,9 @@ export class GoalAgentClient {
         this.intents.delete(key);
         throw new Error(reply.said ?? reply.code);
       }
+      // A refusal can also replace a committed result at the disclosure fence.
+      // Retain its explanation without settling the intent ahead of the receipt.
+      if (!succeeded(reply.code)) intent.notice = reply.said || reply.code;
     } catch (failure) {
       if (this.intents.get(key) !== intent) throw failure;
       if (

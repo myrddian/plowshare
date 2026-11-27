@@ -94,9 +94,10 @@ export function goalDetail(
     <button data-goal-history ${offline ? 'disabled' : ''}>Open conversation history</button>
     ${actions.includes('resume') && !pending ? '<label>Max activations <input id="goal-activations" type="number" min="1" max="1000" step="1"></label><label>Total model calls <input id="goal-model-calls" type="number" min="1" max="1000000" step="1"></label>' : ''}
     ${actions.map((action) => `<button data-goal-control="${action}" ${disabled}>${label[action]}</button>`).join('')}
-    ${pending === 'submitting' ? '<p role="status">Submitting control…</p>' : ''}
-    ${pending === 'pending' ? '<p role="status">Control outcome pending. Refresh to check its receipt.</p>' : ''}
-    ${pending === 'missing' ? `<p role="status">No receipt found. Review the current status before clearing the marker.</p><button data-goal-clear ${offline ? 'disabled' : ''}>Clear pending control</button>` : ''}
+    ${pending?.notice ? `<p role="alert">${esc(pending.notice)}</p>` : ''}
+    ${pending?.state === 'submitting' ? '<p role="status">Submitting control…</p>' : ''}
+    ${pending?.state === 'pending' ? '<p role="status">Control outcome pending. Refresh to check its receipt.</p>' : ''}
+    ${pending?.state === 'missing' ? `<p role="status">No receipt found. Review the current status before clearing the marker.</p><button data-goal-clear ${offline ? 'disabled' : ''}>Clear pending control</button>` : ''}
     </section>`;
 }
 

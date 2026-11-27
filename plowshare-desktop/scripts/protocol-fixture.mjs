@@ -601,6 +601,10 @@ export async function protocolFixture(options = {}) {
             result = { code: 'CONFLICT', said: 'Goal version changed' };
             break;
           }
+          if (frame.type === 'conversation.goal.resume' && payload.maxModelCalls < 32) {
+            result = { code: 'BAD_REQUEST', said: 'Supply a larger allowance or extend an exhausted cycle within it' };
+            break;
+          }
           const states = {
             'conversation.goal.pause': 'PAUSED',
             'conversation.goal.resume': 'IDLE',
@@ -909,6 +913,12 @@ export async function protocolFixture(options = {}) {
     setRefuseBoard: value => { refuseBoard = value; },
     setWorkflowAckMissing(value) { workflowAckMissing=value; },
     workflowRunCount() { return workflowReceipts.size; },
+    setGoalStatus(goal, status) {
+      const index = goalStatuses.findIndex((row) => row.goal === goal);
+      if (index < 0) throw new Error('Unknown fixture goal.');
+      if (status === null) goalStatuses.splice(index, 1);
+      else goalStatuses[index] = { ...status };
+    },
     setRefusePost(value) { refusePost=value; },
     appendBoardMessage() { const detail = board.details['demo-board'].value; const previous = detail.messages.at(-1); detail.messages.push({ ...previous, id: 'fixture-board-update', kind: 'post', author: 'critic', title: null, body: 'A fresh swarm update from another session.', replyTo: previous.id, alert: true, postedAt: new Date().toISOString() }); board.topics.value[0].messages++; },
     get latestJob() { return [...jobs.values()].at(-1)?.id; },

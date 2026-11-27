@@ -258,8 +258,9 @@ server could not confirm an earlier effect, inspect the original conversation
 and the dependency owner's receipt before taking further action.
 
 If a control outcome is pending in Desktop, use **Refresh** to check its
-receipt. In the TUI, run `/goals status <goal>`. If the client reports a
-missing receipt, review current status before choosing **Clear pending
+receipt. In the TUI, run `/goals status <goal>`. Both clients show any
+server refusal while the receipt is unresolved and the goal remains readable.
+If the client reports a missing receipt, review current status before choosing **Clear pending
 control** or running `/goals clear <goal>`. The marker is local to that
 client session.
 

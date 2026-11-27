@@ -11031,17 +11031,18 @@ describe('Goal Agents in the current project', () => {
     const conversation = 'cnv_GoalA';
     let version = 4;
     let state = 'IDLE';
+    let readable = true;
     const status = () => ({
       goal,
       project: 'plowshare',
       conversation,
       instance: 'ins_GoalA',
-      agent: 'goal_worker',
-      objective: 'Check the **retained** report',
+      agent: readable ? 'goal_worker' : null,
+      objective: readable ? 'Check the **retained** report' : null,
       lifecycle: 'STANDING',
       state,
       version,
-      readable: true,
+      readable,
       reason: null,
       detail: null,
       latestResult: null,
@@ -11099,27 +11100,49 @@ describe('Goal Agents in the current project', () => {
         };
       return { code: 'OK', payload: status() };
     });
-    fake.script('conversation.goal.pause', () => {
+    let pauseRequestId: string | undefined;
+    fake.script('conversation.goal.pause', (payload) => {
+      pauseRequestId = goalRequestId(payload);
       version += 1;
       state = 'PAUSED';
       return { code: 'BAD_REQUEST', said: 'Control reply withheld' };
     });
-    fake.script('conversation.goal.get', () => ({
-      code: 'OK',
-      payload: receipt(),
-    }));
-    fake.script('conversation.goal.resume', () => {
+    fake.script('conversation.goal.get', (payload) =>
+      pauseRequestId && goalRequestId(payload) === pauseRequestId
+        ? { code: 'OK', payload: receipt() }
+        : { code: 'NOT_FOUND' },
+    );
+    const refusal =
+      'Supply a larger allowance or extend an exhausted cycle within it';
+    fake.script('conversation.goal.resume', (payload) => {
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        'maxModelCalls' in payload &&
+        payload.maxModelCalls === 1
+      )
+        return { code: 'BAD_REQUEST', said: refusal };
+
       version += 1;
       state = 'IDLE';
       return { code: 'OK', payload: receipt() };
+    });
+    const cancelRefusal = 'Cancel reply withheld after access changed';
+    fake.script('conversation.goal.cancel', () => {
+      readable = false;
+      return { code: 'BAD_REQUEST', said: cancelRefusal };
     });
     const prompt = scripted([
       '/goals',
       `/goals list ${goal}`,
       `/goals status ${goal}`,
       `/goals pause ${goal}`,
+      `/goals resume ${goal} calls=1`,
+      `/goals status ${goal}`,
+      `/goals clear ${goal}`,
       `/goals resume ${goal} calls=40 activations=24`,
       `/goals cancel ${other}`,
+      `/goals cancel ${goal}`,
     ]);
     const talking = talkingTo(fake, prompt);
     await converse({
@@ -11159,22 +11182,36 @@ describe('Goal Agents in the current project', () => {
         payload: { goal, conversation, version: 4, requestId: pauseId },
       },
     ]);
-    expect(
-      frames.filter(({ type }) => type === 'conversation.goal.get'),
-    ).toEqual([
-      {
-        type: 'conversation.goal.get',
-        payload: { conversation, requestId: pauseId },
-      },
-    ]);
     const resume = frames.filter(
       ({ type }) => type === 'conversation.goal.resume',
     );
-    const [resumeFrame] = resume;
+    const [refusedFrame, resumeFrame] = resume;
+    const refusedId = goalRequestId(refusedFrame?.payload);
+    expect(refusedId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(
+      frames
+        .filter(({ type }) => type === 'conversation.goal.get')
+        .map(({ payload }) => payload),
+    ).toEqual([
+      { conversation, requestId: pauseId },
+      { conversation, requestId: refusedId },
+      { conversation, requestId: refusedId },
+      { conversation, requestId: refusedId },
+    ]);
     const resumeId = goalRequestId(resumeFrame?.payload);
     expect(resumeId).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(resumeId).not.toBe(pauseId);
+    expect(new Set([resumeId, refusedId, pauseId]).size).toBe(3);
     expect(resume).toEqual([
+      {
+        type: 'conversation.goal.resume',
+        payload: {
+          goal,
+          conversation,
+          version: 5,
+          requestId: refusedId,
+          maxModelCalls: 1,
+        },
+      },
       {
         type: 'conversation.goal.resume',
         payload: {
@@ -11187,17 +11224,35 @@ describe('Goal Agents in the current project', () => {
         },
       },
     ]);
-    expect(
-      frames.some(
-        ({ type }) =>
-          type === 'conversation.goal.cancel' || type === 'agent.run',
-      ),
-    ).toBe(false);
+    const cancel = frames.filter(
+      ({ type }) => type === 'conversation.goal.cancel',
+    );
+    const [cancelFrame] = cancel;
+    const cancelId = goalRequestId(cancelFrame?.payload);
+    expect(cancelId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(cancel).toEqual([
+      {
+        type: 'conversation.goal.cancel',
+        payload: { goal, conversation, version: 6, requestId: cancelId },
+      },
+    ]);
+    expect(frames.some(({ type }) => type === 'agent.run')).toBe(false);
     const said = prompt.said.join('\n');
     expect(said).toContain('Check the **retained** report');
     expect(said).toContain('No Goal Agents on this page.');
     expect(said).toContain(`/trajectory ${conversation}`);
     expect(said).toContain('Goal Agent control confirmed.');
+    expect(said.split('Goal Agent control confirmed by receipt.')).toHaveLength(
+      2,
+    );
+    expect(said).not.toContain('Control reply withheld');
+    expect(said).not.toContain(cancelRefusal);
+    expect(said.split(`/goals cancel ${goal}`).at(-1)).toContain(
+      'Conversation content is restricted.',
+    );
+    expect(said.split(refusal)).toHaveLength(3);
+    expect(said).toContain('No receipt found.');
+    expect(said).toContain('Cleared the local control marker.');
     expect(said).toContain('That control is unavailable');
   });
 });

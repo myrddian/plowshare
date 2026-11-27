@@ -1,6 +1,7 @@
 import type {
   GoalControl,
   GoalLimits,
+  PendingGoalControl,
 } from 'plowshare-client-ts/operations/goal-controls';
 import type {
   GoalPage,
@@ -328,7 +329,7 @@ export interface GoalActivity {
   page?: GoalPage;
   previous: boolean;
   selected?: GoalStatus;
-  pending?: 'submitting' | 'pending' | 'missing';
+  pending?: PendingGoalControl;
   loading?: boolean;
   error?: string;
 }

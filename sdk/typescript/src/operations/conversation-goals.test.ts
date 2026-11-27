@@ -3,6 +3,9 @@ import { parseCommand } from './commands.ts';
 import { decodeReply, decodeRequest } from './schema.ts';
 import { discovery } from './discovery.ts';
 import { resultOf } from './direct.ts';
+import { GoalAgentClient } from './goal-controls.ts';
+import type { ConversationGoalStatus, GoalStatus } from './replies.ts';
+import { checkedTransport } from './transport.ts';
 
 const conversation = 'cnv_project';
 const requestId = '00000000-0000-0000-0000-000000000001';
@@ -292,4 +295,117 @@ describe('dedicated Goal Agent contracts', () => {
     );
     expect(resultOf(request, { code: 'CONFLICT' }).kind).toBe('refused');
   });
+});
+
+describe('Goal Agent control reconciliation', () => {
+  it.each([1, 2])(
+    'masks a readable status at version %i when its subsequent receipt is redacted',
+    async (version) => {
+      const status: GoalStatus = {
+        goal,
+        project: 'project',
+        conversation: 'cnv_Goal',
+        instance: 'ins_Goal',
+        lifecycle: 'STANDING',
+        state: 'IDLE',
+        version,
+        readable: true,
+        agent: 'worker',
+        objective: 'Check the private report',
+        reason: null,
+        detail: 'Private details',
+        latestResult: {
+          job: 'job_Goal',
+          turn: 1,
+          summary: 'Private result',
+          evidence: ['Private evidence'],
+        },
+        nextScheduleAt: '2026-11-28T00:00:00Z',
+        schedules: [
+          {
+            schedule: 'daily',
+            generation: requestId,
+            paused: false,
+            nextFireAt: null,
+          },
+        ],
+        relayListeners: [
+          {
+            binding: requestId,
+            generation: requestId,
+            topic: 'private',
+            failure: null,
+            pendingBatch: null,
+          },
+        ],
+        moreSchedules: true,
+        moreRelayListeners: true,
+      };
+      const receipt: ConversationGoalStatus = {
+        goal,
+        conversation: status.conversation,
+        agent: '',
+        objective: '',
+        criteria: null,
+        state: 'PAUSED',
+        version: 2,
+        activations: 1,
+        maxActivations: 10,
+        lastJob: null,
+        lastTurn: null,
+        reason: null,
+        detail: null,
+        modelCallsSpent: 1,
+        modelCallLimit: 10,
+      };
+      const reads: string[] = [];
+      const operations = checkedTransport({
+        ask: (type, payload) => {
+          reads.push(type);
+          switch (type) {
+            case 'conversation.goal.pause':
+              return Promise.resolve({
+                code: 'BAD_REQUEST',
+                said: 'Control reply withheld',
+              });
+            case 'goal.status':
+              return Promise.resolve({ code: 'OK', payload: status });
+            case 'conversation.goal.get':
+              expect(payload).toEqual({
+                conversation: status.conversation,
+                requestId,
+              });
+              return Promise.resolve({ code: 'OK', payload: receipt });
+            default:
+              throw new Error(`Unexpected operation ${type}`);
+          }
+        },
+      });
+      const client = new GoalAgentClient(operations, () => requestId);
+      await client.change({ ...status, version: 1 }, 'pause');
+      const inspected = await client.inspect(status.project, goal);
+      expect(inspected).toEqual({
+        ...status,
+        readable: false,
+        agent: null,
+        objective: null,
+        detail: null,
+        latestResult: null,
+        nextScheduleAt: null,
+        schedules: [],
+        relayListeners: [],
+        moreSchedules: false,
+        moreRelayListeners: false,
+      });
+      expect(client.pending(inspected)).toBeUndefined();
+      expect(client.pending(status)?.state).toBe(
+        version === 2 ? undefined : 'pending',
+      );
+      expect(reads).toEqual([
+        'conversation.goal.pause',
+        'goal.status',
+        'conversation.goal.get',
+      ]);
+    },
+  );
 });

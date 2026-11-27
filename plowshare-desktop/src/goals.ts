@@ -127,11 +127,21 @@ export class GoalActivityClient {
     const result: GoalActivity = { project, page, previous };
     try {
       const status = await this.goals.inspect(project, goal, read.signal);
+      // Status rechecks disclosure for this row and supersedes the list preview.
+      result.page = {
+        ...page,
+        goals: page.goals.map((row) => (row.goal === goal ? status : row)),
+      };
       result.selected = status;
       if (failure) result.error = failure;
       const pending = this.goals.pending(status);
       if (pending !== undefined) result.pending = pending;
     } catch (error) {
+      // A refused status can mean the Goal is no longer discoverable.
+      result.page = {
+        ...page,
+        goals: page.goals.filter((row) => row.goal !== goal),
+      };
       result.error = errorMessage(error);
     }
     if (read.signal.aborted) return;
