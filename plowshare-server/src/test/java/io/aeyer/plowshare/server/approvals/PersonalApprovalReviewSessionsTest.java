@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -14,12 +15,22 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.access.OperationAuthority;
 import io.aeyer.plowshare.server.agents.AgentDefinition;
 import io.aeyer.plowshare.server.agents.Budget;
+import io.aeyer.plowshare.server.agents.Callers;
+import io.aeyer.plowshare.server.agents.EventRuns;
+import io.aeyer.plowshare.server.agents.JobStore;
+import io.aeyer.plowshare.server.agents.Turn;
+import io.aeyer.plowshare.server.events.AgentRunner;
+import io.aeyer.plowshare.server.events.AgentRunner.ScheduledTask;
+import io.aeyer.plowshare.server.events.EventPayload;
+import io.aeyer.plowshare.server.events.FiringRecord;
+import io.aeyer.plowshare.server.events.TriggerRecord;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
 import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,6 +73,14 @@ class PersonalApprovalReviewSessionsTest {
       String authenticatedTask,
       DeploymentSecurityPolicy deployment,
       WorkspaceSecurityGuidance guidance) {
+    return session(authenticatedTask, null, deployment, guidance);
+  }
+
+  private OperationApprovalReview session(
+      String authenticatedTask,
+      ScheduledTask scheduledTask,
+      DeploymentSecurityPolicy deployment,
+      WorkspaceSecurityGuidance guidance) {
     when(operation.executor()).thenReturn("sam");
     when(operation.home()).thenReturn(Home.of("project"));
     when(policies.read("sam"))
@@ -102,6 +121,7 @@ class PersonalApprovalReviewSessionsTest {
                 "sam",
                 "conversation",
                 authenticatedTask,
+                scheduledTask,
                 operation,
                 Budget.of(5),
                 UsageAttribution.LEGACY,
@@ -111,6 +131,116 @@ class PersonalApprovalReviewSessionsTest {
                 },
                 (intent, decision) -> audits.incrementAndGet()))
         .orElseThrow();
+  }
+
+  @Test
+  void a_saved_schedule_supplies_intent_for_an_exact_personal_mirror_edit() {
+    String instruction = "Update /personal/Out/scheduled-brief.md.";
+    var session = scheduledSession("sam", instruction);
+    var edit = personalEdit("sam", "mirror", false, "new finding");
+    var consent = new ApprovalReviews.Consent(true, false, false);
+
+    assertEquals(ApprovalReviews.Action.ALLOW, session.review(edit, consent).action());
+    assertTrue(securityEvidence.get().contains("\"scheduledTask\":\"" + instruction + "\""));
+    assertTrue(securityEvidence.get().contains("\"userIntent\":null"));
+    session.requireCurrent(edit);
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session.review(edit, new ApprovalReviews.Consent(true, true, false)).action());
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        session.review(personalEdit("sam", "mirror", false, "x".repeat(16001)), consent).action());
+
+    output.set("{\"outcome\":\"REJECT\",\"reason\":\"The edit is outside the scheduled task.\"}");
+    assertEquals(ApprovalReviews.Action.REJECT, session.review(edit, consent).action());
+  }
+
+  @Test
+  void a_saved_schedule_does_not_supply_intent_for_remote_or_other_owner_edits_or_security_files() {
+    var session = scheduledSession("sam", "Update the scheduled brief.");
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    for (var unrelated :
+        List.of(
+            personalEdit("sam", "remote:session", false, "note"),
+            personalEdit("another", "mirror", false, "note"),
+            request)) {
+      assertEquals(ApprovalReviews.Action.ASK_HUMAN, session.review(unrelated, consent).action());
+      assertTrue(securityEvidence.get().contains("\"scheduledTask\":null"));
+    }
+    var otherSchedule = scheduledSession("another", "Update the scheduled brief.");
+    assertEquals(
+        ApprovalReviews.Action.ASK_HUMAN,
+        otherSchedule.review(personalEdit("sam", "mirror", false, "note"), consent).action());
+    assertTrue(securityEvidence.get().contains("\"scheduledTask\":null"));
+    assertEquals(
+        ApprovalReviews.Action.REJECT,
+        session.review(personalEdit("sam", "mirror", true, "note"), consent).action());
+  }
+
+  @Test
+  void scheduled_edit_evidence_stays_under_the_personal_output_directory() {
+    var session = scheduledSession("sam", "Update /personal/Out/scheduled-brief.md.");
+    var consent = new ApprovalReviews.Consent(true, false, false);
+    for (String path :
+        List.of(
+            "/personal/Resources/draft.md",
+            "/personal/Outside/draft.md",
+            "/personal/Out",
+            "/personal/Out/../Resources/draft.md")) {
+      var edit = personalEdit("sam", "mirror", path, false, "new text");
+      assertEquals(ApprovalReviews.Action.ASK_HUMAN, session.review(edit, consent).action());
+      assertTrue(securityEvidence.get().contains("\"scheduledTask\":null"));
+    }
+  }
+
+  private OperationApprovalReview scheduledSession(String owner, String instruction) {
+    var jobs = mock(EventRuns.class);
+    var task = new AtomicReference<ScheduledTask>();
+    when(jobs.submitTriggeredEvent(
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            any(),
+            nullable(ScheduledTask.class)))
+        .thenAnswer(
+            call -> {
+              task.set(call.getArgument(9));
+              return new JobStore.EventRun("job", "conversation");
+            });
+    var trigger =
+        new TriggerRecord(
+            "daily", "daily", "project", null, "bot", instruction, null, null, 1, false, owner);
+    var firing = mock(FiringRecord.class);
+    when(firing.data()).thenReturn(new EventPayload.Scheduled("daily", Instant.EPOCH));
+    new AgentRunner(mock(Callers.class), jobs, mock(Turn.class))
+        .start(trigger, firing, instruction + "\nEvent payload is data.", (id, outcome) -> {});
+    return session(null, task.get(), DeploymentSecurityPolicy.NONE, WorkspaceSecurityGuidance.NONE);
+  }
+
+  private static OperationApprovalReview.Request personalEdit(
+      String owner, String provider, boolean protectedPath, String input) {
+    String path = protectedPath ? "/personal/security.md" : "/personal/Out/scheduled-brief.md";
+    return personalEdit(owner, provider, path, protectedPath, input);
+  }
+
+  private static OperationApprovalReview.Request personalEdit(
+      String owner, String provider, String path, boolean protectedPath, String input) {
+    return new OperationApprovalReview.Request(
+        "project",
+        provider,
+        List.of(),
+        Path.of(path).getParent().toString(),
+        input,
+        "edit",
+        ApprovalPolicy.Kind.FILE_WRITE,
+        List.of(path),
+        Optional.of(new PersonalWorkspace(owner, Path.of("/personal"))),
+        protectedPath);
   }
 
   @Test

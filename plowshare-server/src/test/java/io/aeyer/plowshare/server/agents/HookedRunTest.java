@@ -10,6 +10,7 @@ import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.protocol.ToolCall;
 import io.aeyer.plowshare.protocol.fetch.FetchWindow;
 import io.aeyer.plowshare.protocol.search.SearchPage;
+import io.aeyer.plowshare.server.approvals.ApprovalReviewSessions;
 import io.aeyer.plowshare.server.approvals.RunApproval;
 import io.aeyer.plowshare.server.archive.Origin;
 import io.aeyer.plowshare.server.events.AgentRunner;
@@ -1038,7 +1039,7 @@ class HookedRunTest {
   }
 
   @Test
-  void only_a_scheduled_firing_carries_its_saved_task_to_web_review_and_orchestration_start()
+  void only_a_scheduled_firing_carries_its_saved_task_to_review_and_orchestration_start()
       throws Exception {
     String task = "Find and review public legal reporting";
     String rendered = task + "\n\nEvent data must remain separate from authority";
@@ -1096,6 +1097,8 @@ class HookedRunTest {
           new Scripted()
               .then(() -> asking(new ToolCall("s1", SearchTool.NAME, "{\"query\":\"scope\"}")));
       var runtime = webRuntime(model, reviews, new SearchTool(service));
+      var approvalSessions = mock(ApprovalReviewSessions.class);
+      runtime.useApprovalReviewSessions(approvalSessions);
       var launch = new AtomicReference<RunExtras.Context>();
       runtime.useRunExtras(
           context -> {
@@ -1120,9 +1123,21 @@ class HookedRunTest {
               .ending());
       assertEquals(scheduled ? task : null, launch.get().authenticatedWebTask());
       if (scheduled) {
+        verify(approvalSessions)
+            .operations(
+                argThat(
+                    review ->
+                        review.authenticatedTask() == null
+                            && review.scheduledTask().personalFileReview()
+                            && task.equals(review.scheduledTask().instruction())));
         verify(reviews).gate(argThat(context -> task.equals(context.task())), any(), any(), any());
         verify(service).search(eq("scope"), eq(10), eq(30), eq(1), any());
       } else {
+        verify(approvalSessions)
+            .operations(
+                argThat(
+                    review ->
+                        review.authenticatedTask() == null && review.scheduledTask() == null));
         verifyNoInteractions(reviews, service);
         assertTrue(
             log.entries.stream()

@@ -32,6 +32,16 @@ eligibility or the selected bot. An exact account `ASK_HUMAN` rule requires a
 human decision after SECURITY clears. Standing Personal read intent supplies
 intent only, while account `MAY_APPROVE` rules and history supply eligibility.
 
+An owner-authorized schedule can create or revise the output it names under
+`/personal/Out/` on the owner's Personal mirror. The saved instruction from an
+account-owned trigger or server-side Personal schedule must ask for the output
+to be written or updated and identify it by filename, path or naming pattern.
+SECURITY compares the exact `file_edit` with that instruction and applies the
+account's approval policy. A delegate can use the saved instruction when its
+admitted executor, home and scope match the parent. The scheduler carries that
+instruction separately from event data and model-generated handoffs. Edits to
+security configuration still require an explicit current user request.
+
 ## Deployment policy files
 
 Set `security.md` at the root of `plowshare.data.dir` to replace the shipped rule

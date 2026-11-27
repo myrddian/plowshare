@@ -134,10 +134,11 @@ public final class PolicyApprovalReviews implements ApprovalReviews {
           null);
     // A matched standing rule supplies intent for this operation only. Even a clear verdict
     // requires the exact input to be reviewable.
-    if ((intent.userIntent() == null && !standingIntent) || incompleteInput)
+    if ((intent.userIntent() == null && intent.scheduledTask() == null && !standingIntent)
+        || incompleteInput)
       return decision(
           Action.ASK_HUMAN,
-          "Authenticated task intent or complete input evidence is missing; a human must review the exact operation.",
+          "Verified task intent or complete input evidence is missing; a human must review the exact operation.",
           policy,
           ids,
           reviewed,

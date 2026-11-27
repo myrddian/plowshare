@@ -5965,6 +5965,7 @@ public final class JobRuntime {
                     policyOwner,
                     transcript.conversationId(),
                     authenticatedTask,
+                    transcript.scheduledTask(),
                     operation,
                     budget,
                     transcript.usage(),

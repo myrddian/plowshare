@@ -293,9 +293,13 @@ final class ReviewedFileTool
             call,
             kind,
             paths,
-            read == null || !from.equals(path.normalize().toString())
+            !from.equals(path.normalize().toString())
                 ? Optional.empty()
-                : read.personalWorkspace(),
+                : switch (kind) {
+                  case FILE_READ -> read.personalWorkspace();
+                  case FILE_WRITE -> mutation.personalWorkspace();
+                  default -> Optional.empty();
+                },
             securityFileMutation);
     var file =
         new FileApproval(

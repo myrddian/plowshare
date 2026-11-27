@@ -212,6 +212,7 @@ class AgentRunnerTest {
             task.capture());
     Assertions.assertEquals("owner", task.getValue().owner());
     Assertions.assertEquals(work.action().utterance(), task.getValue().instruction());
+    Assertions.assertFalse(task.getValue().personalFileReview());
   }
 
   @Test

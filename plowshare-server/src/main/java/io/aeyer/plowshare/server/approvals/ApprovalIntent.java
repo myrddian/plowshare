@@ -6,10 +6,11 @@ import java.util.Objects;
 /**
  * Immutable operation evidence captured before review. The provider identity is the actual machine
  * and provider generation, not merely "local". User intent must come from an authenticated user
- * entry, never from a requesting model's justification. The input digest binds stdin or a file
- * edit. The ownerPersonalRead flag is evidence that the provider verified the target is inside the
- * owner's Personal workspace. Standing intent must come from a separately matched policy rule. The
- * securityFileMutation flag records a configuration path identified by the file router.
+ * entry, never from a requesting model's justification. A separately identified scheduled task can
+ * supply intent for an ordinary edit under Out in the owner's Personal mirror. The input digest
+ * binds stdin or a file edit. The ownerPersonalRead flag records that the provider verified the
+ * target is inside the owner's Personal workspace. Standing read intent comes from a matched policy
+ * rule. The securityFileMutation flag records a configuration path identified by the router.
  */
 public record ApprovalIntent(
     String owner,
@@ -26,7 +27,8 @@ public record ApprovalIntent(
     String justification,
     String inputPreview,
     boolean ownerPersonalRead,
-    boolean securityFileMutation) {
+    boolean securityFileMutation,
+    String scheduledTask) {
   public ApprovalIntent(
       String owner,
       String conversation,
@@ -55,7 +57,8 @@ public record ApprovalIntent(
         justification,
         null,
         false,
-        false);
+        false,
+        null);
   }
 
   public ApprovalIntent(
@@ -87,7 +90,8 @@ public record ApprovalIntent(
         justification,
         inputPreview,
         false,
-        false);
+        false,
+        null);
   }
 
   public ApprovalIntent {
@@ -103,6 +107,8 @@ public record ApprovalIntent(
     if (securityFileMutation
         && (kind == ApprovalPolicy.Kind.COMMAND || kind == ApprovalPolicy.Kind.FILE_READ))
       throw new IllegalArgumentException("Security file mutation requires a direct file change");
+    if (scheduledTask != null && (kind != ApprovalPolicy.Kind.FILE_WRITE || securityFileMutation))
+      throw new IllegalArgumentException("Scheduled task evidence requires an ordinary file edit");
     argv = ApprovalPolicy.strings(argv, "Approval command", 256);
     paths = ApprovalPolicy.strings(paths, "Approval paths", 2);
     for (String path : paths) ApprovalPolicy.text(path, "Approval path", 8192);
@@ -111,6 +117,7 @@ public record ApprovalIntent(
     ApprovalPolicy.optional(inputDigest, "Approval input digest", 128);
     ApprovalPolicy.digest(inputDigest);
     ApprovalPolicy.optional(userIntent, "Authenticated user intent", 16000);
+    ApprovalPolicy.optional(scheduledTask, "Saved schedule instruction", 16000);
     ApprovalPolicy.optional(justification, "Agent justification", 4000);
     if (inputPreview != null && inputPreview.length() > 16000)
       throw new IllegalArgumentException("Approval input preview exceeds the review limit");

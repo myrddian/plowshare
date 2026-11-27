@@ -38,6 +38,8 @@ import io.aeyer.plowshare.server.files.WorkspaceCodeMap;
 import io.aeyer.plowshare.server.hooks.HookContext;
 import io.aeyer.plowshare.server.hooks.ToolPre;
 import io.aeyer.plowshare.server.images.ImageStore;
+import io.aeyer.plowshare.server.union.MirrorProvider;
+import io.aeyer.plowshare.server.union.UnionGate;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -436,6 +438,48 @@ class ReviewedFileToolTest {
     assertFalse(gate(tool, "{\"path\":\"" + workspace + "/preferences.md\"}").isDenied());
     verify(review).review(argThat(request -> request.personalWorkspace().isEmpty()), any());
     verify(review).review(argThat(request -> request.personalWorkspace().isPresent()), any());
+  }
+
+  @Test
+  void a_personal_mirror_edit_carries_workspace_evidence_only_for_the_exact_path()
+      throws Exception {
+    Path workspace = PersonalWorkspace.LOGICAL_ROOT;
+    Path out = Files.createDirectories(root.resolve("Out"));
+    Files.writeString(out.resolve("brief.md"), "brief");
+    Files.createSymbolicLink(out.resolve("alias.md"), Path.of("brief.md"));
+    var mirror =
+        new MirrorProvider(
+            home.project(),
+            workspace,
+            List.of(),
+            root,
+            mock(UnionGate.class),
+            List.of(new Grant(Scope.WORKSPACE, Mode.WRITE)),
+            Optional.of("owner"));
+    var tool = tool(FileTools.EDIT_NAME, new ProviderRouter(at -> List.of(mirror)));
+    when(review.review(any(), any())).thenReturn(decision(ApprovalReviews.Action.ALLOW));
+
+    assertFalse(
+        gate(tool, "{\"path\":\"/personal/Out/brief.md\",\"content\":\"updated\"}").isDenied());
+    assertFalse(
+        gate(tool, "{\"path\":\"/personal/Out/alias.md\",\"content\":\"updated\"}").isDenied());
+
+    verify(review)
+        .review(
+            argThat(
+                request ->
+                    request.paths().equals(List.of("/personal/Out/brief.md"))
+                        && request
+                            .personalWorkspace()
+                            .equals(Optional.of(new PersonalWorkspace("owner", workspace)))),
+            any());
+    verify(review)
+        .review(
+            argThat(
+                request ->
+                    request.paths().equals(List.of("/personal/Out/alias.md"))
+                        && request.personalWorkspace().isEmpty()),
+            any());
   }
 
   @Test

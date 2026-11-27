@@ -27,9 +27,16 @@ public final class AgentRunner implements Dispatcher.Runner {
     String owner();
 
     String instruction();
+
+    /**
+     * Whether the saved instruction comes from an account-owned trigger or a server-side Personal
+     * schedule. Shared or workspace-editable schedule files cannot speak for their registrar.
+     */
+    boolean personalFileReview();
   }
 
-  private record SavedTask(String owner, String instruction) implements ScheduledTask {}
+  private record SavedTask(String owner, String instruction, boolean personalFileReview)
+      implements ScheduledTask {}
 
   private final Callers callers;
   private final EventRuns jobs;
@@ -77,7 +84,12 @@ public final class AgentRunner implements Dispatcher.Runner {
       if (configured != null && configured.requiresDefinition(trigger.name(), trigger.definedBy()))
         throw new IllegalStateException("The registered schedule source is missing");
       return new Dispatcher.Started.Job(
-          start(trigger, utterance, null, ended, scheduledTask(trigger, firing, trigger.task())));
+          start(
+              trigger,
+              utterance,
+              null,
+              ended,
+              scheduledTask(trigger, firing, trigger.task(), true)));
     }
     var file = managed.get();
     if (!file.status().equals("active") || file.definition() == null || file.definition().paused())
@@ -125,7 +137,12 @@ public final class AgentRunner implements Dispatcher.Runner {
             // if the registered definition changed in the meantime.
             agentAction && !task.equals(trigger.task())
                 ? null
-                : scheduledTask(trigger, firing, task)));
+                : scheduledTask(
+                    trigger,
+                    firing,
+                    task,
+                    source.source().equals("server")
+                        && PersonalSpaces.name(source.account()).equals(source.project()))));
   }
 
   @Override
@@ -143,9 +160,9 @@ public final class AgentRunner implements Dispatcher.Runner {
   }
 
   private static ScheduledTask scheduledTask(
-      TriggerRecord trigger, FiringRecord firing, String task) {
+      TriggerRecord trigger, FiringRecord firing, String task, boolean personalFileReview) {
     return firing.data() instanceof EventPayload.Scheduled && trigger.definedBy() != null
-        ? new SavedTask(trigger.definedBy(), task)
+        ? new SavedTask(trigger.definedBy(), task, personalFileReview)
         : null;
   }
 

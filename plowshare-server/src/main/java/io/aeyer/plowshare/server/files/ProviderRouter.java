@@ -170,27 +170,19 @@ public final class ProviderRouter {
   /** Target selected for a read, with Personal evidence only for its exact workspace root. */
   public record ReadTarget(Target target, Optional<PersonalWorkspace> personalWorkspace) {}
 
-  /**
-   * A mutation and whether it names a security policy file or a path under its fragment directory.
-   */
-  public record MutationTarget(Target target, boolean securityFile) {}
+  /** A mutation, its protected-path classification and any exact Personal workspace evidence. */
+  public record MutationTarget(
+      Target target, boolean securityFile, Optional<PersonalWorkspace> personalWorkspace) {}
 
   /**
    * Resolve once so the roots used to classify the read belong to the provider that will read it.
    */
   public ReadTarget readTarget(Home home, Path path) {
     Target target = targetForRead(home, path);
-    FileProvider provider = target.provider();
-    // An alias must not give a read standing intent when exact account rules name the original.
-    // A Personal read also uses the provider's single, declared workspace.
     return new ReadTarget(
         target,
-        provider
-            .personalWorkspace()
-            .filter(workspace -> target.roots().equals(List.of(workspace.root())))
-            .filter(workspace -> path.equals(target.path()))
-            .filter(workspace -> path.startsWith(workspace.root()))
-            .filter(workspace -> path.equals(provider.reviewPath(path))));
+        exactPersonalWorkspace(target, path)
+            .filter(workspace -> path.equals(target.provider().reviewPath(path))));
   }
 
   public Target targetForRead(Home home, Path path) {
@@ -205,7 +197,20 @@ public final class ProviderRouter {
     boolean protectedPath =
         target.roots().stream()
             .anyMatch(root -> securityFile(root, named) || securityFile(root, reviewed));
-    return new MutationTarget(target, protectedPath);
+    return new MutationTarget(
+        target,
+        protectedPath,
+        exactPersonalWorkspace(target, path).filter(workspace -> path.equals(reviewed)));
+  }
+
+  private static Optional<PersonalWorkspace> exactPersonalWorkspace(Target target, Path path) {
+    // Require the provider's single Personal root and the exact name reviewed by account rules.
+    return target
+        .provider()
+        .personalWorkspace()
+        .filter(workspace -> target.roots().equals(List.of(workspace.root())))
+        .filter(workspace -> path.equals(target.path()))
+        .filter(workspace -> path.startsWith(workspace.root()));
   }
 
   /** Select and pin the provider used for an admitted mutation and its verification reads. */

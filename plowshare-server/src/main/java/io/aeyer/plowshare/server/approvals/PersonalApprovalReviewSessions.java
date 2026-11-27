@@ -6,7 +6,9 @@ import io.aeyer.plowshare.server.auth.ServiceCredentials;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.files.FileProvider.PersonalWorkspace;
 import io.aeyer.plowshare.server.files.WorkspaceRefusedException;
+import io.aeyer.plowshare.server.union.MirrorProvider;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -303,6 +305,28 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
       // A supplied task that exceeds the evidence limit may contain restrictions. Treat it as
       // unavailable evidence even for a read ordinarily covered by standing intent.
       if (taskTooLong || (task != null && task.isBlank())) task = null;
+      var ownerPersonal =
+          request
+              .personalWorkspace()
+              .filter(workspace -> workspace.owner().equals(context.owner()));
+      var schedule = context.scheduledTask();
+      // The mirror can verify the canonical target. A remote provider attests only to the
+      // named path, which cannot rule out an alias to a protected or restricted file.
+      String scheduledTask =
+          context.authenticatedTask() == null
+                  && request.kind() == ApprovalPolicy.Kind.FILE_WRITE
+                  && !request.securityFileMutation()
+                  && MirrorProvider.NAME.equals(request.provider())
+                  && schedule != null
+                  && schedule.personalFileReview()
+                  && schedule.owner().equals(context.owner())
+                  && ownerPersonal
+                      .filter(workspace -> isOutput(workspace, request.paths()))
+                      .isPresent()
+              ? schedule.instruction()
+              : null;
+      if (scheduledTask != null && (scheduledTask.isBlank() || scheduledTask.length() > 16000))
+        scheduledTask = null;
       return new ApprovalIntent(
           context.owner(),
           context.conversation(),
@@ -318,11 +342,10 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
           null,
           request.stdin() == null || request.stdin().length() > 16000 ? null : request.stdin(),
           !taskTooLong
-              && request
-                  .personalWorkspace()
-                  .filter(workspace -> workspace.owner().equals(context.owner()))
-                  .isPresent(),
-          request.securityFileMutation());
+              && ownerPersonal.isPresent()
+              && request.kind() == ApprovalPolicy.Kind.FILE_READ,
+          request.securityFileMutation(),
+          scheduledTask);
     }
 
     private Target target(Request request) {
@@ -342,6 +365,14 @@ public final class PersonalApprovalReviewSessions implements ApprovalReviewSessi
           request.personalWorkspace(),
           request.securityFileMutation());
     }
+  }
+
+  /** Checks the exact path attested by the Personal provider against its output directory. */
+  private static boolean isOutput(PersonalWorkspace workspace, List<String> paths) {
+    if (paths.size() != 1) return false;
+    Path output = workspace.root().resolve("Out");
+    Path file = Path.of(paths.getFirst());
+    return file.equals(file.normalize()) && file.startsWith(output) && !file.equals(output);
   }
 
   private static String digest(String input) {
