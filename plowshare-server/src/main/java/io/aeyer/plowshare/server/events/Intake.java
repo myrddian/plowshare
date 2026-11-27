@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,7 +75,7 @@ public class Intake implements ScheduledArrival, FiredArrival {
 
   @Override
   public List<ScheduledArrival.Arrival> record(
-      String event, String schedule, Instant fireAt, Instant now) {
+      String event, String schedule, Instant fireAt, Instant now, UUID goalGeneration) {
     EventPayload.Scheduled payload = new EventPayload.Scheduled(schedule, fireAt);
     EventPayloadCodec.require(event, null, schedule, fireAt, payload);
     Objects.requireNonNull(now, "arrival time");
@@ -86,10 +87,14 @@ public class Intake implements ScheduledArrival, FiredArrival {
           .ifPresent(firing -> arrivals.add(new ScheduledArrival.Arrival(firing, null)));
     } else {
       firings.lockScheduledQueues(listening.stream().map(TriggerRecord::name).toList());
-      for (var trigger : listening)
-        firings
-            .arrive(event, payload, schedule, fireAt, trigger, now)
-            .ifPresent(firing -> arrivals.add(new ScheduledArrival.Arrival(firing, trigger)));
+      for (var trigger : listening) {
+        // A trigger that merely listens to the same event cannot acquire a Goal binding.
+        var arrival =
+            goalGeneration != null && schedule.equals(trigger.name())
+                ? firings.arriveGoalSchedule(event, payload, trigger, now, goalGeneration)
+                : firings.arrive(event, payload, schedule, fireAt, trigger, now);
+        arrival.ifPresent(firing -> arrivals.add(new ScheduledArrival.Arrival(firing, trigger)));
+      }
       // Apply the existing supersession policy before acknowledging the publication, even if the
       // post-commit notification is lost. No job can start from record().
       for (var arrival : arrivals)

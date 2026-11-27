@@ -10,13 +10,13 @@
   "counts": {
     "legacyMcpTools": 35,
     "legacyMcpCases": 181,
-    "registeredRequestFrames": 299,
+    "registeredRequestFrames": 312,
     "directMemoryCommandsRequired": 12,
-    "headlessCliRequestFrames": 293,
-    "headlessCliOneShotFrames": 283,
+    "headlessCliRequestFrames": 306,
+    "headlessCliOneShotFrames": 296,
     "headlessCliObserverFrames": 2,
     "headlessCliSyncFrames": 8,
-    "typedRequestFrames": 299,
+    "typedRequestFrames": 312,
     "mcpModelAdapters": 20,
     "mcpOperatorOrPlatformBoundaries": 15,
     "typescriptMcpTools": 35,
@@ -154,6 +154,7 @@
           "plowshare-server/src/main/resources/agents/coder.md",
           "plowshare-server/src/main/resources/agents/conversation_diagnostician.md",
           "plowshare-server/src/main/resources/agents/critic.md",
+          "plowshare-server/src/main/resources/agents/goal_worker.md",
           "plowshare-server/src/main/resources/agents/interlocutor.md",
           "plowshare-server/src/main/resources/agents/promotion_judge.md",
           "plowshare-server/src/main/resources/agents/researcher.md",
@@ -3465,6 +3466,91 @@
       "legacyMcpTools": []
     },
     {
+      "frame": "conversation.goal.cancel",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationGoalFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "conversation.goal.get",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationGoalFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "conversation.goal.pause",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationGoalFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "conversation.goal.resume",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationGoalFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "conversation.goal.start",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationGoalFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
       "frame": "conversation.latest",
       "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/ConversationFrames.java",
       "typescriptBuilders": [
@@ -4003,6 +4089,108 @@
       "desktopSourceReferences": [
         "plowshare-desktop/src/schedules.ts"
       ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.answer",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.list",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.receipt",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.sources",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.start",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "goal.status",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -5960,6 +6148,40 @@
       "desktopSourceReferences": [
         "plowshare-desktop/src/operator.ts"
       ],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.listen",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
+      "headlessCliConsumer": true,
+      "typedPayload": true,
+      "headlessCliBoundary": null,
+      "legacyMcpTools": []
+    },
+    {
+      "frame": "message.unlisten",
+      "serverRegistration": "plowshare-server/src/main/java/io/aeyer/plowshare/server/ws/GoalAgentFrames.java",
+      "typescriptBuilders": [
+        {
+          "source": "sdk/typescript/src/operations/catalog.ts",
+          "function": "request / parseCommand"
+        }
+      ],
+      "typescriptConstants": [],
+      "desktopConsumer": false,
+      "desktopSourceReferences": [],
       "headlessCliConsumer": true,
       "typedPayload": true,
       "headlessCliBoundary": null,
@@ -8976,6 +9198,11 @@
           "conversation.context",
           "conversation.context.count",
           "conversation.context.snapshot",
+          "conversation.goal.cancel",
+          "conversation.goal.get",
+          "conversation.goal.pause",
+          "conversation.goal.resume",
+          "conversation.goal.start",
           "conversation.latest",
           "conversation.lifecycle",
           "conversation.list",
@@ -8999,6 +9226,12 @@
           "event.fire",
           "filestore.list",
           "firing.list",
+          "goal.answer",
+          "goal.list",
+          "goal.receipt",
+          "goal.sources",
+          "goal.start",
+          "goal.status",
           "inbox.list",
           "inbox.publish",
           "inbox.read",
@@ -9097,6 +9330,8 @@
           "message.instance.open",
           "message.instance.stop",
           "message.instances",
+          "message.listen",
+          "message.unlisten",
           "orchestration.answer",
           "orchestration.cancel",
           "orchestration.caps",
@@ -9199,7 +9434,7 @@
           "web.fetch",
           "web.search"
         ],
-        "count": 283,
+        "count": 296,
         "validation": "all one-shot dispatch success paths validate response family and code; raw outcomes/future fields preserved; nested malformed rows cannot become empty success; identities and page coordinates checked without retry or fallback",
         "compatibility": "explicit legacy retrieval/job/accepted metadata exceptions retained; persistent observers and sync use their platform lifecycle checks"
       },
@@ -9211,9 +9446,9 @@
     ],
     "operations": {
       "source": "sdk/typescript/src/operations",
-      "status": "48 existing request builders extracted; 299 typed payloads and shared WS dispatch",
+      "status": "48 existing request builders extracted; 312 typed payloads and shared WS dispatch",
       "tui": "12 direct memory verbs, conversation.search, job.status/cancel",
-      "headlessCli": "293 WS operations: 283 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
+      "headlessCli": "306 WS operations: 296 one-shot commands and 2 persistent observer subscriptions and 8 rooted sync mutations; explicit WS job waiting/watching, saved login or ephemeral environment credentials, JSON/readable output and exits; offline command/group help and installed CLI version",
       "boundOperations": {
         "acting.context.open": "physical-connection-subject-context",
         "acting.context.close": "physical-connection-subject-context",

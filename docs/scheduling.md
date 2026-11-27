@@ -203,6 +203,17 @@ Targets reuse ordinary authority rules:
   The firing records acceptance of the message task; its inbox receipt names the task and real message ID for
   `message.delivery` inspection of downstream handling, rather than promising the recipient has finished.
 
+A schedule can wake a dedicated Goal Agent by using a plain `agent` action
+and setting `target.to` to its exact persistent instance in the source account
+and project. A Goal Agent can propose a definition with `goal_schedule` for a
+project Manager to apply in a source whose retained execution account owns
+the Goal mailbox. Scheduled wakes use the goal's retained execution
+authority and finite allowance. Editing, pausing or removing the schedule
+invalidates unclaimed Goal wakes from the old definition. Pausing keeps
+the binding. Removing the final wake binding closes a parked goal after
+already accepted direct steering is handled. An active cycle can still settle.
+[Goal Agent schedules](conversation-goals-design.md#schedule-definitions)
+
 Grants, membership and destinations are validated on each scan and before starting.
 A schedule does not expand tools or bypass an approval because it is unattended.
 

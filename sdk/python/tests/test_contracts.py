@@ -87,13 +87,19 @@ class ContractsTest(unittest.TestCase):
             )
         )
 
-    def test_hosted_coordinates_and_secret_diagnostics(self) -> None:
-        path = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"]).with_name(
-            "hosted-scope-correlations.json"
-        )
-        cases = json.loads(path.read_text()) + json.loads(
-            path.with_name("relay-group-correlations.json").read_text()
-        )
+    def test_receipt_coordinates_and_secret_diagnostics(self) -> None:
+        directory = Path(os.environ["PLOWSHARE_SDK_DTO_FIXTURES"]).parent
+        cases = [
+            row
+            for filename in (
+                "hosted-scope-correlations.json",
+                "relay-group-correlations.json",
+                "goal-listener-correlations.json",
+                "goal-answer-correlations.json",
+                "goal-discovery-correlations.json",
+            )
+            for row in json.loads((directory / filename).read_text())
+        ]
         for row in cases:
             result = decode_reply(row["operation"], row["reply"])
             self.assertEqual(
@@ -102,6 +108,33 @@ class ContractsTest(unittest.TestCase):
             )
             if row["operation"] == "tool.scope.worker.credential":
                 self.assertNotIn(row["reply"]["value"], repr(result))
+
+    def test_goal_answer_preserves_text_and_refuses_invalid_unicode(self) -> None:
+        goal = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        question = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        request_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        answer = "  Approved.\n"
+        operation, payload = encode_request(
+            contracts.GoalAnswerRequest(
+                goal=goal,
+                conversation="cnv_Goal",
+                question=question,
+                request_id=request_id,
+                answer=answer,
+            )
+        )
+        self.assertEqual(operation, "goal.answer")
+        self.assertEqual(_object(payload)["answer"], answer)
+        with self.assertRaises(ValueError):
+            encode_request(
+                contracts.GoalAnswerRequest(
+                    goal=goal,
+                    conversation="cnv_Goal",
+                    question=question,
+                    request_id=request_id,
+                    answer="x\ud800",
+                )
+            )
 
     def test_relay_publish_raw_utf8_limit(self) -> None:
         maximum = 50 * 1024 * 1024

@@ -15,6 +15,8 @@ import io.aeyer.plowshare.server.relay.RelayLogRepository;
 import io.aeyer.plowshare.server.relay.RelayPayload;
 import io.aeyer.plowshare.server.relay.RelayPortProperties;
 import io.aeyer.plowshare.server.relay.RelayReviewCausation;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -82,9 +84,19 @@ public final class RelayMessageReview implements MessageReview {
     long id = require(binding);
     var requestTopic = new Relay.TopicKey(id, binding.requestTopic());
     var responseTopic = new Relay.TopicKey(id, binding.responseTopic());
-    relay.registerTopic(requestTopic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
-    relay.registerTopic(responseTopic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
-    long cursor = relay.topic(responseTopic).lastPosition();
+    relay.registerOwnedTopic(
+        requestTopic,
+        RelayPayload.Kind.TEXT,
+        Relay.Policy.systemDefault(),
+        RelayTopicOwnership.internal(Owner.SECURITY));
+    long cursor =
+        relay
+            .registerOwnedTopic(
+                responseTopic,
+                RelayPayload.Kind.TEXT,
+                Relay.Policy.systemDefault(),
+                RelayTopicOwnership.internal(Owner.SECURITY))
+            .lastPosition();
     String requestId = UUID.randomUUID().toString();
     var causation = RelayReviewCausation.root(requestId);
     String hash = RelayPort.hash(role + "\0" + text);

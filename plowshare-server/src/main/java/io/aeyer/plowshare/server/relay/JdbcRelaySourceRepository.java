@@ -137,7 +137,11 @@ public final class JdbcRelaySourceRepository implements RelaySourceRepository {
               return true;
             }
           }
-          relay.registerTopic(topic, entry.payload().kind(), Relay.Policy.systemDefault());
+          relay.registerOwnedTopic(
+              topic,
+              entry.payload().kind(),
+              Relay.Policy.systemDefault(),
+              RelayTopicOwnership.captured(topic, entry.payload().kind()));
           if (entry.payload() instanceof RelayPayload.WakeRequested wake)
             nativeInboxes.bind(topic, wake);
           relay.publish(

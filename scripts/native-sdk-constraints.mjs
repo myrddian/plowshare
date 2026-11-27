@@ -1,8 +1,9 @@
 /** Portable constraints supplement the generated field graph. Authorization remains server-owned. */
-import { SHAPES } from '../sdk/typescript/build/operations/payload-validation.js';
+import { GOAL_ANSWER_NONBLANK, SHAPES } from '../sdk/typescript/build/operations/payload-validation.js';
 const uuid = '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$';
 const portName = { pattern: '^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$', maxLength: 160 };
 const canonicalUuid = { pattern: '^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$' };
+const zeroUuid = '00000000-0000-0000-0000-000000000000';
 const instant = { timestamp: true, pattern: '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d{1,9})?Z$' };
 // Decimal positions are signed-long values; never coerce them through floating point.
 const longLimit = '9223372036854775807';
@@ -164,13 +165,51 @@ export function constrain(graph) {
           'end',
           'waitMs',
         ].includes(k) &&
-        !(k === 'after' && (op === 'schedule.list' || op === 'schedule.files'))
+        !(k === 'after' && (op === 'schedule.list' || op === 'schedule.files' || op === 'goal.sources' || op === 'goal.list'))
       )
         add(
           v,
           integer(['offset', 'after', 'start', 'waitMs'].includes(k) ? 0 : 1),
         );
       if (k === 'requestId') add(v, { pattern: uuid });
+    }
+    if (op.startsWith('conversation.goal.')) {
+      for (const key of ['goal', 'requestId'])
+        field(s, key, { pattern: uuid, disallowPrefixes: ['00000000-0000-0000-0000-000000000000'] });
+      field(s, 'version', integer(1));
+      field(s, 'maxActivations', integer(1, 1000));
+      field(s, 'objective', { ...text(16000, 1), nonblank: true });
+      field(s, 'criteria', { ...text(8000, 1), nonblank: true });
+    }
+    if (op === 'conversation.goal.resume')
+      field(s, 'maxModelCalls', integer(1, 1000000));
+    if (op === 'message.listen') {
+      field(s, 'batchCount', integer(2, 16));
+      field(s, 'maxDelaySeconds', integer(1, 86400));
+      rules(s, { eq: [present('batchCount'), present('maxDelaySeconds')] });
+    }
+    if (op === 'message.unlisten') field(s, 'version', integer(1));
+    if (['goal.list', 'goal.status', 'goal.receipt'].includes(op)) {
+      for (const key of ['after', 'goal', 'requestId'])
+        field(s, key, { pattern: uuid, maxLength: 36, disallowPrefixes: [zeroUuid] });
+      field(s, 'limit', integer(1, 50));
+    }
+    if (op === 'goal.answer') {
+      for (const key of ['goal', 'question', 'requestId'])
+        field(s, key, {pattern: uuid, maxLength: 36, disallowPrefixes: [zeroUuid]});
+      field(s, 'conversation', {pattern: '^cnv_[A-Za-z0-9]+$', maxLength: 128, trimmed: true});
+      field(s, 'answer', {...text(16000, 1), maxUtf8Bytes: 48000, pattern: GOAL_ANSWER_NONBLANK});
+    }
+    if (['goal.start', 'goal.sources', 'message.listen', 'message.unlisten'].includes(op)) {
+      for (const key of ['goal', 'requestId', 'generation', 'binding'])
+        field(s, key, { pattern: uuid, disallowPrefixes: [zeroUuid] });
+      field(s, 'conversation', {pattern:'^cnv_[A-Za-z0-9]+$', maxLength:128});
+      field(s, 'objective', {...text(16000,1), nonblank:true});
+      field(s, 'criteria', {...text(8000,1), nonblank:true});
+      field(s, 'topic', {pattern:'^[a-z][a-z0-9]*([._-][a-z0-9]+)*$', maxLength:1024});
+      field(s, 'after', {pattern:'^[a-z][a-z0-9]*([._-][a-z0-9]+)*$', maxLength:1024});
+      field(s, 'prefix', {pattern:'^[a-z][a-z0-9]*([._-][a-z0-9]+)*[._-]?$', maxLength:1024});
+      field(s, 'limit', integer(1,100));
     }
     // Operation-specific bounds follow generic defaults so narrower identities stay narrow.
     if (op === 'inbox.publish') {
@@ -207,7 +246,7 @@ export function constrain(graph) {
       field(s, 'requestId', {pattern:uuid,minLength:36,maxLength:36});
       field(s, 'expiresInDays', integer(1,365));
     }
-    if (op === 'schedule.list' || op === 'schedule.files') {
+    if (op === 'schedule.list' || op === 'schedule.files' || op === 'goal.sources') {
       field(s, 'project', {maxLength:256,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$',disallowPrefixes:['personal:','Personal:','client:']});
       field(s, 'after', {minLength:1,maxLength:512,trimmed:true,pattern:'^[^\\x00-\\x1f\\x7f-\\x9f]+$'});
       field(s, 'limit', integer(1,100));
@@ -447,6 +486,74 @@ export function constrain(graph) {
     field(externalView,key,integer(0,9007199254740991));
   graph.$defs.nativeConversationOpenExResult = externalView;
   graph.results['conversation.open.ex'] = {$ref:'#/$defs/nativeConversationOpenExResult'};
+  for (const operation of ['goal.start', 'goal.receipt', 'goal.sources', 'message.listen']) {
+    const reply = resolve(graph, graph.results[operation]);
+    for (const key of ['goal', 'requestId', 'binding', 'generation']) field(reply, key, canonicalUuid);
+    field(reply,'conversation',{pattern:'^cnv_[A-Za-z0-9]+$', maxLength:128});
+    field(reply,'instance',{pattern:'^ins_[A-Za-z0-9]+$', maxLength:128});
+    field(reply,'version',integer(1));
+    field(reply,'topic',{pattern:'^[a-z][a-z0-9]*([._-][a-z0-9]+)*$', maxLength:1024});
+    field(reply,'sources',{maxItems:100});
+    if (operation === 'goal.sources') {
+      const source = resolve(graph, resolve(graph, reply.properties.sources).items);
+      field(source,'generation',canonicalUuid);
+      field(source,'topic',{pattern:'^[a-z][a-z0-9]*([._-][a-z0-9]+)*$', maxLength:1024});
+    }
+  }
+  const goalPage = resolve(graph, graph.results['goal.list']);
+  const discoveryStatus = resolve(graph, graph.results['goal.status']);
+  const discoveryUuid = { ...canonicalUuid, maxLength: 36, disallowPrefixes: [zeroUuid] };
+  field(goalPage, 'goals', { maxItems: 50 });
+  field(goalPage, 'next', discoveryUuid);
+  field(discoveryStatus, 'goal', discoveryUuid);
+  field(discoveryStatus, 'project', text(1024, 1));
+  field(discoveryStatus, 'conversation', { pattern: '^cnv_[A-Za-z0-9]+$', maxLength: 128 });
+  field(discoveryStatus, 'instance', { pattern: '^ins_[A-Za-z0-9]+$', maxLength: 128 });
+  field(discoveryStatus, 'version', integer(1));
+  field(discoveryStatus, 'agent', text(1024, 1));
+  field(discoveryStatus, 'objective', text(16000, 1));
+  field(discoveryStatus, 'nextScheduleAt', instant);
+  field(discoveryStatus, 'schedules', { maxItems: 16 });
+  field(discoveryStatus, 'relayListeners', { maxItems: 16 });
+  rules(discoveryStatus, implies(eq('readable', false), and(
+    ...['agent', 'objective', 'detail', 'latestResult', 'nextScheduleAt'].map(key => eq(key, null)),
+    eq('schedules', []), eq('relayListeners', []),
+    eq('moreSchedules', false), eq('moreRelayListeners', false),
+  )));
+  const goalShape = title => Object.values(graph.$defs).find(shape => shape.title === title);
+  const result = goalShape('GoalResult');
+  field(result, 'job', { pattern: '^job_[A-Za-z0-9]+$', maxLength: 128 });
+  field(result, 'turn', integer(1));
+  field(result, 'summary', text(16000, 1));
+  field(result, 'evidence', { minItems: 1, maxItems: 12, element: text(500, 1) });
+  const wake = goalShape('GoalScheduleWake');
+  field(wake, 'schedule', text(512, 1));
+  field(wake, 'generation', discoveryUuid);
+  field(wake, 'nextFireAt', instant);
+  const listener = goalShape('GoalRelayWake');
+  field(listener, 'binding', discoveryUuid);
+  field(listener, 'generation', discoveryUuid);
+  field(listener, 'topic', { ...portName, maxLength: 1024 });
+  const batch = goalShape('GoalPendingBatch');
+  field(batch, 'id', discoveryUuid);
+  field(batch, 'memberCount', integer(1, 16));
+  field(batch, 'deadline', instant);
+  const goalAnswer = resolve(graph, graph.results['goal.answer']);
+  for (const key of ['goal', 'question', 'requestId'])
+    field(goalAnswer, key, {...canonicalUuid, maxLength: 36, disallowPrefixes: [zeroUuid]});
+  field(goalAnswer, 'conversation', {pattern: '^cnv_[A-Za-z0-9]+$', maxLength: 128, trimmed: true});
+  const unlisten = resolve(graph, graph.results['message.unlisten']);
+  for (const key of ['goal', 'binding', 'requestId'])
+    field(unlisten, key, { ...canonicalUuid, disallowPrefixes: [zeroUuid] });
+  field(unlisten, 'version', integer(1));
+  const goalStatus = resolve(graph, graph.results['conversation.goal.get']);
+  field(goalStatus, 'goal', canonicalUuid);
+  field(goalStatus, 'version', integer(1));
+  field(goalStatus, 'maxActivations', integer(1, 1000));
+  field(goalStatus, 'activations', integer(0, 1000));
+  field(goalStatus, 'lastTurn', integer(1));
+  field(goalStatus, 'modelCallsSpent', integer(0));
+  field(goalStatus, 'modelCallLimit', integer(0));
   for(const operation of ['acting.turn.start','acting.turn.receipt']) {
     const turnReceipt=resolve(graph,graph.results[operation]);
     field(turnReceipt,'requestId',canonicalUuid);

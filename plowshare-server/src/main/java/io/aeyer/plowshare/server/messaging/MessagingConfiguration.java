@@ -22,6 +22,8 @@ import io.aeyer.plowshare.server.events.FiringStore;
 import io.aeyer.plowshare.server.events.InboxStore;
 import io.aeyer.plowshare.server.information.InformationJobs;
 import io.aeyer.plowshare.server.messaging.MessageService.DefinitionAddress;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.relay.RelayProperties;
 import io.aeyer.plowshare.server.swarm.RunShareProvider;
 import java.time.Instant;
@@ -32,6 +34,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.annotation.Order;
 
 /** Messaging composition owns its execution voice, routes, limits, recovery and wake dispatch. */
@@ -57,7 +60,10 @@ public class MessagingConfiguration {
       MessagingProperties messagingProperties,
       ProjectMessageRouting routing,
       TurnRelaySources turnSources,
-      RelayProperties relayProperties) {
+      RelayProperties relayProperties,
+      @Lazy GoalMessageInbox goalInbox,
+      SqlWorkBudget sql,
+      SqlWorkBudgetProperties budgets) {
     RelayMessaging messaging =
         new RelayMessaging(
             repository,
@@ -271,6 +277,8 @@ public class MessagingConfiguration {
     messaging.useApprovals(approvals);
     messaging.useLimits(messagingProperties);
     messaging.useRouting(routing);
+    messaging.useGoalInbox(goalInbox);
+    messaging.useGoalScheduleTransactions(sql.transactions(work, budgets.queryCeiling()));
     messaging.useCancellation(jobs::cancel);
     messaging.useLogVisibility(
         (conversation, account) -> {

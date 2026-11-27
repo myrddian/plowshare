@@ -60,6 +60,7 @@ public class ApprovalsConfig {
       ApprovalDelivery delivery,
       ObjectProvider<ConductorContinuation> conductors,
       ObjectProvider<io.aeyer.plowshare.server.agents.Messaging> messaging,
+      ObjectProvider<GoalApprovalContinuations> goals,
       Inbox inbox,
       ObjectProvider<io.aeyer.plowshare.server.agents.LogStages> stages) {
     HarnessRunApprovalContinuations continuation =
@@ -102,6 +103,8 @@ public class ApprovalsConfig {
                     problem.conversation(),
                     "approval-recovery:" + problem.approval());
             });
+    continuation.useGoalContinuations(
+        () -> goals.getIfAvailable(() -> GoalApprovalContinuations.NONE));
     continuation.whenDecisionRecovered(
         approval -> {
           try {

@@ -1,0 +1,121 @@
+[
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": true
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC",
+      "binding": "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "binding": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "version": 5,
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": true
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "version": 5,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "operation": "message.unlisten",
+    "request": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "reply": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 6,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  }
+]

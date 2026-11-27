@@ -3,9 +3,14 @@ import {
   PACKET_PROTOCOL,
 } from '../../sdk/typescript/src/binding/packets.ts';
 import { sha256 } from '../../sdk/typescript/src/binding/sha256.ts';
-import type {
-  Socket,
-  RequestSend,
+import {
+  actingOptions,
+  type RequestOptions,
+} from '../../sdk/typescript/src/binding/acting.ts';
+import {
+  ConnectionFault,
+  type Socket,
+  type RequestSend,
 } from '../../sdk/typescript/src/binding/connection.ts';
 import { errorMessage } from '../../sdk/typescript/src/binding/values.ts';
 import { isObject } from '../../sdk/typescript/src/binding/values.ts';
@@ -67,7 +72,11 @@ export interface EventStream {
    * Send a request frame on this socket and wait for its reply. The console's first
    * frame-speaking call: INBOX uses it, and screens move to it one at a time.
    */
-  ask(type: string, payload?: unknown): Promise<FrameOutcome>;
+  ask(
+    type: string,
+    payload?: unknown,
+    options?: RequestOptions,
+  ): Promise<FrameOutcome>;
 }
 
 export interface EventStreamOptions {
@@ -185,6 +194,7 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       type: string;
       retire: () => void;
       answered: (o: FrameOutcome) => void;
+      disconnected: (why: string) => void;
       failed: (e: Error) => void;
     }
   >();
@@ -193,7 +203,7 @@ export function openEventStream(options: EventStreamOptions): EventStream {
     waiting.clear();
     for (const each of held) {
       each.retire();
-      each.failed(new Error(why));
+      each.disconnected(why);
     }
   };
 
@@ -307,7 +317,12 @@ export function openEventStream(options: EventStreamOptions): EventStream {
       } else {
         // Do not publish readiness or send application operations before the private
         // exchange succeeds. Refusal closes this attempt; there is no ordered fallback.
-        void ask('transport.dispatch', { mode: 'concurrent-v1' }, true)
+        void ask(
+          'transport.dispatch',
+          { mode: 'concurrent-v1' },
+          undefined,
+          true,
+        )
           .then((outcome) => {
             if (settled || stopped) return;
             const payload = outcome.payload;
@@ -371,7 +386,8 @@ export function openEventStream(options: EventStreamOptions): EventStream {
             pending.answered(outcome);
           } catch {
             pending.failed(
-              new Error(
+              new ConnectionFault(
+                'INVALID_ENVELOPE',
                 'Unreadable response; delivery is uncertain. Refresh before retrying.',
               ),
             );
@@ -422,20 +438,49 @@ export function openEventStream(options: EventStreamOptions): EventStream {
   function ask(
     type: string,
     payload?: unknown,
+    requestOptions?: RequestOptions,
     negotiating = false,
   ): Promise<FrameOutcome> {
+    let local: RequestOptions;
+    try {
+      local = actingOptions(requestOptions);
+    } catch (cause) {
+      return Promise.reject(
+        new ConnectionFault('NOT_SUBMITTED', 'Invalid event request options', {
+          cause,
+        }),
+      );
+    }
+    const { signal } = local;
+    const timeoutMs = local.timeoutMs ?? askTimeoutMs;
+    if (signal?.aborted)
+      return Promise.reject(
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          'Event request was cancelled before submission',
+        ),
+      );
     if (!negotiating && type === 'transport.dispatch')
       return Promise.reject(
-        new Error('Dispatch selection belongs to connection opening'),
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          'Dispatch selection belongs to connection opening',
+        ),
       );
     if (socket === null || (state !== 'open' && !negotiating)) {
       return Promise.reject(
-        new Error(`the event socket is not open; "${type}" was not sent`),
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          `the event socket is not open; "${type}" was not sent`,
+        ),
       );
     }
     if (reservedCount >= maxPending)
       return Promise.reject(
-        new Error('Event request capacity exceeded; nothing was submitted'),
+        new ConnectionFault(
+          'NOT_SUBMITTED',
+          'Event request capacity exceeded; nothing was submitted',
+        ),
       );
     issued += 1;
     const id = `console-${issued}`;
@@ -447,18 +492,24 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         type,
         protocol_version: PROTOCOL_VERSION,
         payload: payload ?? {},
+        ...(local.actingFor === undefined
+          ? {}
+          : { actingFor: local.actingFor }),
       });
     } catch (failure) {
       reservedCount--;
       return Promise.reject(
-        failure instanceof Error ? failure : new Error('Invalid request'),
+        new ConnectionFault('NOT_SUBMITTED', 'Invalid request', {
+          cause: failure,
+        }),
       );
     }
     const bytes = new TextEncoder().encode(frame).length;
     if (bytes > maxPendingBytes - retainedBytes) {
       reservedCount--;
       return Promise.reject(
-        new Error(
+        new ConnectionFault(
+          'NOT_SUBMITTED',
           'Event request byte capacity exceeded; nothing was submitted',
         ),
       );
@@ -482,31 +533,65 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         transfer?.cancel();
         release();
       };
+      const fault = (message: string, cause?: unknown) =>
+        new ConnectionFault(
+          submitted ? 'RESPONSE_LOST' : 'NOT_SUBMITTED',
+          message,
+          { cause },
+        );
+      const abort = () => {
+        const pending = waiting.get(id);
+        if (pending) {
+          waiting.delete(id);
+          retire();
+          pending.failed(
+            fault(
+              submitted
+                ? 'Request cancelled; completion is unknown'
+                : 'Request cancelled before submission',
+            ),
+          );
+        }
+      };
       const deadline = setTimeout(() => {
         if (waiting.delete(id)) {
           retire();
+          signal?.removeEventListener('abort', abort);
           failed(
-            new Error(
+            fault(
               submitted
-                ? `"${type}" was not answered within ${askTimeoutMs}ms; it may still have been acted on`
+                ? `"${type}" was not answered within ${timeoutMs}ms; it may still have been acted on`
                 : `"${type}" expired before submission; nothing was submitted`,
             ),
           );
         }
-      }, askTimeoutMs);
+      }, timeoutMs);
       retainedBytes += bytes;
       waiting.set(id, {
         type,
         retire,
         answered: (outcome) => {
           clearTimeout(deadline);
+          signal?.removeEventListener('abort', abort);
           answered(outcome);
         },
         failed: (problem) => {
           clearTimeout(deadline);
+          signal?.removeEventListener('abort', abort);
           failed(problem);
         },
+        disconnected: (why) => {
+          clearTimeout(deadline);
+          signal?.removeEventListener('abort', abort);
+          failed(fault(why));
+        },
       });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) {
+        physical = true;
+        abort();
+        return;
+      }
       try {
         if (
           live === socket &&
@@ -529,8 +614,9 @@ export function openEventStream(options: EventStreamOptions): EventStream {
               if (waiting.delete(id)) {
                 retire();
                 clearTimeout(deadline);
+                signal?.removeEventListener('abort', abort);
                 failed(
-                  new Error(
+                  fault(
                     submitted
                       ? 'Request transfer failed; completion is unknown'
                       : 'Request transfer failed before submission',
@@ -550,9 +636,8 @@ export function openEventStream(options: EventStreamOptions): EventStream {
         physical = true;
         if (waiting.delete(id)) retire();
         clearTimeout(deadline);
-        failed(
-          trouble instanceof Error ? trouble : new Error(errorMessage(trouble)),
-        );
+        signal?.removeEventListener('abort', abort);
+        failed(fault(errorMessage(trouble), trouble));
       }
     });
   }

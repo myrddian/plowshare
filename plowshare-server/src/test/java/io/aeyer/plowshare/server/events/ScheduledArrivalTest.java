@@ -57,7 +57,7 @@ class ScheduledArrivalTest {
     when(triggers.listening("daily")).thenReturn(List.of(a, b));
     when(firings.arrive("daily", fa.data(), "morning", AT, a, AT)).thenReturn(Optional.of(fa));
     when(firings.arrive("daily", fb.data(), "morning", AT, b, AT)).thenReturn(Optional.of(fb));
-    var recorded = intake.record("daily", "morning", AT, AT);
+    var recorded = intake.record("daily", "morning", AT, AT, null);
     assertEquals(
         List.of(new ScheduledArrival.Arrival(fa, a), new ScheduledArrival.Arrival(fb, b)),
         recorded);
@@ -82,7 +82,7 @@ class ScheduledArrivalTest {
     var unmatched = firing("unmatched", null);
     when(firings.arrive("daily", unmatched.data(), "morning", AT, null, AT))
         .thenReturn(Optional.of(unmatched));
-    var recorded = intake.record("daily", "morning", AT, AT);
+    var recorded = intake.record("daily", "morning", AT, AT, null);
     assertEquals(List.of(new ScheduledArrival.Arrival(unmatched, null)), recorded);
     intake.dispatch(recorded);
     verifyNoInteractions(dispatcher);

@@ -652,6 +652,17 @@ body {
 
 .nothing { margin: .6rem 0; color: var(--dim); font-style: italic; }
 .trouble { margin: .4rem 0; color: var(--refused); }
+.goal-list { display: grid; gap: .75rem; margin: .75rem 0; }
+.goal-row, .goal-detail:not(:empty) {
+  padding: .75rem;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+}
+.goal-row > h3, .goal-detail > h3 { margin: .1rem 0 .5rem; white-space: pre-wrap; }
+.goal-row > button, .goal-detail > button, .goal-pages > button { margin: .4rem .5rem .2rem 0; }
+.goal-detail:not(:empty), .goal-history:not(:empty) { margin-top: 1rem; }
+.goal-evidence { white-space: pre-wrap; }
 .field { display: flex; gap: .6rem; }
 .field .label { flex: 0 0 8rem; text-align: right; color: var(--dim); }
 .field .value { min-width: 0; overflow-wrap: anywhere; }

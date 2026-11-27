@@ -9,6 +9,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -53,7 +55,7 @@ class RelayEventPublicationTest {
 
   /** Teaches a mocked broker to accept a registration, a subscription and one append. */
   private void answerBroker(Relay broker, long position, Relay.Read read) {
-    when(broker.registerTopic(any(), any(), any()))
+    when(broker.registerOwnedTopic(any(), any(), any(), any()))
         .thenAnswer(
             call ->
                 new Relay.Topic(
@@ -253,7 +255,12 @@ class RelayEventPublicationTest {
     serving(
         new Relay.Read(new Relay.Subscription(subscription, 1, AT), Optional.empty(), List.of()));
     publication.fire("daily", new EventPayload.Empty(), "enzo");
-    verify(relay).registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    verify(relay)
+        .registerOwnedTopic(
+            topic,
+            RelayPayload.Kind.TEXT,
+            Relay.Policy.systemDefault(),
+            RelayTopicOwnership.internal(Owner.EVENTS));
     assertEquals(Relay.SystemScope.SERVER, topic.scope());
   }
 

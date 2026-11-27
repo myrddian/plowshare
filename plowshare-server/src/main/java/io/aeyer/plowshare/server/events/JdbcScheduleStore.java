@@ -6,12 +6,16 @@ import io.aeyer.plowshare.server.relay.Relay;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * The schedules table, and the compare-and-set that makes a tick one server's. A schedule is owned
@@ -21,31 +25,7 @@ public class JdbcScheduleStore implements ScheduleStore {
 
   private static final String COLUMNS = "name, cron, zone, emits, paused, next_fire_at, defined_by";
 
-  // The repository rechecks execution authority when claiming, not just when a file is enrolled.
-  // A deleted source cannot fall through to the legacy administrator-only emitter rule.
-  private static final String EMITTER_AUTHORIZED =
-      """
-      EXISTS (
-        SELECT 1 FROM admins a
-        WHERE a.handle=schedules.defined_by AND a.enabled AND NOT a.bootstrap AND (
-          (NOT schedules.file_managed AND a.server_admin)
-          OR (schedules.file_managed AND EXISTS (
-            SELECT 1 FROM schedule_files f JOIN schedule_sources s ON s.id=f.source_id
-            WHERE f.internal_name=schedules.name AND f.status='active' AND s.account=a.handle
-              AND ((s.project_id IS NULL AND a.server_admin) OR EXISTS (
-                SELECT 1 FROM projects p WHERE p.id=s.project_id AND (
-                  p.personal_owner=a.handle OR (p.personal_owner IS NULL AND (
-                    (a.server_admin AND p.name NOT LIKE 'client:%' AND p.name NOT LIKE 'personal:%'
-                      AND p.name NOT LIKE 'contained:%')
-                    OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id=p.id
-                      AND m.handle=a.handle AND m.role IN ('CONTRIBUTOR','MANAGER'))
-                  ))
-                )
-              ))
-          ))
-        )
-      )
-      """;
+  private static final String EMITTER_AUTHORIZED = ScheduleSql.emitterAuthorized("schedules");
 
   private final JdbcTemplate jdbc;
 
@@ -151,11 +131,13 @@ public class JdbcScheduleStore implements ScheduleStore {
     return jdbc.query(
         "SELECT "
             + COLUMNS
+            + ", (SELECT f.generation FROM schedule_files f"
+            + " WHERE schedules.file_managed AND f.internal_name=schedules.name) AS file_generation"
             + " FROM schedules"
             + " WHERE NOT paused AND "
             + EMITTER_AUTHORIZED
             + " AND next_fire_at <= ? ORDER BY next_fire_at, name",
-        JdbcScheduleStore::row,
+        (row, index) -> JdbcScheduleStore.row(row, row.getObject("file_generation", UUID.class)),
         Timestamp.from(now));
   }
 
@@ -196,11 +178,21 @@ public class JdbcScheduleStore implements ScheduleStore {
   }
 
   @Override
-  public Optional<Relay.Scope> claimPublication(ScheduleRecord selected, Instant following) {
+  public Optional<Claim> claimPublication(ScheduleRecord selected, Instant following) {
     java.util.Objects.requireNonNull(selected, "selected schedule");
     java.util.Objects.requireNonNull(following, "following fire time");
     if (!following.isAfter(selected.nextFireAt()))
       throw new IllegalArgumentException("the next schedule occurrence must move forward");
+    if (selected.fileGeneration() != null) {
+      if (!TransactionSynchronizationManager.isActualTransactionActive())
+        throw new IllegalStateException("A managed schedule claim requires a transaction");
+      // Every reconciliation that changes the file generation writes this schedule row first.
+      // A separate statement gets a fresh READ COMMITTED snapshot after any waiting editor,
+      // including when an input-only edit left every timing column unchanged.
+      if (jdbc.queryForList(
+              "SELECT name FROM schedules WHERE name=? FOR UPDATE", String.class, selected.name())
+          .isEmpty()) return Optional.empty();
+    }
     // Matching timing alone is insufficient: a file/legacy edit can keep the same due time
     // while changing the event or owner. Return only the scope of the definition actually claimed.
     return jdbc
@@ -209,19 +201,27 @@ public class JdbcScheduleStore implements ScheduleStore {
         WITH claimed AS (
           UPDATE schedules SET next_fire_at=?
           WHERE name=? AND next_fire_at=? AND cron=? AND zone=? AND emits=? AND defined_by=?
+            AND (SELECT f.generation FROM schedule_files f
+                WHERE schedules.file_managed AND f.internal_name=schedules.name)
+                IS NOT DISTINCT FROM ?::uuid
             AND NOT paused AND
         """
                 + EMITTER_AUTHORIZED
                 + """
-          RETURNING name,file_managed
+          RETURNING name,file_managed,cron,emits
         )
-        SELECT s.project_id FROM claimed c
+        SELECT s.project_id,b.generation AS goal_generation,f.definition->>'zone' AS file_zone
+        FROM claimed c
         LEFT JOIN schedule_files f ON c.file_managed AND f.internal_name=c.name
         LEFT JOIN schedule_sources s ON s.id=f.source_id
+        LEFT JOIN goal_schedule_bindings b ON b.schedule=f.internal_name AND NOT b.paused
+          AND c.emits=f.internal_name AND c.cron=f.definition->>'cron'
         """,
             (row, index) -> {
               Long project = row.getObject("project_id", Long.class);
-              return project == null ? Relay.SystemScope.SERVER : new Relay.ProjectScope(project);
+              Relay.Scope scope =
+                  project == null ? Relay.SystemScope.SERVER : new Relay.ProjectScope(project);
+              return new Claim(scope, goalGeneration(row, selected.zone()));
             },
             Timestamp.from(following),
             selected.name(),
@@ -229,12 +229,31 @@ public class JdbcScheduleStore implements ScheduleStore {
             selected.cron(),
             selected.zone(),
             selected.emits(),
-            selected.definedBy())
+            selected.definedBy(),
+            selected.fileGeneration())
         .stream()
         .findFirst();
   }
 
+  private static UUID goalGeneration(ResultSet row, String runtimeZone) throws SQLException {
+    UUID generation = row.getObject("goal_generation", UUID.class);
+    if (generation == null) return null;
+    String fileZone = row.getString("file_zone");
+    if (fileZone == null) return null;
+    try {
+      // Legacy admin controls can alter the runtime row without reconciling its file. They
+      // still fire under their existing contract but cannot mint evidence for a Goal binding.
+      return runtimeZone.equals(ZoneId.of(fileZone).getId()) ? generation : null;
+    } catch (DateTimeException invalid) {
+      return null;
+    }
+  }
+
   private static ScheduleRecord row(ResultSet rs, int n) throws SQLException {
+    return row(rs, null);
+  }
+
+  private static ScheduleRecord row(ResultSet rs, UUID generation) throws SQLException {
     return new ScheduleRecord(
         rs.getString("name"),
         rs.getString("cron"),
@@ -242,6 +261,7 @@ public class JdbcScheduleStore implements ScheduleStore {
         rs.getString("emits"),
         rs.getBoolean("paused"),
         rs.getObject("next_fire_at", OffsetDateTime.class).toInstant(),
-        rs.getString("defined_by"));
+        rs.getString("defined_by"),
+        generation);
   }
 }

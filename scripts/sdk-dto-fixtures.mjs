@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { hostedReplyMatches } from '../sdk/typescript/build/operations/hosted-tool-scopes.js';
+import { resultOf } from '../sdk/typescript/build/operations/direct.js';
 /** Shared boundary examples, checked against the canonical SDK before native tests. */
 import {
   decodePayload,
@@ -799,6 +800,155 @@ for (const operation of ['schedule.list', 'schedule.files']) {
     {limit:1.5}, {limit:'50'}, {offset:50}]) input(operation,value,false);
 }
 
+// Standing Goal Agents opt into batching and remove listeners with a retained versioned receipt.
+const standingGoal = {
+  goal: '00000000-0000-0000-0000-000000000001',
+  conversation: 'cnv_Goal',
+};
+const listener = {
+  ...standingGoal,
+  topic: 'news.feed',
+  generation: '00000000-0000-0000-0000-000000000002',
+};
+input('message.listen', listener, true);
+for (const batch of [
+  {batchCount: 2, maxDelaySeconds: 1},
+  {batchCount: 16, maxDelaySeconds: 86400},
+]) input('message.listen', {...listener, ...batch}, true);
+for (const batch of [
+  {batchCount: 8},
+  {maxDelaySeconds: 60},
+  {batchCount: null, maxDelaySeconds: null},
+  {batchCount: 1, maxDelaySeconds: 60},
+  {batchCount: 17, maxDelaySeconds: 60},
+  {batchCount: 8, maxDelaySeconds: 0},
+  {batchCount: 8, maxDelaySeconds: 86401},
+  {batchCount: 8, maxDelaySeconds: 1.5},
+]) input('message.listen', {...listener, ...batch}, false);
+const goalControl = {
+  ...standingGoal,
+  version: 4,
+  requestId: '00000000-0000-0000-0000-000000000003',
+};
+const binding = '00000000-0000-0000-0000-000000000004';
+const unsubscribe = {...goalControl, binding};
+input('message.unlisten', unsubscribe, true);
+for (const change of [
+  {binding: null},
+  {binding: '00000000-0000-0000-0000-000000000000'},
+  {version: 0},
+  {version: 2147483648},
+  {topic: 'news.feed'},
+]) input('message.unlisten', {...unsubscribe, ...change}, false);
+const unlistenReceipt = {goal: standingGoal.goal, binding, version: 5, requestId: goalControl.requestId};
+result('message.unlisten', {...unlistenReceipt, future: true}, true);
+for (const change of [
+  {requestId: 'invalid'},
+  {goal: '00000000-0000-0000-0000-000000000000'},
+  {version: 0},
+  {version: 5.5},
+]) result('message.unlisten', {...unlistenReceipt, ...change}, false);
+const question = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+const answerReceipt = {
+  goal: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  conversation: standingGoal.conversation,
+  question,
+  requestId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+};
+const answerRequest = {...answerReceipt, answer: '  Use the approved dataset.\n'};
+input('goal.answer', answerRequest, true);
+// Java whitespace excludes nonbreaking spaces and includes the ASCII separators.
+input('goal.answer', {...answerRequest, answer: '\u2007'}, true);
+for (const change of [
+  {goal: '00000000-0000-0000-0000-000000000000'},
+  {conversation: 'cnv_Goal\n'},
+  {question: '00000000-0000-0000-0000-000000000000'},
+  {question: null},
+  {question: question + '\n'},
+  {requestId: 'invalid'},
+  {answer: ''},
+  {answer: '\t\u001c\u2008\u3000'},
+  {answer: 'data\0set'},
+  {answer: null},
+  {version: 5},
+]) input('goal.answer', {...answerRequest, ...change}, false);
+const {question: omittedQuestion, ...missingQuestion} = answerRequest;
+input('goal.answer', missingQuestion, false);
+result('goal.answer', {...answerReceipt, future: true}, true);
+for (const change of [
+  {goal: answerReceipt.goal.toUpperCase()},
+  {conversation: 'cnv_Goal\n'},
+  {question: null},
+  {requestId: '00000000-0000-0000-0000-000000000000'},
+]) result('goal.answer', {...answerReceipt, ...change}, false);
+input('conversation.goal.resume', goalControl, true);
+for (const maxModelCalls of [1, 1000000])
+  input('conversation.goal.resume', {...goalControl, maxModelCalls}, true);
+for (const maxModelCalls of [0, 1.5, 1000001, null, '100'])
+  input('conversation.goal.resume', {...goalControl, maxModelCalls}, false);
+
+const waitingGoal = {
+  ...standingGoal,
+  agent: 'goal_worker',
+  objective: 'Check the report',
+  criteria: null,
+  state: 'WAITING',
+  version: 4,
+  activations: 1,
+  maxActivations: 8,
+  lastJob: 'job_1',
+  lastTurn: 1,
+  reason: null,
+  detail: 'Waiting for the dependency to settle',
+  modelCallsSpent: 1,
+  modelCallLimit: 8,
+};
+result('conversation.goal.get', waitingGoal, true);
+result('conversation.goal.get', {...waitingGoal, state: 'waiting'}, false);
+
+// Goal Agent discovery only exposes authorized, typed project snapshots.
+const discoveryGoal = {
+  goal: standingGoal.goal, project: 'fixture', conversation: standingGoal.conversation,
+  instance: 'ins_Goal', agent: 'goal_worker', objective: 'Check the report',
+  lifecycle: 'STANDING', state: 'WAITING', version: 4, readable: true,
+  reason: null, detail: 'Waiting for another event',
+  latestResult: {job:'job_Goal', turn: 1, summary: 'Report landed', evidence: ['report-v1']},
+  nextScheduleAt: '2026-01-01T00:01:00Z',
+  schedules: [{schedule:'daily', generation:binding, paused:false, nextFireAt:'2026-01-01T00:01:00Z'}],
+  relayListeners: [{binding, topic:'news.feed', generation:binding, failure:null,
+    pendingBatch:{id:binding,state:'READY',memberCount:2,deadline:'2026-01-01T00:01:00Z'}}],
+  moreSchedules: false, moreRelayListeners: false,
+};
+const restrictedGoal = {
+  ...discoveryGoal, readable:false, agent:null, objective:null, detail:null,
+  latestResult:null, nextScheduleAt:null, schedules:[], relayListeners:[],
+};
+result('goal.status', {...discoveryGoal, future: true}, true);
+result('goal.status', restrictedGoal, true);
+result('goal.status', {...restrictedGoal, objective:'private'}, false);
+result('goal.status', {...restrictedGoal, moreSchedules:true}, false);
+result('goal.status', {...discoveryGoal, nextScheduleAt:'tomorrow'}, false);
+result('goal.status', {...discoveryGoal, latestResult:{...discoveryGoal.latestResult, evidence:[]}}, false);
+result('goal.status', {...discoveryGoal, latestResult:{...discoveryGoal.latestResult, evidence:['x'.repeat(501)]}}, false);
+result('goal.status', {...discoveryGoal, relayListeners:[{...discoveryGoal.relayListeners[0], topic:null}]}, true);
+result('goal.status', {...discoveryGoal, relayListeners:[{...discoveryGoal.relayListeners[0], topic:'News!'}]}, false);
+result('goal.list', {goals:[discoveryGoal],next:discoveryGoal.goal}, true);
+result('goal.list', {goals:[],next:null}, true);
+result('goal.list', {goals:Array(51).fill(discoveryGoal),next:null}, false);
+result('goal.receipt', {goal:discoveryGoal.goal,conversation:discoveryGoal.conversation,
+  instance:discoveryGoal.instance,version:1,requestId:answerReceipt.requestId}, true);
+input('goal.list', {project:'fixture',after:discoveryGoal.goal.toUpperCase(),limit:50}, true);
+input('goal.list', {project:'fixture'}, true);
+for (const change of [
+  {project:''}, {project:' fixture '}, {project:null}, {after:null}, {after:'wrong'},
+  {after:'00000000-0000-0000-0000-000000000000'}, {limit:null}, {limit:0},
+  {limit:51}, {limit:'2'}, {limit:1.5}, {conversation:'cnv_Goal'},
+]) input('goal.list', {project:'fixture',...change}, false);
+input('goal.status', {project:'fixture',goal:discoveryGoal.goal}, true);
+input('goal.status', {goal:discoveryGoal.goal}, false);
+input('goal.receipt', {project:'fixture',requestId:answerReceipt.requestId}, true);
+input('goal.receipt', {project:'fixture',requestId:'bad'}, false);
+
 // Application publications choose a category, never their Manager recipients.
 const inboxPublication = {
   project: 'network-privacy-watch',
@@ -846,6 +996,113 @@ if (process.argv.includes('--check')) {
 console.log('Canonical SDK DTO cases verified:', cases.length);
 
 // Coordinate fixtures supplement schema cases with structurally valid foreign replies.
+const goalListenerCorrelations = [
+  {operation: 'message.unlisten', request: unsubscribe, reply: unlistenReceipt, valid: true},
+];
+const uppercaseGoal = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const uppercaseBinding = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+const uppercaseRequest = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+goalListenerCorrelations.push({
+  operation: 'message.unlisten',
+  request: {
+    ...unsubscribe, goal: uppercaseGoal.toUpperCase(), binding: uppercaseBinding.toUpperCase(),
+    requestId: uppercaseRequest.toUpperCase(),
+  },
+  reply: {...unlistenReceipt, goal: uppercaseGoal, binding: uppercaseBinding, requestId: uppercaseRequest},
+  valid: true,
+});
+for (const change of [
+  {goal: uppercaseGoal},
+  {binding: uppercaseBinding},
+  {requestId: uppercaseRequest},
+  {version: unsubscribe.version},
+  {version: unlistenReceipt.version + 1},
+]) {
+  goalListenerCorrelations.push({
+    operation: 'message.unlisten', request: unsubscribe, reply: {...unlistenReceipt, ...change},
+    valid: false,
+  });
+}
+for (const row of goalListenerCorrelations) {
+  const payload = decodePayload(row.operation, row.request);
+  decodeReply(row.operation, row.reply);
+  const accepted = resultOf({type: row.operation, payload}, {code: 'OK', payload: row.reply}).kind === 'completed';
+  if (accepted !== row.valid) throw new Error('Invalid Goal Agent listener correlation fixture');
+}
+const goalListenerCorrelationPath = new URL('../test-support/contracts/goal-listener-correlations.json', import.meta.url);
+const goalListenerCorrelationContent = JSON.stringify(goalListenerCorrelations, null, 2) + '\n';
+if (process.argv.includes('--check')) {
+  if (readFileSync(goalListenerCorrelationPath, 'utf8') !== goalListenerCorrelationContent)
+    throw new Error('Stale Goal Agent listener correlation fixtures');
+} else writeFileSync(goalListenerCorrelationPath, goalListenerCorrelationContent);
+
+const answerCorrelations = [
+  {operation: 'goal.answer', request: answerRequest, reply: answerReceipt, valid: true},
+  {
+    operation: 'goal.answer',
+    request: {
+      ...answerRequest, goal: answerRequest.goal.toUpperCase(), question: question.toUpperCase(),
+      requestId: answerRequest.requestId.toUpperCase(),
+    },
+    reply: answerReceipt,
+    valid: true,
+  },
+];
+for (const change of [
+  {goal: uppercaseBinding},
+  {conversation: 'cnv_goal'},
+  {question: uppercaseBinding},
+  {requestId: uppercaseBinding},
+  {question: uppercaseBinding, Question: question},
+]) {
+  answerCorrelations.push({
+    operation: 'goal.answer', request: answerRequest, reply: {...answerReceipt, ...change},
+    valid: false,
+  });
+}
+for (const row of answerCorrelations) {
+  const payload = decodePayload(row.operation, row.request);
+  decodeReply(row.operation, row.reply);
+  const accepted = resultOf({type: row.operation, payload}, {code: 'OK', payload: row.reply}).kind === 'completed';
+  if (accepted !== row.valid) throw new Error('Invalid Goal Agent answer correlation fixture');
+}
+const answerCorrelationPath = new URL('../test-support/contracts/goal-answer-correlations.json', import.meta.url);
+const answerCorrelationContent = JSON.stringify(answerCorrelations, null, 2) + '\n';
+if (process.argv.includes('--check')) {
+  if (readFileSync(answerCorrelationPath, 'utf8') !== answerCorrelationContent)
+    throw new Error('Stale Goal Agent answer correlation fixtures');
+} else writeFileSync(answerCorrelationPath, answerCorrelationContent);
+
+const discoveryReply = {goal:discoveryGoal.goal,conversation:discoveryGoal.conversation,
+  instance:discoveryGoal.instance,version:1,requestId:answerReceipt.requestId};
+const listRequest = {project: discoveryGoal.project};
+const pages = {goals: [discoveryGoal], next: discoveryGoal.goal};
+const statusRequest = {project: discoveryGoal.project, goal: discoveryGoal.goal.toUpperCase()};
+const receiptRequest = {project: discoveryGoal.project, requestId: discoveryReply.requestId.toUpperCase()};
+const discoveryCorrelations = [
+  {operation:'goal.list', request:listRequest, reply:pages, valid:true},
+  {operation:'goal.list', request:{...listRequest,project:'foreign'}, reply:pages, valid:false},
+  {operation:'goal.list', request:{...listRequest,after:discoveryGoal.goal.toUpperCase()}, reply:pages, valid:false},
+  {operation:'goal.list', request:{...listRequest,limit:1}, reply:{goals:[discoveryGoal,{...discoveryGoal,goal:binding}],next:null}, valid:false},
+  {operation:'goal.status', request:statusRequest, reply:discoveryGoal, valid:true},
+  {operation:'goal.status', request:{...statusRequest,project:'foreign'}, reply:discoveryGoal, valid:false},
+  {operation:'goal.status', request:statusRequest, reply:{...discoveryGoal,goal:binding,Goal:discoveryGoal.goal}, valid:false},
+  {operation:'goal.receipt', request:receiptRequest, reply:discoveryReply, valid:true},
+  {operation:'goal.receipt', request:receiptRequest, reply:{...discoveryReply,requestId:binding,RequestId:discoveryReply.requestId}, valid:false},
+];
+for (const row of discoveryCorrelations) {
+  const payload = decodePayload(row.operation, row.request);
+  decodeReply(row.operation, row.reply);
+  const accepted = resultOf({type: row.operation, payload}, {code: 'OK', payload: row.reply}).kind === 'completed';
+  if (accepted !== row.valid) throw new Error('Invalid Goal Agent discovery correlation fixture');
+}
+const discoveryCorrelationPath = new URL('../test-support/contracts/goal-discovery-correlations.json', import.meta.url);
+const discoveryCorrelationContent = JSON.stringify(discoveryCorrelations, null, 2) + '\n';
+if (process.argv.includes('--check')) {
+  if (readFileSync(discoveryCorrelationPath, 'utf8') !== discoveryCorrelationContent)
+    throw new Error('Stale Goal Agent discovery correlation fixtures');
+} else writeFileSync(discoveryCorrelationPath, discoveryCorrelationContent);
+
 const groupCorrelations=[{operation:'relay.group.delete',request:deleteGroup,reply:{...deleteGroup,removed:true},valid:true}];
 for(const key of ['project','topic','group','generation']) {
   const request={...deleteGroup,[key]:key==='generation'?'99999999-9999-9999-9999-999999999999':'foreign'};

@@ -821,6 +821,43 @@ export const SHAPES: Record<
     ['conversation'],
     ['agent', 'session', 'maxTurns', 'noTurnCap', 'maxModelCalls'],
   ],
+  'goal.answer': [
+    ['goal', 'conversation', 'question', 'requestId', 'answer'],
+    [],
+  ],
+  'goal.start': [['project', 'agent', 'objective', 'requestId'], ['criteria']],
+  'goal.list': [['project'], ['after', 'limit']],
+  'goal.status': [['project', 'goal'], []],
+  'goal.receipt': [['project', 'requestId'], []],
+  'goal.sources': [
+    ['goal', 'conversation'],
+    ['prefix', 'kind', 'after', 'limit'],
+  ],
+  'message.listen': [
+    ['goal', 'conversation', 'topic', 'generation'],
+    ['batchCount', 'maxDelaySeconds'],
+  ],
+  'message.unlisten': [
+    ['goal', 'conversation', 'binding', 'version', 'requestId'],
+    [],
+  ],
+  'conversation.goal.start': [
+    ['conversation', 'requestId', 'agent', 'objective'],
+    ['criteria', 'maxActivations'],
+  ],
+  'conversation.goal.get': [['conversation'], ['requestId']],
+  'conversation.goal.pause': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    [],
+  ],
+  'conversation.goal.resume': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    ['maxActivations', 'maxModelCalls'],
+  ],
+  'conversation.goal.cancel': [
+    ['conversation', 'requestId', 'goal', 'version'],
+    [],
+  ],
   'agent.list': [[], ['project']],
   'agent.define': [
     ['name', 'text'],
@@ -1164,6 +1201,49 @@ export function commandProblem(
       !/^[A-Za-z0-9_-]{1,128}$/u.test(body['invocationId']))
   )
     return 'Invalid retained invocation ID';
+  if (
+    type === 'goal.list' ||
+    type === 'goal.status' ||
+    type === 'goal.receipt'
+  ) {
+    const project = body['project'];
+    if (
+      typeof project !== 'string' ||
+      !project ||
+      project.length > 1024 ||
+      project !== project.trim() ||
+      /[\p{Cc}\u2028\u2029]/u.test(project)
+    )
+      return 'Supply an exact project';
+    const key =
+      type === 'goal.list'
+        ? 'after'
+        : type === 'goal.status'
+          ? 'goal'
+          : 'requestId';
+    const value = body[key];
+    if (
+      (type !== 'goal.list' || Object.hasOwn(body, key)) &&
+      (typeof value !== 'string' ||
+        value.length !== 36 ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu.test(value) ||
+        value === '00000000-0000-0000-0000-000000000000')
+    )
+      return `Supply a nonzero UUID for ${key}`;
+    if (Object.hasOwn(body, 'limit') && !goalInteger(body['limit'], 1, 50))
+      return 'Goal list limit must be 1 through 50';
+    return undefined;
+  }
+  if (type.startsWith('conversation.goal.'))
+    return goalPayloadProblem(type, body, required);
+  if (
+    type === 'goal.answer' ||
+    type === 'goal.start' ||
+    type === 'goal.sources' ||
+    type === 'message.listen' ||
+    type === 'message.unlisten'
+  )
+    return dedicatedGoalPayloadProblem(type, body, required);
   if (type === 'approval.policy.get' || type === 'approval.policy.save')
     return problem(type, body);
   if (
@@ -1858,4 +1938,187 @@ function pricingProblem(body: Record<string, unknown>): string | undefined {
       previous = tier.fromInputTokens;
     }
   }
+}
+
+function goalPayloadProblem(
+  type: ExtendedOperation,
+  body: Record<string, unknown>,
+  required: readonly string[],
+): string | undefined {
+  for (const key of required)
+    if (body[key] == null) return `Supply ${key} for ${type}`;
+  const conversation = body['conversation'];
+  const locator = (value: unknown) =>
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 1024 &&
+    !/\p{Cc}/u.test(value);
+  if (!locator(conversation)) return 'Supply an exact conversation identifier';
+  for (const key of ['goal', 'requestId']) {
+    const value = body[key];
+    if (
+      value != null &&
+      (typeof value !== 'string' ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value) ||
+        value === '00000000-0000-0000-0000-000000000000')
+    )
+      return `${key} must be a nonzero UUID`;
+  }
+  for (const key of ['version', 'maxActivations']) {
+    const value = body[key];
+    if (
+      value != null &&
+      (typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 1 ||
+        value > (key === 'version' ? 2147483647 : 1000))
+    )
+      return `${key} must be a positive integer within its supported range`;
+  }
+  if (
+    'maxModelCalls' in body &&
+    !goalInteger(body['maxModelCalls'], 1, 1000000)
+  )
+    return 'maxModelCalls must be an integer from 1 through 1000000';
+  if (type === 'conversation.goal.start') {
+    if (!locator(body['agent'])) return 'Supply an exact agent identifier';
+    for (const [key, limit] of Object.entries({
+      objective: 16000,
+      criteria: 8000,
+    })) {
+      const value = body[key];
+      if (
+        value != null &&
+        (typeof value !== 'string' ||
+          !value.trim() ||
+          value.length > limit ||
+          value.includes(String.fromCharCode(0)))
+      )
+        return `${key} must be nonblank text of at most ${limit} characters`;
+    }
+  }
+  return undefined;
+}
+
+function goalInteger(value: unknown, min: number, max: number): boolean {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+  );
+}
+
+// These ranges match Character.isWhitespace, as used by String.isBlank on the server.
+export const GOAL_ANSWER_NONBLANK =
+  '[^\\x09-\\x0d\\x1c-\\x20' +
+  '\u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]';
+const goalAnswerNonblank = new RegExp(GOAL_ANSWER_NONBLANK, 'u');
+
+function dedicatedGoalPayloadProblem(
+  type: ExtendedOperation,
+  body: Record<string, unknown>,
+  required: readonly string[],
+): string | undefined {
+  for (const key of required)
+    if (body[key] == null) return `Supply ${key} for ${type}`;
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/iu;
+  for (const key of [
+    'requestId',
+    'goal',
+    'generation',
+    'binding',
+    'question',
+  ]) {
+    const value = body[key];
+    if (
+      value !== undefined &&
+      (typeof value !== 'string' ||
+        !uuid.test(value) ||
+        value === '00000000-0000-0000-0000-000000000000')
+    )
+      return `Supply a nonzero UUID for ${key}`;
+  }
+  if (type === 'goal.start') {
+    for (const key of ['project', 'agent']) {
+      const value = body[key];
+      if (
+        typeof value !== 'string' ||
+        !value ||
+        value.length > 1024 ||
+        value !== value.trim() ||
+        /\p{Cc}/u.test(value)
+      )
+        return `Supply an exact ${key}`;
+    }
+    for (const [key, max] of [
+      ['objective', 16000],
+      ['criteria', 8000],
+    ] as const) {
+      const value = body[key];
+      if (
+        value != null &&
+        (typeof value !== 'string' ||
+          !value.trim() ||
+          value.length > max ||
+          value.includes('\0'))
+      )
+        return `Supply bounded nonblank ${key}`;
+    }
+    return undefined;
+  }
+  const conversation = body['conversation'];
+  if (
+    typeof conversation !== 'string' ||
+    !/^cnv_[A-Za-z0-9]+$/u.test(conversation) ||
+    conversation.length > 128
+  )
+    return 'Supply the dedicated Goal Agent conversation';
+  if (type === 'goal.answer') {
+    const answer = body['answer'];
+    return typeof answer === 'string' &&
+      answer.length <= 16000 &&
+      !answer.includes('\0') &&
+      !/\p{Cs}/u.test(answer) &&
+      goalAnswerNonblank.test(answer)
+      ? undefined
+      : 'Supply a bounded nonblank answer';
+  }
+  if (type === 'message.unlisten') {
+    return goalInteger(body['version'], 1, 2147483647)
+      ? undefined
+      : 'version must be a positive integer within its supported range';
+  }
+  if (type === 'message.listen') {
+    const hasCount = Object.hasOwn(body, 'batchCount');
+    const hasDelay = Object.hasOwn(body, 'maxDelaySeconds');
+    if (hasCount !== hasDelay)
+      return 'Supply batchCount and maxDelaySeconds together';
+    if (hasCount && !goalInteger(body['batchCount'], 2, 16))
+      return 'batchCount must be an integer from 2 through 16';
+    if (hasDelay && !goalInteger(body['maxDelaySeconds'], 1, 86400))
+      return 'maxDelaySeconds must be an integer from 1 through 86400';
+  }
+  const topic = /^[a-z][a-z0-9]*([._-][a-z0-9]+)*$/u;
+  for (const key of ['prefix', 'after', 'topic']) {
+    const value = body[key];
+    if (
+      value != null &&
+      (typeof value !== 'string' ||
+        value.length > 1024 ||
+        !topic.test(key === 'prefix' ? value.replace(/[._-]$/u, '') : value))
+    )
+      return `Supply an exact Relay ${key}`;
+  }
+  const limit = body['limit'];
+  if (
+    limit != null &&
+    (typeof limit !== 'number' ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 100)
+  )
+    return 'Goal Relay discovery limit must be 1 through 100';
+  return undefined;
 }

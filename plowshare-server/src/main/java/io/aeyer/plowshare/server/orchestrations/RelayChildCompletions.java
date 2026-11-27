@@ -4,6 +4,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -57,7 +59,11 @@ public final class RelayChildCompletions implements ChildCompletionConsumer, Aut
         new Relay.TopicKey(
             project == 0 ? Relay.SystemScope.SERVER : new Relay.ProjectScope(project),
             ChildCompletions.TOPIC);
-    relay.registerTopic(topic, RelayPayload.Kind.LIFECYCLE, Relay.Policy.systemDefault());
+    relay.registerOwnedTopic(
+        topic,
+        RelayPayload.Kind.LIFECYCLE,
+        Relay.Policy.systemDefault(),
+        RelayTopicOwnership.internal(Owner.ORCHESTRATIONS));
     var subscription = new Relay.SubscriptionKey(topic, ChildCompletions.GROUP);
     relay.subscribe(subscription, Relay.Start.OLDEST_RETAINED);
     var acquired =

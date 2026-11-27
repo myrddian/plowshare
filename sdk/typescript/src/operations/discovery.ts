@@ -60,6 +60,14 @@ const MUTATIONS = new Set<string>([
   'conversation.open',
   'conversation.open.ex',
   'conversation.lifecycle',
+  'goal.start',
+  'goal.answer',
+  'message.listen',
+  'message.unlisten',
+  'conversation.goal.start',
+  'conversation.goal.pause',
+  'conversation.goal.resume',
+  'conversation.goal.cancel',
   'agent.define',
   'job.cancel',
   'job.limits',
@@ -235,6 +243,35 @@ const examples: Record<string, unknown> = {
     agent: 'reviewer',
     makeDefault: true,
     requestId: '00000000-0000-0000-0000-000000000001',
+  },
+  'message.listen': {
+    goal: '00000000-0000-0000-0000-000000000001',
+    conversation: 'cnv_Goal',
+    topic: 'news.feed',
+    generation: '00000000-0000-0000-0000-000000000002',
+    batchCount: 8,
+    maxDelaySeconds: 60,
+  },
+  'goal.answer': {
+    goal: '00000000-0000-0000-0000-000000000001',
+    conversation: 'cnv_Goal',
+    question: '00000000-0000-0000-0000-000000000003',
+    requestId: '00000000-0000-0000-0000-000000000004',
+    answer: 'Use the approved dataset.',
+  },
+  'message.unlisten': {
+    goal: '00000000-0000-0000-0000-000000000001',
+    conversation: 'cnv_Goal',
+    binding: '00000000-0000-0000-0000-000000000003',
+    version: 2,
+    requestId: '00000000-0000-0000-0000-000000000004',
+  },
+  'conversation.goal.resume': {
+    goal: '00000000-0000-0000-0000-000000000001',
+    conversation: 'cnv_Goal',
+    version: 2,
+    requestId: '00000000-0000-0000-0000-000000000004',
+    maxModelCalls: 150,
   },
   'conversation.open': { project: 'my_project' },
   'conversation.open.ex': {
@@ -431,7 +468,11 @@ export function discovery(target = '') {
               )
             : [],
           defaults:
-            'Omitted paging and budget fields are server-owned. web.search requires pageSize, max, page.',
+            operation === 'message.listen'
+              ? 'Omit both batching fields for single-event delivery. Supply batchCount (2–16) and maxDelaySeconds (1–86400) together for batched delivery.'
+              : operation === 'conversation.goal.resume'
+                ? 'For a dedicated Goal Agent, maxModelCalls raises the absolute ceiling. Supply an integer from 1 through 1000000.'
+                : 'Omitted paging and budget fields are server-owned. web.search requires pageSize, max, page.',
           example:
             examples[operation] ?? sample(commandInput(operation, shape)),
         };

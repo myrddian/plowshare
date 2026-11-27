@@ -1,5 +1,7 @@
 package io.aeyer.plowshare.server.relay;
 
+import java.util.UUID;
+
 /** Atomic retirement for a domain's own subscription and empty topic; never a public authority. */
 public interface RelayRetirementRepository {
   /**
@@ -12,4 +14,8 @@ public interface RelayRetirementRepository {
 
   /** Removes a Personal Mailbox cursor under its owning subscription lock. */
   void retireMailboxCursor(Relay.SubscriptionKey owner);
+
+  /** Removes only a disarmed Goal binding's cursor under the caller's Goal row lock. */
+  void retireGoalCursor(
+      Relay.SubscriptionKey owner, UUID topicGeneration, UUID subscriptionGeneration);
 }

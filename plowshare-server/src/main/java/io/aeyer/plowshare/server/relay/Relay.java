@@ -25,6 +25,14 @@ public interface Relay {
    */
   Topic registerTopic(TopicKey key, RelayPayload.Kind kind, Policy initialPolicy);
 
+  /**
+   * Registers an owning subsystem and its Goal feed declaration with the topic generation. Only its
+   * trusted server registration supplies ownership. Repeating the declaration preserves existing
+   * policy and rejects conflicting claims.
+   */
+  Topic registerOwnedTopic(
+      TopicKey key, RelayPayload.Kind kind, Policy initialPolicy, RelayTopicOwnership ownership);
+
   /** Reads registered topic metadata without changing policy; an unavailable topic fails. */
   Topic topic(TopicKey key);
 
@@ -110,6 +118,13 @@ public interface Relay {
    * acknowledging additional loss. Repeating a previously applied acknowledgement is harmless.
    */
   Subscription acknowledgeGap(SubscriptionKey key, long expiredThrough);
+
+  /** The exact subscribed group is no longer retained. */
+  final class SubscriptionUnavailable extends IllegalStateException {
+    public SubscriptionUnavailable() {
+      super("Relay subscription does not exist");
+    }
+  }
 
   /** Counts retained unread publications, separately reporting any expired gap. */
   Unread unread(SubscriptionKey key);

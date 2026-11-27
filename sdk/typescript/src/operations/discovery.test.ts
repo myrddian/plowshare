@@ -61,6 +61,9 @@ describe('offline command discovery', () => {
   });
   it.each([
     'information acquire',
+    'message listen',
+    'message unlisten',
+    'conversation goal resume',
     'agent run',
     'orchestration start',
     'admin account create',

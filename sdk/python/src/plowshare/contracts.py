@@ -81,6 +81,14 @@ class ConversationDto:
     conversation: str
 
 @dataclass(frozen=True, kw_only=True)
+class GoalControlDto:
+    """Validated fields of the GoalControl protocol contract."""
+    conversation: str
+    goal: str
+    request_id: str
+    version: float
+
+@dataclass(frozen=True, kw_only=True)
 class ConversationOpenRequestExDto:
     """Validated fields of the ConversationOpenRequestEx protocol contract."""
     external_conversation: str
@@ -90,6 +98,34 @@ class ConversationOpenRequestExDto:
     no_turn_cap: bool | Unset = UNSET
     project: str
     source: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAnswerRequestDto:
+    """Validated fields of the GoalAnswerRequest protocol contract."""
+    answer: str
+    conversation: str
+    goal: str
+    question: str
+    request_id: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalListRequestDto:
+    """Validated fields of the GoalListRequest protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
+    project: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalReceiptRequestDto:
+    """Validated fields of the GoalReceiptRequest protocol contract."""
+    project: str
+    request_id: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalStatusRequestDto:
+    """Validated fields of the GoalStatusRequest protocol contract."""
+    goal: str
+    project: str
 
 SchemaObjectEntry: TypeAlias = "None | str | float | Literal[False] | Literal[True] | Mapping[str, SchemaObjectEntry] | tuple[SchemaObjectEntry, ...]"
 
@@ -1596,6 +1632,27 @@ class ContextSnapshotDtoToolsItemDto:
     parameters: Mapping[str, ToolParameterSchemaEntry]
 
 @dataclass(frozen=True, kw_only=True)
+class ConversationGoalStatusDto:
+    """Validated fields of the ConversationGoalStatus protocol contract."""
+    activations: float
+    agent: str
+    conversation: str
+    criteria: TierDtoProject
+    detail: TierDtoProject
+    goal: str
+    last_job: TierDtoProject
+    last_turn: ScheduleDefinitionDtoLimitsDtoMaxModelCalls
+    max_activations: float
+    model_call_limit: ScheduleDefinitionDtoLimitsDtoMaxModelCalls
+    model_calls_spent: ScheduleDefinitionDtoLimitsDtoMaxModelCalls
+    objective: str
+    reason: ConversationGoalStatusDtoReason
+    state: Literal["READY", "RUNNING", "IDLE", "WAITING", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "COMPLETE", "CANCELLED"]
+    version: float
+
+ConversationGoalStatusDtoReason: TypeAlias = "None | Literal[\"OPERATOR_PAUSED\"] | Literal[\"ACTIVATION_LIMIT\"] | Literal[\"MODEL_ALLOWANCE\"] | Literal[\"NO_PROGRESS\"] | Literal[\"TURN_FAILED\"] | Literal[\"AUTHORITY_OR_SOURCE_CHANGED\"] | Literal[\"INELIGIBLE_CONVERSATION\"] | Literal[\"AGENT_BLOCKED\"] | Literal[\"UNCONFIRMED_TURN\"] | Literal[\"STOP_REQUESTED\"]"
+
+@dataclass(frozen=True, kw_only=True)
 class ConversationViewDto:
     """Validated fields of the ConversationView protocol contract."""
     id: str
@@ -1940,6 +1997,104 @@ class FileStoreOptionDto:
 class FileStoreCatalogDto:
     """Validated fields of the FileStoreCatalog protocol contract."""
     stores: tuple[FileStoreOptionDto, ...]
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAnswerReceiptDto:
+    """Validated fields of the GoalAnswerReceipt protocol contract."""
+    conversation: str
+    goal: str
+    question: str
+    request_id: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalResultDto:
+    """Validated fields of the GoalResult protocol contract."""
+    evidence: tuple[str, ...]
+    job: str
+    summary: str
+    turn: float
+
+@dataclass(frozen=True, kw_only=True)
+class GoalPendingBatchDto:
+    """Validated fields of the GoalPendingBatch protocol contract."""
+    deadline: str
+    id: str
+    member_count: float
+    state: Literal["READY", "OPEN"]
+
+@dataclass(frozen=True, kw_only=True)
+class GoalRelayWakeDto:
+    """Validated fields of the GoalRelayWake protocol contract."""
+    binding: str
+    failure: GoalRelayWakeDtoFailure
+    generation: str
+    pending_batch: GoalRelayWakeDtoPendingBatch
+    topic: TierDtoProject
+
+GoalRelayWakeDtoFailure: TypeAlias = "None | Literal[\"SOURCE_CHANGED\"] | Literal[\"RETENTION_GAP\"] | Literal[\"UNSUPPORTED_PUBLICATION\"]"
+
+GoalRelayWakeDtoPendingBatch: TypeAlias = "None | GoalPendingBatchDto"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalScheduleWakeDto:
+    """Validated fields of the GoalScheduleWake protocol contract."""
+    generation: str
+    next_fire_at: TierDtoProject
+    paused: bool
+    schedule: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalStatusDto:
+    """Validated fields of the GoalStatus protocol contract."""
+    agent: TierDtoProject
+    conversation: str
+    detail: TierDtoProject
+    goal: str
+    instance: str
+    latest_result: GoalStatusDtoLatestResult
+    lifecycle: Literal["AD_HOC", "STANDING"]
+    more_relay_listeners: bool
+    more_schedules: bool
+    next_schedule_at: TierDtoProject
+    objective: TierDtoProject
+    project: str
+    readable: bool
+    reason: ConversationGoalStatusDtoReason
+    relay_listeners: tuple[GoalRelayWakeDto, ...]
+    schedules: tuple[GoalScheduleWakeDto, ...]
+    state: Literal["READY", "RUNNING", "IDLE", "WAITING", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "COMPLETE", "CANCELLED"]
+    version: float
+
+GoalStatusDtoLatestResult: TypeAlias = "None | GoalResultDto"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalPageDto:
+    """Validated fields of the GoalPage protocol contract."""
+    goals: tuple[GoalStatusDto, ...]
+    next: TierDtoProject
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAgentStartedDto:
+    """Validated fields of the GoalAgentStarted protocol contract."""
+    conversation: str
+    goal: str
+    instance: str
+    request_id: str
+    version: float
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAgentSourcesDto:
+    """Validated fields of the GoalAgentSources protocol contract."""
+    goal: str
+    project: str
+    sources: tuple[GoalAgentSourcesDtoSourcesItemDto, ...]
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAgentSourcesDtoSourcesItemDto:
+    """Validated fields of the GoalAgentSourcesDtoSourcesItemDto protocol contract."""
+    generation: str
+    kind: Literal["TEXT", "EMPTY"]
+    topic: str
 
 @dataclass(frozen=True, kw_only=True)
 class InboxItemDto:
@@ -2890,6 +3045,22 @@ class MessageInstancesDto:
     offset: float
 
 @dataclass(frozen=True, kw_only=True)
+class GoalAgentListenerDto:
+    """Validated fields of the GoalAgentListener protocol contract."""
+    binding: str
+    generation: str
+    goal: str
+    topic: str
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAgentUnlistenReceiptDto:
+    """Validated fields of the GoalAgentUnlistenReceipt protocol contract."""
+    binding: str
+    goal: str
+    request_id: str
+    version: float
+
+@dataclass(frozen=True, kw_only=True)
 class OrchestrationAnsweredDto:
     """Validated fields of the OrchestrationAnswered protocol contract."""
     id: str
@@ -3418,7 +3589,7 @@ class ProviderCredentialStatusDto:
     generation: TierDtoProject
     key_id: TierDtoProject
     project: str
-    state: Literal["UNCERTAIN", "NONE", "PENDING", "READY", "REFRESHING", "REVOKED"]
+    state: Literal["UNCERTAIN", "READY", "NONE", "PENDING", "REFRESHING", "REVOKED"]
     subject: str
 
 @dataclass(frozen=True, kw_only=True)
@@ -3497,7 +3668,7 @@ class RelayEventDtoPayloadDto:
     blob: RelayEventDtoPayloadDtoBlob | Unset = UNSET
     emits: TierDtoProject
     fire_at: TierDtoProject
-    kind: Literal["EMPTY", "TEXT", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"]
+    kind: Literal["TEXT", "EMPTY", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"]
     lifecycle: RelayEventDtoPayloadDtoLifecycle | Unset = UNSET
     schedule: TierDtoProject
     text: TierDtoProject
@@ -3583,7 +3754,7 @@ class RelayTopicDto:
     """Validated fields of the RelayTopic protocol contract."""
     expired_through: str
     generation: TierDtoProject | Unset = UNSET
-    kind: Literal["EMPTY", "TEXT", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"]
+    kind: Literal["TEXT", "EMPTY", "BLOB", "SCHEDULE_DUE", "LIFECYCLE", "WAKE_REQUESTED"]
     max_records: TierDtoProject
     name: str
     retention_seconds: str
@@ -4549,6 +4720,32 @@ class ConversationFollowPayloadVariant2Dto:
     conversations: tuple[str, ...]
 
 @dataclass(frozen=True, kw_only=True)
+class ConversationGoalGetPayloadDto:
+    """Validated fields of the ConversationGoalGetPayloadDto protocol contract."""
+    conversation: str
+    request_id: TierDtoProject | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalResumePayloadDto:
+    """Validated fields of the ConversationGoalResumePayloadDto protocol contract."""
+    conversation: str
+    goal: str
+    max_activations: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    max_model_calls: float | Unset = UNSET
+    request_id: str
+    version: float
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalStartPayloadDto:
+    """Validated fields of the ConversationGoalStartPayloadDto protocol contract."""
+    agent: str
+    conversation: str
+    criteria: TierDtoProject | Unset = UNSET
+    max_activations: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    objective: str
+    request_id: str
+
+@dataclass(frozen=True, kw_only=True)
 class ConversationLatestPayloadDto:
     """Validated fields of the ConversationLatestPayloadDto protocol contract."""
     agent: str
@@ -4702,6 +4899,27 @@ class FiringListPayloadDto:
     offset: float | Unset = UNSET
     status: str | Unset = UNSET
     trigger: str | Unset = UNSET
+
+@dataclass(frozen=True, kw_only=True)
+class GoalSourcesPayloadDto:
+    """Validated fields of the GoalSourcesPayloadDto protocol contract."""
+    after: TierDtoProject | Unset = UNSET
+    conversation: str
+    goal: str
+    kind: GoalSourcesPayloadDtoKind | Unset = UNSET
+    limit: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    prefix: TierDtoProject | Unset = UNSET
+
+GoalSourcesPayloadDtoKind: TypeAlias = "None | Literal[\"TEXT\"] | Literal[\"EMPTY\"]"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalStartPayloadDto:
+    """Validated fields of the GoalStartPayloadDto protocol contract."""
+    agent: str
+    criteria: TierDtoProject | Unset = UNSET
+    objective: str
+    project: str
+    request_id: str
 
 @dataclass(frozen=True, kw_only=True)
 class InboxListPayloadDto:
@@ -5598,6 +5816,25 @@ class MessageInstancesPayloadDto:
     limit: float | Unset = UNSET
     offset: float | Unset = UNSET
     project: str
+
+@dataclass(frozen=True, kw_only=True)
+class MessageListenPayloadDto:
+    """Validated fields of the MessageListenPayloadDto protocol contract."""
+    batch_count: float | Unset = UNSET
+    conversation: str
+    generation: str
+    goal: str
+    max_delay_seconds: float | Unset = UNSET
+    topic: str
+
+@dataclass(frozen=True, kw_only=True)
+class MessageUnlistenPayloadDto:
+    """Validated fields of the MessageUnlistenPayloadDto protocol contract."""
+    binding: str
+    conversation: str
+    goal: str
+    request_id: str
+    version: float
 
 @dataclass(frozen=True, kw_only=True)
 class OrchestrationAnswerPayloadDto:
@@ -6951,6 +7188,53 @@ class ConversationFollowRequest(Request[None]):
     operation: ClassVar[str] = "conversation.follow"
 
 @dataclass(frozen=True, kw_only=True)
+class ConversationGoalCancelRequest(Request[ConversationGoalStatusDto]):
+    """Validated fields of the GoalControl protocol contract."""
+    conversation: str
+    goal: str
+    request_id: str
+    version: float
+    operation: ClassVar[str] = "conversation.goal.cancel"
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalGetRequest(Request[ConversationGoalStatusDto]):
+    """Validated fields of the ConversationGoalGetRequest protocol contract."""
+    conversation: str
+    request_id: TierDtoProject | Unset = UNSET
+    operation: ClassVar[str] = "conversation.goal.get"
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalPauseRequest(Request[ConversationGoalStatusDto]):
+    """Validated fields of the GoalControl protocol contract."""
+    conversation: str
+    goal: str
+    request_id: str
+    version: float
+    operation: ClassVar[str] = "conversation.goal.pause"
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalResumeRequest(Request[ConversationGoalStatusDto]):
+    """Validated fields of the ConversationGoalResumeRequest protocol contract."""
+    conversation: str
+    goal: str
+    max_activations: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    max_model_calls: float | Unset = UNSET
+    request_id: str
+    version: float
+    operation: ClassVar[str] = "conversation.goal.resume"
+
+@dataclass(frozen=True, kw_only=True)
+class ConversationGoalStartRequest(Request[ConversationGoalStatusDto]):
+    """Validated fields of the ConversationGoalStartRequest protocol contract."""
+    agent: str
+    conversation: str
+    criteria: TierDtoProject | Unset = UNSET
+    max_activations: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    objective: str
+    request_id: str
+    operation: ClassVar[str] = "conversation.goal.start"
+
+@dataclass(frozen=True, kw_only=True)
 class ConversationLatestRequest(Request[ConversationLatestResult]):
     """Validated fields of the ConversationLatestRequest protocol contract."""
     agent: str
@@ -7138,6 +7422,59 @@ class FiringListRequest(Request[tuple[FiringRecordDto, ...]]):
     status: str | Unset = UNSET
     trigger: str | Unset = UNSET
     operation: ClassVar[str] = "firing.list"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalAnswerRequest(Request[GoalAnswerReceiptDto]):
+    """Validated fields of the GoalAnswerRequest protocol contract."""
+    answer: str
+    conversation: str
+    goal: str
+    question: str
+    request_id: str
+    operation: ClassVar[str] = "goal.answer"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalListRequest(Request[GoalPageDto]):
+    """Validated fields of the GoalListRequest protocol contract."""
+    after: str | Unset = UNSET
+    limit: float | Unset = UNSET
+    project: str
+    operation: ClassVar[str] = "goal.list"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalReceiptRequest(Request[GoalAgentStartedDto]):
+    """Validated fields of the GoalReceiptRequest protocol contract."""
+    project: str
+    request_id: str
+    operation: ClassVar[str] = "goal.receipt"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalSourcesRequest(Request[GoalAgentSourcesDto]):
+    """Validated fields of the GoalSourcesRequest protocol contract."""
+    after: TierDtoProject | Unset = UNSET
+    conversation: str
+    goal: str
+    kind: GoalSourcesPayloadDtoKind | Unset = UNSET
+    limit: ScheduleDefinitionDtoLimitsDtoMaxModelCalls | Unset = UNSET
+    prefix: TierDtoProject | Unset = UNSET
+    operation: ClassVar[str] = "goal.sources"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalStartRequest(Request[GoalAgentStartedDto]):
+    """Validated fields of the GoalStartRequest protocol contract."""
+    agent: str
+    criteria: TierDtoProject | Unset = UNSET
+    objective: str
+    project: str
+    request_id: str
+    operation: ClassVar[str] = "goal.start"
+
+@dataclass(frozen=True, kw_only=True)
+class GoalStatusRequest(Request[GoalStatusDto]):
+    """Validated fields of the GoalStatusRequest protocol contract."""
+    goal: str
+    project: str
+    operation: ClassVar[str] = "goal.status"
 
 @dataclass(frozen=True, kw_only=True)
 class InboxListRequest(Request[InboxPageDto]):
@@ -8120,6 +8457,27 @@ class MessageInstancesRequest(Request[MessageInstancesDto]):
     offset: float | Unset = UNSET
     project: str
     operation: ClassVar[str] = "message.instances"
+
+@dataclass(frozen=True, kw_only=True)
+class MessageListenRequest(Request[GoalAgentListenerDto]):
+    """Validated fields of the MessageListenRequest protocol contract."""
+    batch_count: float | Unset = UNSET
+    conversation: str
+    generation: str
+    goal: str
+    max_delay_seconds: float | Unset = UNSET
+    topic: str
+    operation: ClassVar[str] = "message.listen"
+
+@dataclass(frozen=True, kw_only=True)
+class MessageUnlistenRequest(Request[GoalAgentUnlistenReceiptDto]):
+    """Validated fields of the MessageUnlistenRequest protocol contract."""
+    binding: str
+    conversation: str
+    goal: str
+    request_id: str
+    version: float
+    operation: ClassVar[str] = "message.unlisten"
 
 @dataclass(frozen=True, kw_only=True)
 class OrchestrationAnswerRequest(Request[OrchestrationAnsweredDto]):
@@ -9130,417 +9488,435 @@ _MODELS = {
     "shape103": IdDto,
     "shape104": ImageAdmissionRequestDto,
     "shape113": ConversationDto,
-    "shape124": ConversationOpenRequestExDto,
-    "shape199": OmitDto,
-    "shape203": DiscoverySelectionDto,
-    "shape211": InformationFilterDto,
-    "shape213": DocumentTargetDto,
-    "shape222": SelectionDto,
-    "shape139": SelectionDtoScopeVariant1Dto,
-    "shape141": SelectionDtoScopeVariant2Dto,
-    "shape143": SelectionDtoScopeVariant3Dto,
-    "shape144": SelectionDtoScopeVariant4Dto,
-    "shape233": SchemaDefinitionDto,
-    "shape231": InformationTypeContractDto,
-    "shape230": InformationContentBindingDto,
-    "shape251": PortableEvidenceDto,
-    "shape252": PortableOriginReferenceDto,
-    "shape249": PortableProvenanceDto,
-    "shape229": PortableDescriptorDto,
-    "shape228": PortableDocumentDto,
-    "shape256": PortableLinkDto,
-    "shape226": PortableBundleDto,
-    "shape264": PortableReuseDto,
-    "shape266": PortableTypeMappingDto,
-    "shape225": PortableImportPlanDto,
-    "shape259": PortableImportPlanDtoDestinationsItemVariant1Dto,
-    "shape261": PortableImportPlanDtoDestinationsItemVariant2Dto,
-    "shape276": CommonDto,
-    "shape287": ReferencePolicyDto,
-    "shape286": ReferencePolicySettingsDto,
-    "shape301": ReportFindingDto,
-    "shape308": ReportReviewDto,
-    "shape340": NavigationPathDto,
-    "shape343": NavigationPathDtoStepsItemVariant1Dto,
-    "shape345": NavigationPathDtoStepsItemVariant2Dto,
-    "shape346": NavigationPathDtoStepsItemVariant3Dto,
-    "shape348": NavigationPathDtoStepsItemVariant4Dto,
-    "shape355": TierDto2,
-    "shape361": MemoryProposalDto,
-    "shape373": OrchestrationChoiceDto,
-    "shape375": TierDto3,
-    "shape384": ProcQueryDto,
-    "shape422": ProviderOAuthSettingsDto,
-    "shape412": ProviderConnectionDefinitionDto,
-    "shape424": ProviderCredentialMutationDto,
-    "shape426": ProviderCredentialTargetDto,
-    "shape428": RelayAckRequestDto,
-    "shape429": RelayConsumeRequestDto,
-    "shape433": RelayDeleteGroupRequestDto,
-    "shape434": RelayInspectGroupRequestDto,
-    "shape438": RelayOperateRequestDto,
-    "shape446": RelayPublishRequestDto,
-    "shape457": ScheduleDefinitionDto,
-    "shape458": ScheduleDefinitionDtoActionDto,
-    "shape468": ScheduleDefinitionDtoLimitsDto,
-    "shape469": ScheduleDefinitionDtoNotifyPersonalBotDto,
-    "shape470": ScheduleDefinitionDtoTargetDto,
-    "shape480": ToolInvocationReadDto,
-    "shape481": ToolScopeConnectDto,
-    "shape487": HostedToolDefinitionDto,
-    "shape491": HostedToolAcknowledgementDto,
-    "shape493": HostedToolConsumptionDto,
-    "shape494": HostedToolCredentialRequestDto,
-    "shape499": HostedToolPublicationDto,
-    "shape502": HostedToolWorkerDto,
-    "shape533": UsageFilterDto,
-    "shape551": ActingTurnReceiptDto,
-    "shape558": ServerAccountDto,
-    "shape557": AccountCredentialDto,
-    "shape562": AdminAuditDto,
-    "shape560": AdminAuditPageDto,
-    "shape570": PricingRatesDto,
-    "shape572": PricingTierDto,
-    "shape567": PricingCardDto,
-    "shape565": PricingEntryDto,
-    "shape574": ServiceAccountDto,
-    "shape579": ServiceScopeDto,
-    "shape577": ServiceTokenDto,
-    "shape576": ServiceCredentialDto,
-    "shape582": SessionsRevokedDto,
-    "shape584": ServerSessionDto,
-    "shape585": AdminStatusDto,
-    "shape586": ObservedStartedJobDto,
-    "shape590": CommandEntryDto,
-    "shape588": AgentViewDto,
-    "shape587": DefinedAgentDto,
-    "shape593": ConversationStartedJobDto,
-    "shape595": ApplicationReleaseDto,
-    "shape594": ApplicationDeploymentReceiptDto,
-    "shape596": ContainedApplicationCancellationDto,
-    "shape597": ContainedApplicationCeilingDto,
-    "shape598": ContainedApplicationChildDto,
-    "shape599": ContainedApplicationDestructionDto,
-    "shape600": ContainedApplicationChildrenDto,
-    "shape604": ContainedApplicationResourceDto,
-    "shape602": ContainedApplicationResourcesDto,
-    "shape608": ContainedApplicationRunningDto,
-    "shape611": ContainedApplicationStepDto,
-    "shape609": ContainedApplicationTrajectoryDto,
-    "shape612": ProjectViewDto,
-    "shape615": ApplicationDeploymentStatusDto,
-    "shape617": ApplicationFileDocumentDto,
-    "shape620": ApplicationFileEntryDto,
-    "shape618": ApplicationFileListingDto,
-    "shape624": ApplicationServiceDeclarationDto,
-    "shape623": ApplicationIdentityBindingDto,
-    "shape621": ApplicationIdentityStatusDto,
-    "shape630": ApplicationTokenReceiptDto,
-    "shape629": ApplicationCredentialDto,
-    "shape631": ApprovalAnsweredDto,
-    "shape635": BudgetExtensionDto,
-    "shape638": FileApprovalDto,
-    "shape641": WebApprovalDto,
-    "shape634": ApprovalViewDto,
-    "shape632": ApprovalListedDto,
-    "shape646": ApprovalCapabilitiesDto,
-    "shape645": ApprovalPolicyViewDto,
-    "shape648": ApprovalRevokedDto,
-    "shape653": ImageAdmissionReceiptDto,
-    "shape662": BoardMessageDto,
-    "shape666": SwarmSelectionDto,
-    "shape664": BoardTopicDto,
-    "shape661": BoardClosedDto,
-    "shape669": BoardDecisionDto,
-    "shape671": BoardMessageDto2,
-    "shape674": BoardSeatDto,
-    "shape673": SeatViewDto,
-    "shape667": BoardMessagesDto,
-    "shape675": BoardOpenedDto,
-    "shape676": BoardPostedDto,
-    "shape677": BoardRetriedDto,
-    "shape680": BoardSummaryDto,
-    "shape678": BoardTopicsDto,
-    "shape681": BufferPurgeReportDto,
-    "shape685": FileReadWindowDto,
-    "shape691": ToolEffectReceiptViewDto,
-    "shape690": RetainedToolResultViewDto,
-    "shape714": SourceViewDto,
-    "shape718": OpenedViewDto,
-    "shape716": AskedViewDto,
-    "shape684": EntryViewDto,
-    "shape682": EntryPageViewDto,
-    "shape720": CompactionViewDto,
-    "shape723": MeasuredTurnDto,
-    "shape725": TokenCountDto,
-    "shape729": ToolCostDto,
-    "shape727": PrefixDto,
-    "shape731": UnavailableDto,
-    "shape721": ContextViewDto,
-    "shape733": ContextCountDto,
-    "shape742": ProjectionMessageDto,
-    "shape745": ProjectionMessageDtoPartsItemVariant1Dto,
-    "shape747": ProjectionMessageDtoPartsItemVariant2Dto,
-    "shape755": ProjectionMessageDtoToolCallsItemDto,
-    "shape756": ContextSamplingDto,
-    "shape757": ContextSamplingDtoResponseFormatDto,
-    "shape738": ContextSnapshotDto,
-    "shape740": ContextSnapshotDtoCountVariant2Dto,
-    "shape763": ContextSnapshotDtoToolsItemDto,
-    "shape766": ConversationViewDto,
-    "shape767": LifecycleViewDto,
-    "shape771": ProjectionMessageDto2,
-    "shape769": ProjectionViewDto,
-    "shape775": SearchEvidenceDto,
-    "shape781": InputReferenceDto,
-    "shape779": InputProvenanceDto,
-    "shape777": SearchSourceDto,
-    "shape774": LogSearchHitDto,
-    "shape782": LogSearchReachDto,
-    "shape785": PassageCoverageDto,
-    "shape783": SearchRetrievalDto,
-    "shape772": LogSearchResponseDto,
-    "shape788": ToolCallTraceDto,
-    "shape786": ToolTraceViewDto,
-    "shape790": TurnViewDto,
-    "shape793": UnitViewDto,
-    "shape791": ChunkDetailResponseDto,
-    "shape796": CitationDto,
-    "shape794": CitationsResponseDto,
-    "shape799": DocumentChapterDto,
-    "shape797": DocumentDetailResponseDto,
-    "shape803": DocumentListEntryDto,
-    "shape801": DocumentListResponseDto,
-    "shape806": RankedDocumentDto,
-    "shape804": DocumentRankingResponseDto,
-    "shape809": RetrieveHitDto,
-    "shape807": RetrieveResponseDto,
-    "shape812": DocumentSearchHitDto,
-    "shape810": ObservedSearchDto,
-    "shape813": DocumentStanceResponseDto,
-    "shape815": FiringRecordDto,
-    "shape818": FileStoreOptionDto,
-    "shape816": FileStoreCatalogDto,
-    "shape821": InboxItemDto,
-    "shape819": InboxPageDto,
-    "shape822": InboxMarkedDto,
-    "shape827": InformationGateDto,
-    "shape829": InformationGateDtoRecordsItemDto,
-    "shape824": InformationAcquisitionDto,
-    "shape837": ChangedInformationDto,
-    "shape838": InformationQuestionDto,
-    "shape841": InformationAwaitOutcomeDto,
-    "shape839": InformationFenceDto,
-    "shape847": InformationProjectionReuseDto,
-    "shape842": InformationContentViewDto,
-    "shape848": InformationAdmissionDto,
-    "shape849": InformationAvailabilityDto,
-    "shape850": DiscoveryFacetsDto,
-    "shape852": DiscoveryFacetsDtoItemsItemDto,
-    "shape855": DiscoveryItemDto,
-    "shape853": DiscoveryPageDto,
-    "shape860": InformationWindowDto,
-    "shape864": DiscoveryScopeDto,
-    "shape862": DiscoveryScopesDto,
-    "shape868": InformationFacetValueDto,
-    "shape866": InformationFacetValuesDto,
-    "shape869": InformationFacetMoreDto,
-    "shape872": InformationTagEdgeDto,
-    "shape870": InformationTagGraphDto,
-    "shape865": InformationFacetCountsDto,
-    "shape877": InformationTypeIdentityDto,
-    "shape876": InformationContentMetadataDto,
-    "shape875": CurrentDocumentDto,
-    "shape887": InformationEventDto,
-    "shape885": InformationEventsDto,
-    "shape888": InformationEvidenceDto,
-    "shape889": RecordedEvidenceDto,
-    "shape890": FinalisedInformationDto,
-    "shape891": PortableCapabilitiesDto,
-    "shape897": PortableMappingDto,
-    "shape895": PortableImportedDto,
-    "shape898": PortableOriginDto,
-    "shape899": PortableReadableDto,
-    "shape913": InformationProgressDto,
-    "shape914": InformationProgressDtoPassageVectorsDto,
-    "shape915": InformationProgressDtoStoredSummaryEntitiesDto,
-    "shape916": InformationReportDto,
-    "shape917": InformationReportDtoDetailsDto,
-    "shape919": InformationStepDto,
-    "shape904": InformationRevisionDto,
-    "shape928": AdoptedInformationDto,
-    "shape931": MigrationEntryDto,
-    "shape934": MigrationEntryDtoToolCallsVariant2ItemDto,
-    "shape936": MigrationJobDto,
-    "shape938": MigrationLogDto,
-    "shape929": InformationMigrationInspectionDto,
-    "shape941": MigrationDocumentDto,
-    "shape943": MigrationPayloadDto,
-    "shape939": InformationMigrationInventoryDto,
-    "shape944": ReleasedInformationDto,
-    "shape945": NavigationCapabilitiesDto,
-    "shape956": CodeSymbolDto,
-    "shape947": CodeOutlineDto,
-    "shape957": ReferencePolicyViewDto,
-    "shape280": ReferencePolicyViewDtoTargetVariant1Dto,
-    "shape282": ReferencePolicyViewDtoTargetVariant2Dto,
-    "shape283": ReferencePolicyViewDtoTargetVariant3Dto,
-    "shape958": QueuedInformationDto,
-    "shape959": DocumentRelationshipDto,
-    "shape962": DocumentConnectionDto,
-    "shape874": DocumentConnectionDtoSelectionVariant1Dto,
-    "shape879": DocumentConnectionDtoSelectionVariant2Dto,
-    "shape881": DocumentConnectionDtoSelectionVariant3Dto,
-    "shape963": NavigationChangedDto,
-    "shape968": InformationSearchPlacementDto,
-    "shape970": InformationSearchPlacementDtoChapterTitleVariant1Dto,
-    "shape971": InformationSearchPlacementDtoChapterTitleVariant2Dto,
-    "shape972": InformationUnplacedDto,
-    "shape966": InformationSearchChunkDto,
-    "shape965": InformationSearchHitDto,
-    "shape976": CodeSymbolMatchDto,
-    "shape974": CodeSymbolMatchesDto,
-    "shape978": InformationTypeVersionDto,
-    "shape981": InformationContentCapabilitiesDto,
-    "shape983": InformationTypeVersionsDto,
-    "shape987": MetadataValidationIssueDto,
-    "shape985": MetadataValidationResultDto,
-    "shape992": SavedNavigationViewDto,
-    "shape997": PartialDto,
-    "shape1001": PartialDto2,
-    "shape999": ObservedOutcomeDto,
-    "shape995": ObservedJobDto,
-    "shape1004": ObservedIndexDto,
-    "shape1006": MemoryProvenanceDto,
-    "shape1007": MemoryHomeDto,
-    "shape1009": MemoryInvalidationDto,
-    "shape1005": MemoryRecordDto,
-    "shape1011": NavigationRetrievalDto,
-    "shape1010": MemoryNavigationDto,
-    "shape1012": ObservedRecallDto,
-    "shape1014": MemoryRepairDto,
-    "shape1015": MemoryWriteResponseDto,
-    "shape1016": MessageDeliveryDto,
-    "shape1017": MessageDeliveriesDto,
-    "shape1019": MessageInstanceDto,
-    "shape1024": MessageInstancesDto,
-    "shape1026": OrchestrationAnsweredDto,
-    "shape1027": OrchestrationCancelledDto,
-    "shape1029": SettingViewDto,
-    "shape1030": BooleanSettingViewDto,
-    "shape1028": CapsViewDto,
-    "shape1035": StageViewDto,
-    "shape1033": DefinitionViewDto,
-    "shape1031": DefinitionsDto,
-    "shape1038": RunViewDto,
-    "shape1036": OrchestrationListedDto,
-    "shape1042": RecordViewDto,
-    "shape1040": RecordPageViewDto,
-    "shape1046": ChildViewDto,
-    "shape1054": QuestionOptionDto,
-    "shape1052": QuestionDto,
-    "shape1048": MessageViewDto,
-    "shape1050": MessageViewDtoStructureVariant2Dto,
-    "shape1055": MessageViewDtoStructureVariant3Dto,
-    "shape1057": TodoViewDto,
-    "shape1044": OrchestrationStatusDto,
-    "shape1060": PersonalSubscriptionStatusDto,
-    "shape1062": PersonalSubscriptionEntryDto,
-    "shape1064": PersonalSubscriptionEntryDtoHandlerVariant1Dto,
-    "shape1065": PersonalSubscriptionEntryDtoHandlerVariant2Dto,
-    "shape1067": PersonalSubscriptionEntryDtoSourceVariant1Dto,
-    "shape1069": PersonalSubscriptionEntryDtoSourceVariant1DtoScheduleDto,
-    "shape1070": PersonalSubscriptionEntryDtoSourceVariant2Dto,
-    "shape1072": PersonalSubscriptionEntryDtoSourceVariant3Dto,
-    "shape1075": PersonalSubscriptionEntryDtoSourceVariant4Dto,
-    "shape1079": PersonalSubscriptionEntryDtoSourceVariant5Dto,
-    "shape1084": PersonalSubscriptionEntryDtoSourceVariant6Dto,
-    "shape1058": PersonalSubscriptionViewDto,
-    "shape1091": ProcAttemptDto,
-    "shape1089": ProcCallDto,
-    "shape1092": ProcSelectionDto,
-    "shape1087": ProcCallsDto,
-    "shape1096": ProcConversationDto,
-    "shape1094": ProcConversationsDto,
-    "shape1101": ProcQueueDto,
-    "shape1097": ProcQueuesDto,
-    "shape1099": ProcQueuesDtoPoolsItemDto,
-    "shape1103": ProcToolDto,
-    "shape1093": ProcInspectionDto,
-    "shape1104": ProcToolsDto,
-    "shape1107": ProjectGrantChangeDto,
-    "shape1109": ProjectGrantDto,
-    "shape1105": ProjectAccessDto,
-    "shape1111": ProjectMembersDto,
-    "shape1113": ProposalViewDto,
-    "shape1114": ReconsideredDto,
-    "shape1115": ResolvedProposalDto,
-    "shape1117": ProviderConnectionDto,
-    "shape1119": ProviderCredentialStatusDto,
-    "shape1116": ProviderMutationReceiptDto,
-    "shape1135": ProviderAuthorizationDto,
-    "shape1138": ProviderFactsDto,
-    "shape1137": ProviderRegistrationDto,
-    "shape1144": RelayCausationDto,
-    "shape1147": RelayBlobDescriptorDto,
-    "shape1142": RelayEventDto,
-    "shape1145": RelayEventDtoPayloadDto,
-    "shape1156": RelayEventDtoPayloadDtoLifecycleVariant2Dto,
-    "shape1158": RelayEventDtoPayloadDtoWakeVariant2Dto,
-    "shape1140": RelayBatchDto,
-    "shape1166": RelayGroupDeletedDto,
-    "shape1167": RelayGroupStateDto,
-    "shape1170": RelayBranchDto,
-    "shape1183": RelayTopicDto,
-    "shape1184": RelayControlResultDto,
-    "shape1195": SweepReportDto,
-    "shape1196": ScheduleRecordDto,
-    "shape1198": ScheduleFileDto,
-    "shape1204": ScheduleNamesDto,
-    "shape1203": ScheduleProposalDto,
-    "shape1207": PoolUseDto,
-    "shape1209": ReadyDto,
-    "shape1205": SwarmDto,
-    "shape1212": SwarmTypeDto,
-    "shape1210": SwarmTypesDto,
-    "shape1218": ToolContentPartDto,
-    "shape1216": ToolContentBodyDto,
-    "shape1214": ToolInvocationResultDto,
-    "shape1229": ToolScopeConnectionDto,
-    "shape1232": HostedToolBindingDto,
-    "shape1231": HostedToolReceiptDto,
-    "shape1239": HostedToolCredentialDto,
-    "shape1241": HostedToolReconciliationDto,
-    "shape1242": HostedToolRegistrationDto,
-    "shape1243": HostedToolWorkerStatusDto,
-    "shape1245": TriggerRecordDto,
-    "shape1250": UnionConflictDto,
-    "shape1248": UnionConflictsDto,
-    "shape1255": IneligibleUnionDto,
-    "shape1256": EligibleUnionDto,
-    "shape1260": UsageTotalsDto,
-    "shape1262": UsageHealthDto,
-    "shape1257": UsageReportDto,
-    "shape1258": UsageReportDtoFiltersDto,
-    "shape1268": UsageAttemptDto,
-    "shape1266": UsageCallDto,
-    "shape1264": UsageAuditDto,
-    "shape1270": UsageAuditDtoFiltersDto,
-    "shape1272": UsageAttemptsDto,
-    "shape1273": UsageInitialDto,
-    "shape1274": WebFetchResponseDto,
-    "shape1277": WebSearchHitDto,
-    "shape1275": WebSearchResponseDto,
-    "shape1279": JobEventDto,
-    "shape1280": JobDeltaDto,
-    "shape1310": RelayBlobPublishDto,
-    "shape1311": RelayBlobReadDto,
-    "shape1312": RelayBlobPublishedDto,
-    "shape1313": RelayBlobPublishedDtoPublicationDto,
+    "shape120": GoalControlDto,
+    "shape128": ConversationOpenRequestExDto,
+    "shape160": GoalAnswerRequestDto,
+    "shape161": GoalListRequestDto,
+    "shape162": GoalReceiptRequestDto,
+    "shape168": GoalStatusRequestDto,
+    "shape212": OmitDto,
+    "shape216": DiscoverySelectionDto,
+    "shape224": InformationFilterDto,
+    "shape226": DocumentTargetDto,
+    "shape235": SelectionDto,
+    "shape143": SelectionDtoScopeVariant1Dto,
+    "shape145": SelectionDtoScopeVariant2Dto,
+    "shape147": SelectionDtoScopeVariant3Dto,
+    "shape148": SelectionDtoScopeVariant4Dto,
+    "shape246": SchemaDefinitionDto,
+    "shape244": InformationTypeContractDto,
+    "shape243": InformationContentBindingDto,
+    "shape264": PortableEvidenceDto,
+    "shape265": PortableOriginReferenceDto,
+    "shape262": PortableProvenanceDto,
+    "shape242": PortableDescriptorDto,
+    "shape241": PortableDocumentDto,
+    "shape269": PortableLinkDto,
+    "shape239": PortableBundleDto,
+    "shape277": PortableReuseDto,
+    "shape279": PortableTypeMappingDto,
+    "shape238": PortableImportPlanDto,
+    "shape272": PortableImportPlanDtoDestinationsItemVariant1Dto,
+    "shape274": PortableImportPlanDtoDestinationsItemVariant2Dto,
+    "shape289": CommonDto,
+    "shape300": ReferencePolicyDto,
+    "shape299": ReferencePolicySettingsDto,
+    "shape314": ReportFindingDto,
+    "shape321": ReportReviewDto,
+    "shape353": NavigationPathDto,
+    "shape356": NavigationPathDtoStepsItemVariant1Dto,
+    "shape358": NavigationPathDtoStepsItemVariant2Dto,
+    "shape359": NavigationPathDtoStepsItemVariant3Dto,
+    "shape361": NavigationPathDtoStepsItemVariant4Dto,
+    "shape368": TierDto2,
+    "shape374": MemoryProposalDto,
+    "shape388": OrchestrationChoiceDto,
+    "shape390": TierDto3,
+    "shape399": ProcQueryDto,
+    "shape437": ProviderOAuthSettingsDto,
+    "shape427": ProviderConnectionDefinitionDto,
+    "shape439": ProviderCredentialMutationDto,
+    "shape441": ProviderCredentialTargetDto,
+    "shape443": RelayAckRequestDto,
+    "shape444": RelayConsumeRequestDto,
+    "shape448": RelayDeleteGroupRequestDto,
+    "shape449": RelayInspectGroupRequestDto,
+    "shape453": RelayOperateRequestDto,
+    "shape461": RelayPublishRequestDto,
+    "shape472": ScheduleDefinitionDto,
+    "shape473": ScheduleDefinitionDtoActionDto,
+    "shape483": ScheduleDefinitionDtoLimitsDto,
+    "shape484": ScheduleDefinitionDtoNotifyPersonalBotDto,
+    "shape485": ScheduleDefinitionDtoTargetDto,
+    "shape495": ToolInvocationReadDto,
+    "shape496": ToolScopeConnectDto,
+    "shape502": HostedToolDefinitionDto,
+    "shape506": HostedToolAcknowledgementDto,
+    "shape508": HostedToolConsumptionDto,
+    "shape509": HostedToolCredentialRequestDto,
+    "shape514": HostedToolPublicationDto,
+    "shape517": HostedToolWorkerDto,
+    "shape548": UsageFilterDto,
+    "shape566": ActingTurnReceiptDto,
+    "shape573": ServerAccountDto,
+    "shape572": AccountCredentialDto,
+    "shape577": AdminAuditDto,
+    "shape575": AdminAuditPageDto,
+    "shape585": PricingRatesDto,
+    "shape587": PricingTierDto,
+    "shape582": PricingCardDto,
+    "shape580": PricingEntryDto,
+    "shape589": ServiceAccountDto,
+    "shape594": ServiceScopeDto,
+    "shape592": ServiceTokenDto,
+    "shape591": ServiceCredentialDto,
+    "shape597": SessionsRevokedDto,
+    "shape599": ServerSessionDto,
+    "shape600": AdminStatusDto,
+    "shape601": ObservedStartedJobDto,
+    "shape605": CommandEntryDto,
+    "shape603": AgentViewDto,
+    "shape602": DefinedAgentDto,
+    "shape608": ConversationStartedJobDto,
+    "shape610": ApplicationReleaseDto,
+    "shape609": ApplicationDeploymentReceiptDto,
+    "shape611": ContainedApplicationCancellationDto,
+    "shape612": ContainedApplicationCeilingDto,
+    "shape613": ContainedApplicationChildDto,
+    "shape614": ContainedApplicationDestructionDto,
+    "shape615": ContainedApplicationChildrenDto,
+    "shape619": ContainedApplicationResourceDto,
+    "shape617": ContainedApplicationResourcesDto,
+    "shape623": ContainedApplicationRunningDto,
+    "shape626": ContainedApplicationStepDto,
+    "shape624": ContainedApplicationTrajectoryDto,
+    "shape627": ProjectViewDto,
+    "shape630": ApplicationDeploymentStatusDto,
+    "shape632": ApplicationFileDocumentDto,
+    "shape635": ApplicationFileEntryDto,
+    "shape633": ApplicationFileListingDto,
+    "shape639": ApplicationServiceDeclarationDto,
+    "shape638": ApplicationIdentityBindingDto,
+    "shape636": ApplicationIdentityStatusDto,
+    "shape645": ApplicationTokenReceiptDto,
+    "shape644": ApplicationCredentialDto,
+    "shape646": ApprovalAnsweredDto,
+    "shape650": BudgetExtensionDto,
+    "shape653": FileApprovalDto,
+    "shape656": WebApprovalDto,
+    "shape649": ApprovalViewDto,
+    "shape647": ApprovalListedDto,
+    "shape661": ApprovalCapabilitiesDto,
+    "shape660": ApprovalPolicyViewDto,
+    "shape663": ApprovalRevokedDto,
+    "shape668": ImageAdmissionReceiptDto,
+    "shape677": BoardMessageDto,
+    "shape681": SwarmSelectionDto,
+    "shape679": BoardTopicDto,
+    "shape676": BoardClosedDto,
+    "shape684": BoardDecisionDto,
+    "shape686": BoardMessageDto2,
+    "shape689": BoardSeatDto,
+    "shape688": SeatViewDto,
+    "shape682": BoardMessagesDto,
+    "shape690": BoardOpenedDto,
+    "shape691": BoardPostedDto,
+    "shape692": BoardRetriedDto,
+    "shape695": BoardSummaryDto,
+    "shape693": BoardTopicsDto,
+    "shape696": BufferPurgeReportDto,
+    "shape700": FileReadWindowDto,
+    "shape706": ToolEffectReceiptViewDto,
+    "shape705": RetainedToolResultViewDto,
+    "shape729": SourceViewDto,
+    "shape733": OpenedViewDto,
+    "shape731": AskedViewDto,
+    "shape699": EntryViewDto,
+    "shape697": EntryPageViewDto,
+    "shape735": CompactionViewDto,
+    "shape738": MeasuredTurnDto,
+    "shape740": TokenCountDto,
+    "shape744": ToolCostDto,
+    "shape742": PrefixDto,
+    "shape746": UnavailableDto,
+    "shape736": ContextViewDto,
+    "shape748": ContextCountDto,
+    "shape757": ProjectionMessageDto,
+    "shape760": ProjectionMessageDtoPartsItemVariant1Dto,
+    "shape762": ProjectionMessageDtoPartsItemVariant2Dto,
+    "shape770": ProjectionMessageDtoToolCallsItemDto,
+    "shape771": ContextSamplingDto,
+    "shape772": ContextSamplingDtoResponseFormatDto,
+    "shape753": ContextSnapshotDto,
+    "shape755": ContextSnapshotDtoCountVariant2Dto,
+    "shape778": ContextSnapshotDtoToolsItemDto,
+    "shape780": ConversationGoalStatusDto,
+    "shape804": ConversationViewDto,
+    "shape805": LifecycleViewDto,
+    "shape809": ProjectionMessageDto2,
+    "shape807": ProjectionViewDto,
+    "shape813": SearchEvidenceDto,
+    "shape819": InputReferenceDto,
+    "shape817": InputProvenanceDto,
+    "shape815": SearchSourceDto,
+    "shape812": LogSearchHitDto,
+    "shape820": LogSearchReachDto,
+    "shape823": PassageCoverageDto,
+    "shape821": SearchRetrievalDto,
+    "shape810": LogSearchResponseDto,
+    "shape826": ToolCallTraceDto,
+    "shape824": ToolTraceViewDto,
+    "shape828": TurnViewDto,
+    "shape831": UnitViewDto,
+    "shape829": ChunkDetailResponseDto,
+    "shape834": CitationDto,
+    "shape832": CitationsResponseDto,
+    "shape837": DocumentChapterDto,
+    "shape835": DocumentDetailResponseDto,
+    "shape841": DocumentListEntryDto,
+    "shape839": DocumentListResponseDto,
+    "shape844": RankedDocumentDto,
+    "shape842": DocumentRankingResponseDto,
+    "shape847": RetrieveHitDto,
+    "shape845": RetrieveResponseDto,
+    "shape850": DocumentSearchHitDto,
+    "shape848": ObservedSearchDto,
+    "shape851": DocumentStanceResponseDto,
+    "shape853": FiringRecordDto,
+    "shape856": FileStoreOptionDto,
+    "shape854": FileStoreCatalogDto,
+    "shape857": GoalAnswerReceiptDto,
+    "shape862": GoalResultDto,
+    "shape873": GoalPendingBatchDto,
+    "shape867": GoalRelayWakeDto,
+    "shape877": GoalScheduleWakeDto,
+    "shape860": GoalStatusDto,
+    "shape858": GoalPageDto,
+    "shape878": GoalAgentStartedDto,
+    "shape879": GoalAgentSourcesDto,
+    "shape881": GoalAgentSourcesDtoSourcesItemDto,
+    "shape885": InboxItemDto,
+    "shape883": InboxPageDto,
+    "shape886": InboxMarkedDto,
+    "shape891": InformationGateDto,
+    "shape893": InformationGateDtoRecordsItemDto,
+    "shape888": InformationAcquisitionDto,
+    "shape901": ChangedInformationDto,
+    "shape902": InformationQuestionDto,
+    "shape905": InformationAwaitOutcomeDto,
+    "shape903": InformationFenceDto,
+    "shape911": InformationProjectionReuseDto,
+    "shape906": InformationContentViewDto,
+    "shape912": InformationAdmissionDto,
+    "shape913": InformationAvailabilityDto,
+    "shape914": DiscoveryFacetsDto,
+    "shape916": DiscoveryFacetsDtoItemsItemDto,
+    "shape919": DiscoveryItemDto,
+    "shape917": DiscoveryPageDto,
+    "shape924": InformationWindowDto,
+    "shape928": DiscoveryScopeDto,
+    "shape926": DiscoveryScopesDto,
+    "shape932": InformationFacetValueDto,
+    "shape930": InformationFacetValuesDto,
+    "shape933": InformationFacetMoreDto,
+    "shape936": InformationTagEdgeDto,
+    "shape934": InformationTagGraphDto,
+    "shape929": InformationFacetCountsDto,
+    "shape941": InformationTypeIdentityDto,
+    "shape940": InformationContentMetadataDto,
+    "shape939": CurrentDocumentDto,
+    "shape951": InformationEventDto,
+    "shape949": InformationEventsDto,
+    "shape952": InformationEvidenceDto,
+    "shape953": RecordedEvidenceDto,
+    "shape954": FinalisedInformationDto,
+    "shape955": PortableCapabilitiesDto,
+    "shape961": PortableMappingDto,
+    "shape959": PortableImportedDto,
+    "shape962": PortableOriginDto,
+    "shape963": PortableReadableDto,
+    "shape977": InformationProgressDto,
+    "shape978": InformationProgressDtoPassageVectorsDto,
+    "shape979": InformationProgressDtoStoredSummaryEntitiesDto,
+    "shape980": InformationReportDto,
+    "shape981": InformationReportDtoDetailsDto,
+    "shape983": InformationStepDto,
+    "shape968": InformationRevisionDto,
+    "shape992": AdoptedInformationDto,
+    "shape995": MigrationEntryDto,
+    "shape998": MigrationEntryDtoToolCallsVariant2ItemDto,
+    "shape1000": MigrationJobDto,
+    "shape1002": MigrationLogDto,
+    "shape993": InformationMigrationInspectionDto,
+    "shape1005": MigrationDocumentDto,
+    "shape1007": MigrationPayloadDto,
+    "shape1003": InformationMigrationInventoryDto,
+    "shape1008": ReleasedInformationDto,
+    "shape1009": NavigationCapabilitiesDto,
+    "shape1020": CodeSymbolDto,
+    "shape1011": CodeOutlineDto,
+    "shape1021": ReferencePolicyViewDto,
+    "shape293": ReferencePolicyViewDtoTargetVariant1Dto,
+    "shape295": ReferencePolicyViewDtoTargetVariant2Dto,
+    "shape296": ReferencePolicyViewDtoTargetVariant3Dto,
+    "shape1022": QueuedInformationDto,
+    "shape1023": DocumentRelationshipDto,
+    "shape1026": DocumentConnectionDto,
+    "shape938": DocumentConnectionDtoSelectionVariant1Dto,
+    "shape943": DocumentConnectionDtoSelectionVariant2Dto,
+    "shape945": DocumentConnectionDtoSelectionVariant3Dto,
+    "shape1027": NavigationChangedDto,
+    "shape1032": InformationSearchPlacementDto,
+    "shape1034": InformationSearchPlacementDtoChapterTitleVariant1Dto,
+    "shape1035": InformationSearchPlacementDtoChapterTitleVariant2Dto,
+    "shape1036": InformationUnplacedDto,
+    "shape1030": InformationSearchChunkDto,
+    "shape1029": InformationSearchHitDto,
+    "shape1040": CodeSymbolMatchDto,
+    "shape1038": CodeSymbolMatchesDto,
+    "shape1042": InformationTypeVersionDto,
+    "shape1045": InformationContentCapabilitiesDto,
+    "shape1047": InformationTypeVersionsDto,
+    "shape1051": MetadataValidationIssueDto,
+    "shape1049": MetadataValidationResultDto,
+    "shape1056": SavedNavigationViewDto,
+    "shape1061": PartialDto,
+    "shape1065": PartialDto2,
+    "shape1063": ObservedOutcomeDto,
+    "shape1059": ObservedJobDto,
+    "shape1068": ObservedIndexDto,
+    "shape1070": MemoryProvenanceDto,
+    "shape1071": MemoryHomeDto,
+    "shape1073": MemoryInvalidationDto,
+    "shape1069": MemoryRecordDto,
+    "shape1075": NavigationRetrievalDto,
+    "shape1074": MemoryNavigationDto,
+    "shape1076": ObservedRecallDto,
+    "shape1078": MemoryRepairDto,
+    "shape1079": MemoryWriteResponseDto,
+    "shape1080": MessageDeliveryDto,
+    "shape1081": MessageDeliveriesDto,
+    "shape1083": MessageInstanceDto,
+    "shape1088": MessageInstancesDto,
+    "shape1090": GoalAgentListenerDto,
+    "shape1091": GoalAgentUnlistenReceiptDto,
+    "shape1092": OrchestrationAnsweredDto,
+    "shape1093": OrchestrationCancelledDto,
+    "shape1095": SettingViewDto,
+    "shape1096": BooleanSettingViewDto,
+    "shape1094": CapsViewDto,
+    "shape1101": StageViewDto,
+    "shape1099": DefinitionViewDto,
+    "shape1097": DefinitionsDto,
+    "shape1104": RunViewDto,
+    "shape1102": OrchestrationListedDto,
+    "shape1108": RecordViewDto,
+    "shape1106": RecordPageViewDto,
+    "shape1112": ChildViewDto,
+    "shape1120": QuestionOptionDto,
+    "shape1118": QuestionDto,
+    "shape1114": MessageViewDto,
+    "shape1116": MessageViewDtoStructureVariant2Dto,
+    "shape1121": MessageViewDtoStructureVariant3Dto,
+    "shape1123": TodoViewDto,
+    "shape1110": OrchestrationStatusDto,
+    "shape1126": PersonalSubscriptionStatusDto,
+    "shape1128": PersonalSubscriptionEntryDto,
+    "shape1130": PersonalSubscriptionEntryDtoHandlerVariant1Dto,
+    "shape1131": PersonalSubscriptionEntryDtoHandlerVariant2Dto,
+    "shape1133": PersonalSubscriptionEntryDtoSourceVariant1Dto,
+    "shape1135": PersonalSubscriptionEntryDtoSourceVariant1DtoScheduleDto,
+    "shape1136": PersonalSubscriptionEntryDtoSourceVariant2Dto,
+    "shape1138": PersonalSubscriptionEntryDtoSourceVariant3Dto,
+    "shape1141": PersonalSubscriptionEntryDtoSourceVariant4Dto,
+    "shape1145": PersonalSubscriptionEntryDtoSourceVariant5Dto,
+    "shape1150": PersonalSubscriptionEntryDtoSourceVariant6Dto,
+    "shape1124": PersonalSubscriptionViewDto,
+    "shape1157": ProcAttemptDto,
+    "shape1155": ProcCallDto,
+    "shape1158": ProcSelectionDto,
+    "shape1153": ProcCallsDto,
+    "shape1162": ProcConversationDto,
+    "shape1160": ProcConversationsDto,
+    "shape1167": ProcQueueDto,
+    "shape1163": ProcQueuesDto,
+    "shape1165": ProcQueuesDtoPoolsItemDto,
+    "shape1169": ProcToolDto,
+    "shape1159": ProcInspectionDto,
+    "shape1170": ProcToolsDto,
+    "shape1173": ProjectGrantChangeDto,
+    "shape1175": ProjectGrantDto,
+    "shape1171": ProjectAccessDto,
+    "shape1177": ProjectMembersDto,
+    "shape1179": ProposalViewDto,
+    "shape1180": ReconsideredDto,
+    "shape1181": ResolvedProposalDto,
+    "shape1183": ProviderConnectionDto,
+    "shape1185": ProviderCredentialStatusDto,
+    "shape1182": ProviderMutationReceiptDto,
+    "shape1200": ProviderAuthorizationDto,
+    "shape1203": ProviderFactsDto,
+    "shape1202": ProviderRegistrationDto,
+    "shape1209": RelayCausationDto,
+    "shape1212": RelayBlobDescriptorDto,
+    "shape1207": RelayEventDto,
+    "shape1210": RelayEventDtoPayloadDto,
+    "shape1219": RelayEventDtoPayloadDtoLifecycleVariant2Dto,
+    "shape1221": RelayEventDtoPayloadDtoWakeVariant2Dto,
+    "shape1205": RelayBatchDto,
+    "shape1229": RelayGroupDeletedDto,
+    "shape1230": RelayGroupStateDto,
+    "shape1233": RelayBranchDto,
+    "shape1246": RelayTopicDto,
+    "shape1247": RelayControlResultDto,
+    "shape1258": SweepReportDto,
+    "shape1259": ScheduleRecordDto,
+    "shape1261": ScheduleFileDto,
+    "shape1267": ScheduleNamesDto,
+    "shape1266": ScheduleProposalDto,
+    "shape1270": PoolUseDto,
+    "shape1272": ReadyDto,
+    "shape1268": SwarmDto,
+    "shape1275": SwarmTypeDto,
+    "shape1273": SwarmTypesDto,
+    "shape1281": ToolContentPartDto,
+    "shape1279": ToolContentBodyDto,
+    "shape1277": ToolInvocationResultDto,
+    "shape1292": ToolScopeConnectionDto,
+    "shape1295": HostedToolBindingDto,
+    "shape1294": HostedToolReceiptDto,
+    "shape1302": HostedToolCredentialDto,
+    "shape1304": HostedToolReconciliationDto,
+    "shape1305": HostedToolRegistrationDto,
+    "shape1306": HostedToolWorkerStatusDto,
+    "shape1308": TriggerRecordDto,
+    "shape1313": UnionConflictDto,
+    "shape1311": UnionConflictsDto,
+    "shape1318": IneligibleUnionDto,
+    "shape1319": EligibleUnionDto,
+    "shape1323": UsageTotalsDto,
+    "shape1325": UsageHealthDto,
+    "shape1320": UsageReportDto,
+    "shape1321": UsageReportDtoFiltersDto,
+    "shape1331": UsageAttemptDto,
+    "shape1329": UsageCallDto,
+    "shape1327": UsageAuditDto,
+    "shape1333": UsageAuditDtoFiltersDto,
+    "shape1335": UsageAttemptsDto,
+    "shape1336": UsageInitialDto,
+    "shape1337": WebFetchResponseDto,
+    "shape1340": WebSearchHitDto,
+    "shape1338": WebSearchResponseDto,
+    "shape1342": JobEventDto,
+    "shape1343": JobDeltaDto,
+    "shape1373": RelayBlobPublishDto,
+    "shape1374": RelayBlobReadDto,
+    "shape1375": RelayBlobPublishedDto,
+    "shape1376": RelayBlobPublishedDtoPublicationDto,
     "shape0": ActingContextClosePayloadDto,
     "shape2": ActingContextOpenPayloadDto,
     "shape3": ActingContextOpenPayloadDtoProofDto,
-    "shape550": ActingContextOpenResultDto,
+    "shape565": ActingContextOpenResultDto,
     "shape5": ActingTurnReceiptPayloadDto,
     "shape6": ActingTurnStartPayloadDto,
     "shape7": AdminAccountCreatePayloadDto,
@@ -9586,8 +9962,8 @@ _MODELS = {
     "shape78": ApprovalAnswerPayloadDto,
     "shape84": ApprovalListPayloadDto,
     "shape85": ApprovalPolicySavePayloadDto,
-    "shape650": ArtifactAdmissionStatusResultVariant1Dto,
-    "shape652": ArtifactAdmissionStatusResultVariant2Dto,
+    "shape665": ArtifactAdmissionStatusResultVariant1Dto,
+    "shape667": ArtifactAdmissionStatusResultVariant2Dto,
     "shape105": BoardClosePayloadDto,
     "shape106": BoardMessagesPayloadDto,
     "shape107": BoardOpenPayloadDto,
@@ -9598,240 +9974,247 @@ _MODELS = {
     "shape112": ConversationChatPayloadDto,
     "shape114": ConversationContextPayloadDto,
     "shape115": ConversationContextCountPayloadDto,
-    "shape732": ConversationContextCountResultDto,
+    "shape747": ConversationContextCountResultDto,
     "shape116": ConversationContextSnapshotPayloadDto,
     "shape118": ConversationFollowPayloadVariant1Dto,
     "shape119": ConversationFollowPayloadVariant2Dto,
-    "shape120": ConversationLatestPayloadDto,
-    "shape121": ConversationLifecyclePayloadDto,
-    "shape122": ConversationListPayloadDto,
-    "shape123": ConversationOpenPayloadDto,
-    "shape125": ConversationProjectionPayloadDto,
-    "shape126": ConversationResumePayloadDto,
-    "shape127": ConversationSearchPayloadDto,
-    "shape132": ConversationToolTracePayloadDto,
-    "shape133": ConversationTrajectoryPayloadDto,
-    "shape134": DocumentAskPayloadDto,
-    "shape135": DocumentChunkPayloadDto,
-    "shape136": DocumentCitationsPayloadDto,
-    "shape137": DocumentDetailPayloadDto,
-    "shape147": DocumentListPayloadDto,
-    "shape148": DocumentRankPayloadDto,
-    "shape149": DocumentRetrievePayloadDto,
-    "shape150": DocumentSearchPayloadDto,
-    "shape151": DocumentStancePayloadDto,
-    "shape152": EventFirePayloadDto,
-    "shape154": EventFirePayloadDtoDataVariant2Dto,
-    "shape155": FiringListPayloadDto,
-    "shape156": InboxListPayloadDto,
-    "shape157": InboxPublishPayloadDto,
-    "shape162": InboxReadPayloadDto,
-    "shape163": InboxReceiptPayloadDto,
-    "shape823": InboxReceiptResultDto,
-    "shape164": InformationAcquirePayloadDto,
-    "shape169": InformationAcquirePayloadDtoTypingVariant1Dto,
-    "shape174": InformationAcquirePayloadDtoTypingVariant2Dto,
-    "shape176": InformationAcquirePayloadDtoTypingVariant3Dto,
-    "shape179": InformationAcquisitionsPayloadDto,
-    "shape180": InformationAllowancePayloadDto,
-    "shape181": InformationAskPayloadDto,
-    "shape182": InformationAwaitPayloadDto,
-    "shape185": InformationAwaitPayloadDtoSourcesItemVariant1Dto,
-    "shape186": InformationAwaitPayloadDtoSourcesItemVariant2Dto,
-    "shape187": InformationContentGetPayloadDto,
-    "shape188": InformationContentRevisePayloadDto,
-    "shape189": InformationDeletePayloadDto,
-    "shape190": InformationDiscoveryFacetsPayloadDto,
-    "shape204": InformationDiscoveryReadPayloadDto,
-    "shape205": InformationDiscoveryScopesPayloadDto,
-    "shape206": InformationDiscoverySearchPayloadDto,
-    "shape207": InformationDocumentsFacetsPayloadDto,
-    "shape212": InformationDocumentsGetPayloadDto,
-    "shape214": InformationDocumentsListPayloadDto,
-    "shape883": InformationDocumentsListResultDto,
-    "shape216": InformationEventsPayloadDto,
-    "shape217": InformationEvidenceReadPayloadDto,
-    "shape218": InformationEvidenceRecordPayloadDto,
-    "shape219": InformationExcludePayloadDto,
-    "shape220": InformationFacetsPayloadDto,
-    "shape221": InformationFinalisePayloadDto,
-    "shape223": InformationInterchangeExportPayloadDto,
-    "shape224": InformationInterchangeImportPayloadDto,
-    "shape267": InformationInterchangeOriginPayloadDto,
-    "shape268": InformationInterchangeReadablePayloadDto,
-    "shape269": InformationInventoryPayloadDto,
-    "shape270": InformationLinkPayloadDto,
-    "shape271": InformationListPayloadDto,
-    "shape272": InformationMigrationAdoptPayloadDto,
-    "shape273": InformationMigrationInspectPayloadDto,
-    "shape274": InformationMigrationListPayloadDto,
-    "shape275": InformationMigrationReleasePayloadDto,
-    "shape277": InformationOutlinePayloadDto,
-    "shape278": InformationPolicyGetPayloadDto,
-    "shape285": InformationPolicySetPayloadDto,
-    "shape288": InformationRankPayloadDto,
-    "shape289": InformationReadPayloadDto,
-    "shape290": InformationRebuildPayloadDto,
-    "shape299": InformationRecordReportPayloadDto,
-    "shape309": InformationRefreshPayloadDto,
-    "shape310": InformationRelationshipsCreatePayloadDto,
-    "shape311": InformationRelationshipsListPayloadDto,
-    "shape960": InformationRelationshipsListResultDto,
-    "shape312": InformationRelationshipsRemovePayloadDto,
-    "shape313": InformationReplacePayloadDto,
-    "shape314": InformationRestorePayloadDto,
-    "shape315": InformationRetryPayloadDto,
-    "shape316": InformationRevisePayloadDto,
-    "shape317": InformationSearchPayloadDto,
-    "shape318": InformationSharePayloadDto,
-    "shape319": InformationStatusPayloadDto,
-    "shape320": InformationSymbolsPayloadDto,
-    "shape321": InformationTagsPayloadDto,
-    "shape322": InformationTagsGroupsPayloadDto,
-    "shape325": InformationTagsReplacePayloadDto,
-    "shape326": InformationTypesActivatePayloadDto,
-    "shape327": InformationTypesCapabilitiesPayloadDto,
-    "shape328": InformationTypesDeprecatePayloadDto,
-    "shape329": InformationTypesGetPayloadDto,
-    "shape330": InformationTypesListPayloadDto,
-    "shape331": InformationTypesValidatePayloadDto,
-    "shape332": InformationTypesVersionCreatePayloadDto,
-    "shape333": InformationUnexcludePayloadDto,
-    "shape334": InformationUnlinkPayloadDto,
-    "shape335": InformationUnsharePayloadDto,
-    "shape336": InformationUploadPayloadDto,
-    "shape337": InformationViewsDeletePayloadDto,
-    "shape338": InformationViewsGetPayloadDto,
-    "shape993": InformationViewsListResultDto,
-    "shape339": InformationViewsSavePayloadDto,
-    "shape350": InformationWithdrawPayloadDto,
-    "shape351": JobCancelPayloadDto,
-    "shape352": JobLimitsPayloadDto,
-    "shape353": JobStatusPayloadDto,
-    "shape354": JobStreamPayloadDto,
-    "shape356": MemoryInvalidatePayloadDto,
-    "shape357": MemoryNavigatePayloadDto,
-    "shape358": MemoryReadPayloadDto,
-    "shape359": MemoryRecallPayloadDto,
-    "shape360": MemoryWritePayloadDto,
-    "shape362": MessageCancelPayloadDto,
-    "shape363": MessageDeliveriesPayloadDto,
-    "shape364": MessageDeliveryPayloadDto,
-    "shape365": MessageInstancePayloadDto,
-    "shape366": MessageInstanceArchivePayloadDto,
-    "shape367": MessageInstanceDefaultPayloadDto,
-    "shape368": MessageInstanceOpenPayloadDto,
-    "shape369": MessageInstanceStopPayloadDto,
-    "shape370": MessageInstancesPayloadDto,
-    "shape371": OrchestrationAnswerPayloadDto,
-    "shape374": OrchestrationCapsPayloadDto,
-    "shape376": OrchestrationListPayloadDto,
-    "shape377": OrchestrationReceiptPayloadDto,
-    "shape1039": OrchestrationReceiptResultDto,
-    "shape378": OrchestrationRecordPayloadDto,
-    "shape379": OrchestrationRepairPayloadDto,
-    "shape380": OrchestrationRepairPayloadDtoCheckpointDto,
-    "shape381": OrchestrationResumePayloadDto,
-    "shape382": OrchestrationStartPayloadDto,
-    "shape1043": OrchestrationStartResultDto,
-    "shape383": PersonalSubscriptionActivatePayloadDto,
-    "shape391": ProjectAccessPayloadDto,
-    "shape392": ProjectAttachPayloadDto,
-    "shape393": ProjectCreatePayloadDto,
-    "shape394": ProjectDefinePayloadDto,
-    "shape395": ProjectForgetPayloadDto,
-    "shape396": ProjectLendPayloadDto,
-    "shape397": ProjectMemberAddPayloadDto,
-    "shape398": ProjectMemberRemovePayloadDto,
-    "shape399": ProjectMemberRolePayloadDto,
-    "shape400": ProjectMovePayloadDto,
-    "shape401": ProjectUnlendPayloadDto,
-    "shape402": ProjectWorkspacePayloadDto,
-    "shape403": ProposalResolvePayloadDto,
-    "shape404": ProviderConnectionChangePayloadDto,
-    "shape409": ProviderConnectionListPayloadDto,
-    "shape410": ProviderConnectionReceiptPayloadDto,
-    "shape411": ProviderConnectionSavePayloadDto,
-    "shape423": ProviderConnectionStatusPayloadDto,
-    "shape425": ProviderCredentialPutPayloadDto,
-    "shape427": ProviderDeregisterPayloadDto,
-    "shape1139": RelayAckResultDto,
-    "shape436": RelayLogPayloadVariant1Dto,
-    "shape437": RelayLogPayloadVariant2Dto,
-    "shape1168": RelayLogResultDto,
-    "shape1179": RelayLogResultDtoRecoveriesItemDto,
-    "shape1180": RelayLogResultDtoScopeDto,
-    "shape1182": RelayLogResultDtoSubscribersItemDto,
-    "shape445": RelayProcessPayloadDto,
-    "shape1188": RelayProcessResultDto,
-    "shape1190": RelayProcessResultDtoGapsItemDto,
-    "shape1191": RelayPublishResultDto,
-    "shape448": RelayTopicsPayloadVariant1Dto,
-    "shape449": RelayTopicsPayloadVariant2Dto,
-    "shape1192": RelayTopicsResultDto,
-    "shape1193": RelayTopicsResultDtoScopeDto,
-    "shape450": ScheduleDefinePayloadDto,
-    "shape451": ScheduleFilesPayloadDto,
-    "shape452": ScheduleForgetPayloadDto,
-    "shape453": ScheduleListPayloadDto,
-    "shape454": SchedulePausePayloadDto,
-    "shape455": ScheduleReadPayloadDto,
-    "shape456": ScheduleSavePayloadDto,
-    "shape477": ScheduleSyncPayloadDto,
-    "shape478": SwarmTypesPayloadDto,
-    "shape479": TodosReadPayloadDto,
-    "shape482": ToolScopeDisconnectPayloadDto,
-    "shape1230": ToolScopeDisconnectResultDto,
-    "shape483": ToolScopeHostChangePayloadDto,
-    "shape484": ToolScopeHostListPayloadDto,
-    "shape485": ToolScopeHostReceiptPayloadDto,
-    "shape486": ToolScopeHostSavePayloadDto,
-    "shape488": ToolScopeHostStatusPayloadDto,
-    "shape489": ToolScopeListPayloadDto,
-    "shape1237": ToolScopeListResultDto,
-    "shape490": ToolScopeWorkerAckPayloadDto,
-    "shape492": ToolScopeWorkerConsumePayloadDto,
-    "shape498": ToolScopeWorkerPublishPayloadDto,
-    "shape500": ToolScopeWorkerReadPayloadDto,
-    "shape501": ToolScopeWorkerRegisterPayloadDto,
-    "shape503": ToolScopeWorkerStatusPayloadDto,
-    "shape504": TriggerDefinePayloadDto,
-    "shape505": TriggerForgetPayloadDto,
-    "shape506": TriggerPausePayloadDto,
-    "shape507": UnionAbortPayloadDto,
-    "shape508": UnionBeginPayloadDto,
-    "shape1247": UnionBeginResultDto,
-    "shape509": UnionConflictListPayloadDto,
-    "shape510": UnionConflictOpenPayloadDto,
-    "shape1251": UnionConflictOpenResultDto,
-    "shape511": UnionConflictResolvePayloadDto,
-    "shape515": UnionDisablePayloadDto,
-    "shape516": UnionEnablePayloadDto,
-    "shape1252": UnionEnableResultDto,
-    "shape517": UnionHiddenPayloadDto,
-    "shape1253": UnionHiddenResultDto,
-    "shape518": UnionReadyPayloadDto,
-    "shape519": UnionStatusPayloadDto,
-    "shape520": UsageAgentPayloadDto,
-    "shape531": UsageCallsPayloadDto,
-    "shape532": UsageConversationPayloadDto,
-    "shape534": UsageOrchestrationPayloadDto,
-    "shape535": UsageProjectPayloadDto,
-    "shape536": UsageRunPayloadDto,
-    "shape537": UsageSubscribePayloadDto,
-    "shape546": UsageUnsubscribePayloadDto,
-    "shape547": WebFetchPayloadDto,
-    "shape548": WebSearchPayloadDto,
-    "shape1284": NotificationVariant3Dto,
-    "shape1286": NotificationVariant4Dto,
-    "shape1288": NotificationVariant5Dto,
-    "shape1290": NotificationVariant6Dto,
-    "shape1297": NotificationVariant7Dto,
-    "shape1299": NotificationVariant8Dto,
-    "shape1301": NotificationVariant9Dto,
-    "shape1303": NotificationVariant10Dto,
-    "shape1305": NotificationVariant11Dto,
-    "shape1307": NotificationVariant12Dto,
+    "shape121": ConversationGoalGetPayloadDto,
+    "shape122": ConversationGoalResumePayloadDto,
+    "shape123": ConversationGoalStartPayloadDto,
+    "shape124": ConversationLatestPayloadDto,
+    "shape125": ConversationLifecyclePayloadDto,
+    "shape126": ConversationListPayloadDto,
+    "shape127": ConversationOpenPayloadDto,
+    "shape129": ConversationProjectionPayloadDto,
+    "shape130": ConversationResumePayloadDto,
+    "shape131": ConversationSearchPayloadDto,
+    "shape136": ConversationToolTracePayloadDto,
+    "shape137": ConversationTrajectoryPayloadDto,
+    "shape138": DocumentAskPayloadDto,
+    "shape139": DocumentChunkPayloadDto,
+    "shape140": DocumentCitationsPayloadDto,
+    "shape141": DocumentDetailPayloadDto,
+    "shape151": DocumentListPayloadDto,
+    "shape152": DocumentRankPayloadDto,
+    "shape153": DocumentRetrievePayloadDto,
+    "shape154": DocumentSearchPayloadDto,
+    "shape155": DocumentStancePayloadDto,
+    "shape156": EventFirePayloadDto,
+    "shape158": EventFirePayloadDtoDataVariant2Dto,
+    "shape159": FiringListPayloadDto,
+    "shape163": GoalSourcesPayloadDto,
+    "shape167": GoalStartPayloadDto,
+    "shape169": InboxListPayloadDto,
+    "shape170": InboxPublishPayloadDto,
+    "shape175": InboxReadPayloadDto,
+    "shape176": InboxReceiptPayloadDto,
+    "shape887": InboxReceiptResultDto,
+    "shape177": InformationAcquirePayloadDto,
+    "shape182": InformationAcquirePayloadDtoTypingVariant1Dto,
+    "shape187": InformationAcquirePayloadDtoTypingVariant2Dto,
+    "shape189": InformationAcquirePayloadDtoTypingVariant3Dto,
+    "shape192": InformationAcquisitionsPayloadDto,
+    "shape193": InformationAllowancePayloadDto,
+    "shape194": InformationAskPayloadDto,
+    "shape195": InformationAwaitPayloadDto,
+    "shape198": InformationAwaitPayloadDtoSourcesItemVariant1Dto,
+    "shape199": InformationAwaitPayloadDtoSourcesItemVariant2Dto,
+    "shape200": InformationContentGetPayloadDto,
+    "shape201": InformationContentRevisePayloadDto,
+    "shape202": InformationDeletePayloadDto,
+    "shape203": InformationDiscoveryFacetsPayloadDto,
+    "shape217": InformationDiscoveryReadPayloadDto,
+    "shape218": InformationDiscoveryScopesPayloadDto,
+    "shape219": InformationDiscoverySearchPayloadDto,
+    "shape220": InformationDocumentsFacetsPayloadDto,
+    "shape225": InformationDocumentsGetPayloadDto,
+    "shape227": InformationDocumentsListPayloadDto,
+    "shape947": InformationDocumentsListResultDto,
+    "shape229": InformationEventsPayloadDto,
+    "shape230": InformationEvidenceReadPayloadDto,
+    "shape231": InformationEvidenceRecordPayloadDto,
+    "shape232": InformationExcludePayloadDto,
+    "shape233": InformationFacetsPayloadDto,
+    "shape234": InformationFinalisePayloadDto,
+    "shape236": InformationInterchangeExportPayloadDto,
+    "shape237": InformationInterchangeImportPayloadDto,
+    "shape280": InformationInterchangeOriginPayloadDto,
+    "shape281": InformationInterchangeReadablePayloadDto,
+    "shape282": InformationInventoryPayloadDto,
+    "shape283": InformationLinkPayloadDto,
+    "shape284": InformationListPayloadDto,
+    "shape285": InformationMigrationAdoptPayloadDto,
+    "shape286": InformationMigrationInspectPayloadDto,
+    "shape287": InformationMigrationListPayloadDto,
+    "shape288": InformationMigrationReleasePayloadDto,
+    "shape290": InformationOutlinePayloadDto,
+    "shape291": InformationPolicyGetPayloadDto,
+    "shape298": InformationPolicySetPayloadDto,
+    "shape301": InformationRankPayloadDto,
+    "shape302": InformationReadPayloadDto,
+    "shape303": InformationRebuildPayloadDto,
+    "shape312": InformationRecordReportPayloadDto,
+    "shape322": InformationRefreshPayloadDto,
+    "shape323": InformationRelationshipsCreatePayloadDto,
+    "shape324": InformationRelationshipsListPayloadDto,
+    "shape1024": InformationRelationshipsListResultDto,
+    "shape325": InformationRelationshipsRemovePayloadDto,
+    "shape326": InformationReplacePayloadDto,
+    "shape327": InformationRestorePayloadDto,
+    "shape328": InformationRetryPayloadDto,
+    "shape329": InformationRevisePayloadDto,
+    "shape330": InformationSearchPayloadDto,
+    "shape331": InformationSharePayloadDto,
+    "shape332": InformationStatusPayloadDto,
+    "shape333": InformationSymbolsPayloadDto,
+    "shape334": InformationTagsPayloadDto,
+    "shape335": InformationTagsGroupsPayloadDto,
+    "shape338": InformationTagsReplacePayloadDto,
+    "shape339": InformationTypesActivatePayloadDto,
+    "shape340": InformationTypesCapabilitiesPayloadDto,
+    "shape341": InformationTypesDeprecatePayloadDto,
+    "shape342": InformationTypesGetPayloadDto,
+    "shape343": InformationTypesListPayloadDto,
+    "shape344": InformationTypesValidatePayloadDto,
+    "shape345": InformationTypesVersionCreatePayloadDto,
+    "shape346": InformationUnexcludePayloadDto,
+    "shape347": InformationUnlinkPayloadDto,
+    "shape348": InformationUnsharePayloadDto,
+    "shape349": InformationUploadPayloadDto,
+    "shape350": InformationViewsDeletePayloadDto,
+    "shape351": InformationViewsGetPayloadDto,
+    "shape1057": InformationViewsListResultDto,
+    "shape352": InformationViewsSavePayloadDto,
+    "shape363": InformationWithdrawPayloadDto,
+    "shape364": JobCancelPayloadDto,
+    "shape365": JobLimitsPayloadDto,
+    "shape366": JobStatusPayloadDto,
+    "shape367": JobStreamPayloadDto,
+    "shape369": MemoryInvalidatePayloadDto,
+    "shape370": MemoryNavigatePayloadDto,
+    "shape371": MemoryReadPayloadDto,
+    "shape372": MemoryRecallPayloadDto,
+    "shape373": MemoryWritePayloadDto,
+    "shape375": MessageCancelPayloadDto,
+    "shape376": MessageDeliveriesPayloadDto,
+    "shape377": MessageDeliveryPayloadDto,
+    "shape378": MessageInstancePayloadDto,
+    "shape379": MessageInstanceArchivePayloadDto,
+    "shape380": MessageInstanceDefaultPayloadDto,
+    "shape381": MessageInstanceOpenPayloadDto,
+    "shape382": MessageInstanceStopPayloadDto,
+    "shape383": MessageInstancesPayloadDto,
+    "shape384": MessageListenPayloadDto,
+    "shape385": MessageUnlistenPayloadDto,
+    "shape386": OrchestrationAnswerPayloadDto,
+    "shape389": OrchestrationCapsPayloadDto,
+    "shape391": OrchestrationListPayloadDto,
+    "shape392": OrchestrationReceiptPayloadDto,
+    "shape1105": OrchestrationReceiptResultDto,
+    "shape393": OrchestrationRecordPayloadDto,
+    "shape394": OrchestrationRepairPayloadDto,
+    "shape395": OrchestrationRepairPayloadDtoCheckpointDto,
+    "shape396": OrchestrationResumePayloadDto,
+    "shape397": OrchestrationStartPayloadDto,
+    "shape1109": OrchestrationStartResultDto,
+    "shape398": PersonalSubscriptionActivatePayloadDto,
+    "shape406": ProjectAccessPayloadDto,
+    "shape407": ProjectAttachPayloadDto,
+    "shape408": ProjectCreatePayloadDto,
+    "shape409": ProjectDefinePayloadDto,
+    "shape410": ProjectForgetPayloadDto,
+    "shape411": ProjectLendPayloadDto,
+    "shape412": ProjectMemberAddPayloadDto,
+    "shape413": ProjectMemberRemovePayloadDto,
+    "shape414": ProjectMemberRolePayloadDto,
+    "shape415": ProjectMovePayloadDto,
+    "shape416": ProjectUnlendPayloadDto,
+    "shape417": ProjectWorkspacePayloadDto,
+    "shape418": ProposalResolvePayloadDto,
+    "shape419": ProviderConnectionChangePayloadDto,
+    "shape424": ProviderConnectionListPayloadDto,
+    "shape425": ProviderConnectionReceiptPayloadDto,
+    "shape426": ProviderConnectionSavePayloadDto,
+    "shape438": ProviderConnectionStatusPayloadDto,
+    "shape440": ProviderCredentialPutPayloadDto,
+    "shape442": ProviderDeregisterPayloadDto,
+    "shape1204": RelayAckResultDto,
+    "shape451": RelayLogPayloadVariant1Dto,
+    "shape452": RelayLogPayloadVariant2Dto,
+    "shape1231": RelayLogResultDto,
+    "shape1242": RelayLogResultDtoRecoveriesItemDto,
+    "shape1243": RelayLogResultDtoScopeDto,
+    "shape1245": RelayLogResultDtoSubscribersItemDto,
+    "shape460": RelayProcessPayloadDto,
+    "shape1251": RelayProcessResultDto,
+    "shape1253": RelayProcessResultDtoGapsItemDto,
+    "shape1254": RelayPublishResultDto,
+    "shape463": RelayTopicsPayloadVariant1Dto,
+    "shape464": RelayTopicsPayloadVariant2Dto,
+    "shape1255": RelayTopicsResultDto,
+    "shape1256": RelayTopicsResultDtoScopeDto,
+    "shape465": ScheduleDefinePayloadDto,
+    "shape466": ScheduleFilesPayloadDto,
+    "shape467": ScheduleForgetPayloadDto,
+    "shape468": ScheduleListPayloadDto,
+    "shape469": SchedulePausePayloadDto,
+    "shape470": ScheduleReadPayloadDto,
+    "shape471": ScheduleSavePayloadDto,
+    "shape492": ScheduleSyncPayloadDto,
+    "shape493": SwarmTypesPayloadDto,
+    "shape494": TodosReadPayloadDto,
+    "shape497": ToolScopeDisconnectPayloadDto,
+    "shape1293": ToolScopeDisconnectResultDto,
+    "shape498": ToolScopeHostChangePayloadDto,
+    "shape499": ToolScopeHostListPayloadDto,
+    "shape500": ToolScopeHostReceiptPayloadDto,
+    "shape501": ToolScopeHostSavePayloadDto,
+    "shape503": ToolScopeHostStatusPayloadDto,
+    "shape504": ToolScopeListPayloadDto,
+    "shape1300": ToolScopeListResultDto,
+    "shape505": ToolScopeWorkerAckPayloadDto,
+    "shape507": ToolScopeWorkerConsumePayloadDto,
+    "shape513": ToolScopeWorkerPublishPayloadDto,
+    "shape515": ToolScopeWorkerReadPayloadDto,
+    "shape516": ToolScopeWorkerRegisterPayloadDto,
+    "shape518": ToolScopeWorkerStatusPayloadDto,
+    "shape519": TriggerDefinePayloadDto,
+    "shape520": TriggerForgetPayloadDto,
+    "shape521": TriggerPausePayloadDto,
+    "shape522": UnionAbortPayloadDto,
+    "shape523": UnionBeginPayloadDto,
+    "shape1310": UnionBeginResultDto,
+    "shape524": UnionConflictListPayloadDto,
+    "shape525": UnionConflictOpenPayloadDto,
+    "shape1314": UnionConflictOpenResultDto,
+    "shape526": UnionConflictResolvePayloadDto,
+    "shape530": UnionDisablePayloadDto,
+    "shape531": UnionEnablePayloadDto,
+    "shape1315": UnionEnableResultDto,
+    "shape532": UnionHiddenPayloadDto,
+    "shape1316": UnionHiddenResultDto,
+    "shape533": UnionReadyPayloadDto,
+    "shape534": UnionStatusPayloadDto,
+    "shape535": UsageAgentPayloadDto,
+    "shape546": UsageCallsPayloadDto,
+    "shape547": UsageConversationPayloadDto,
+    "shape549": UsageOrchestrationPayloadDto,
+    "shape550": UsageProjectPayloadDto,
+    "shape551": UsageRunPayloadDto,
+    "shape552": UsageSubscribePayloadDto,
+    "shape561": UsageUnsubscribePayloadDto,
+    "shape562": WebFetchPayloadDto,
+    "shape563": WebSearchPayloadDto,
+    "shape1347": NotificationVariant3Dto,
+    "shape1349": NotificationVariant4Dto,
+    "shape1351": NotificationVariant5Dto,
+    "shape1353": NotificationVariant6Dto,
+    "shape1360": NotificationVariant7Dto,
+    "shape1362": NotificationVariant8Dto,
+    "shape1364": NotificationVariant9Dto,
+    "shape1366": NotificationVariant10Dto,
+    "shape1368": NotificationVariant11Dto,
+    "shape1370": NotificationVariant12Dto,
 }
 
 _REQUESTS = {
@@ -9901,6 +10284,11 @@ _REQUESTS = {
     ConversationContextCountRequest: "conversation.context.count",
     ConversationContextSnapshotRequest: "conversation.context.snapshot",
     ConversationFollowRequest: "conversation.follow",
+    ConversationGoalCancelRequest: "conversation.goal.cancel",
+    ConversationGoalGetRequest: "conversation.goal.get",
+    ConversationGoalPauseRequest: "conversation.goal.pause",
+    ConversationGoalResumeRequest: "conversation.goal.resume",
+    ConversationGoalStartRequest: "conversation.goal.start",
     ConversationLatestRequest: "conversation.latest",
     ConversationLifecycleRequest: "conversation.lifecycle",
     ConversationListRequest: "conversation.list",
@@ -9924,6 +10312,12 @@ _REQUESTS = {
     EventFireRequest: "event.fire",
     FilestoreListRequest: "filestore.list",
     FiringListRequest: "firing.list",
+    GoalAnswerRequest: "goal.answer",
+    GoalListRequest: "goal.list",
+    GoalReceiptRequest: "goal.receipt",
+    GoalSourcesRequest: "goal.sources",
+    GoalStartRequest: "goal.start",
+    GoalStatusRequest: "goal.status",
     InboxListRequest: "inbox.list",
     InboxPublishRequest: "inbox.publish",
     InboxReadRequest: "inbox.read",
@@ -10023,6 +10417,8 @@ _REQUESTS = {
     MessageInstanceOpenRequest: "message.instance.open",
     MessageInstanceStopRequest: "message.instance.stop",
     MessageInstancesRequest: "message.instances",
+    MessageListenRequest: "message.listen",
+    MessageUnlistenRequest: "message.unlisten",
     OrchestrationAnswerRequest: "orchestration.answer",
     OrchestrationCancelRequest: "orchestration.cancel",
     OrchestrationCapsRequest: "orchestration.caps",
@@ -10146,7 +10542,12 @@ _FIELDS = {
     IdDto: {"id": "id"},
     ImageAdmissionRequestDto: {"invocation": "invocation", "ordinal": "ordinal", "requestId": "request_id"},
     ConversationDto: {"conversation": "conversation"},
+    GoalControlDto: {"conversation": "conversation", "goal": "goal", "requestId": "request_id", "version": "version"},
     ConversationOpenRequestExDto: {"externalConversation": "external_conversation", "maxModelCalls": "max_model_calls", "maxTurns": "max_turns", "noBudget": "no_budget", "noTurnCap": "no_turn_cap", "project": "project", "source": "source"},
+    GoalAnswerRequestDto: {"answer": "answer", "conversation": "conversation", "goal": "goal", "question": "question", "requestId": "request_id"},
+    GoalListRequestDto: {"after": "after", "limit": "limit", "project": "project"},
+    GoalReceiptRequestDto: {"project": "project", "requestId": "request_id"},
+    GoalStatusRequestDto: {"goal": "goal", "project": "project"},
     OmitDto: {"author": "author", "autoTag": "auto_tag", "contentType": "content_type", "contentTypeVersion": "content_type_version", "documentAuthor": "document_author", "kind": "kind", "subtype": "subtype", "tagGroup": "tag_group", "tags": "tags", "untyped": "untyped", "when": "when"},
     DiscoverySelectionDto: {"cursor": "cursor", "filter": "filter", "limit": "limit", "scopes": "scopes"},
     InformationFilterDto: {"author": "author", "autoTag": "auto_tag", "contentType": "content_type", "contentTypeVersion": "content_type_version", "documentAuthor": "document_author", "kind": "kind", "search": "search", "subtype": "subtype", "tagGroup": "tag_group", "tags": "tags", "untyped": "untyped", "when": "when"},
@@ -10303,6 +10704,7 @@ _FIELDS = {
     ContextSnapshotDto: {"agent": "agent", "captured_at": "captured_at", "conversation": "conversation", "count": "count", "messages": "messages", "model": "model", "projection": "projection", "sampling": "sampling", "tools": "tools"},
     ContextSnapshotDtoCountVariant2Dto: {"basis": "basis", "gaps": "gaps", "tokens": "tokens"},
     ContextSnapshotDtoToolsItemDto: {"description": "description", "name": "name", "parameters": "parameters"},
+    ConversationGoalStatusDto: {"activations": "activations", "agent": "agent", "conversation": "conversation", "criteria": "criteria", "detail": "detail", "goal": "goal", "lastJob": "last_job", "lastTurn": "last_turn", "maxActivations": "max_activations", "modelCallLimit": "model_call_limit", "modelCallsSpent": "model_calls_spent", "objective": "objective", "reason": "reason", "state": "state", "version": "version"},
     ConversationViewDto: {"id": "id", "maxModelCalls": "max_model_calls", "maxTurns": "max_turns", "modelCallsSpent": "model_calls_spent", "noBudget": "no_budget", "noTurnCap": "no_turn_cap", "project": "project", "title": "title"},
     LifecycleViewDto: {"id": "id", "lifecycle": "lifecycle"},
     ProjectionMessageDto2: {"content": "content", "role": "role"},
@@ -10337,6 +10739,16 @@ _FIELDS = {
     FiringRecordDto: {"arrivedAt": "arrived_at", "data": "data", "event": "event", "finishedAt": "finished_at", "fireAt": "fire_at", "id": "id", "jobId": "job_id", "reason": "reason", "schedule": "schedule", "startedAt": "started_at", "status": "status", "supersededBy": "superseded_by", "target": "target", "topic": "topic", "trigger": "trigger"},
     FileStoreOptionDto: {"alias": "alias", "role": "role"},
     FileStoreCatalogDto: {"stores": "stores"},
+    GoalAnswerReceiptDto: {"conversation": "conversation", "goal": "goal", "question": "question", "requestId": "request_id"},
+    GoalResultDto: {"evidence": "evidence", "job": "job", "summary": "summary", "turn": "turn"},
+    GoalPendingBatchDto: {"deadline": "deadline", "id": "id", "memberCount": "member_count", "state": "state"},
+    GoalRelayWakeDto: {"binding": "binding", "failure": "failure", "generation": "generation", "pendingBatch": "pending_batch", "topic": "topic"},
+    GoalScheduleWakeDto: {"generation": "generation", "nextFireAt": "next_fire_at", "paused": "paused", "schedule": "schedule"},
+    GoalStatusDto: {"agent": "agent", "conversation": "conversation", "detail": "detail", "goal": "goal", "instance": "instance", "latestResult": "latest_result", "lifecycle": "lifecycle", "moreRelayListeners": "more_relay_listeners", "moreSchedules": "more_schedules", "nextScheduleAt": "next_schedule_at", "objective": "objective", "project": "project", "readable": "readable", "reason": "reason", "relayListeners": "relay_listeners", "schedules": "schedules", "state": "state", "version": "version"},
+    GoalPageDto: {"goals": "goals", "next": "next"},
+    GoalAgentStartedDto: {"conversation": "conversation", "goal": "goal", "instance": "instance", "requestId": "request_id", "version": "version"},
+    GoalAgentSourcesDto: {"goal": "goal", "project": "project", "sources": "sources"},
+    GoalAgentSourcesDtoSourcesItemDto: {"generation": "generation", "kind": "kind", "topic": "topic"},
     InboxItemDto: {"about": "about", "answer": "answer", "arrivedAt": "arrived_at", "conversation": "conversation", "ending": "ending", "firing": "firing", "handle": "handle", "id": "id", "kind": "kind", "readAt": "read_at"},
     InboxPageDto: {"items": "items", "unread": "unread"},
     InboxMarkedDto: {"marked": "marked", "unread": "unread"},
@@ -10440,6 +10852,8 @@ _FIELDS = {
     MessageDeliveriesDto: {"deliveries": "deliveries", "more": "more", "offset": "offset"},
     MessageInstanceDto: {"active": "active", "agent": "agent", "archived": "archived", "conversation": "conversation", "createdAt": "created_at", "defaultInstance": "default_instance", "id": "id", "job": "job", "lifetime": "lifetime", "pending": "pending", "project": "project", "state": "state"},
     MessageInstancesDto: {"instances": "instances", "more": "more", "offset": "offset"},
+    GoalAgentListenerDto: {"binding": "binding", "generation": "generation", "goal": "goal", "topic": "topic"},
+    GoalAgentUnlistenReceiptDto: {"binding": "binding", "goal": "goal", "requestId": "request_id", "version": "version"},
     OrchestrationAnsweredDto: {"id": "id", "state": "state"},
     OrchestrationCancelledDto: {"id": "id", "state": "state"},
     SettingViewDto: {"source": "source", "value": "value"},
@@ -10618,6 +11032,9 @@ _FIELDS = {
     ConversationContextSnapshotPayloadDto: {"agent": "agent", "conversation": "conversation", "measure": "measure"},
     ConversationFollowPayloadVariant1Dto: {"conversation": "conversation"},
     ConversationFollowPayloadVariant2Dto: {"conversations": "conversations"},
+    ConversationGoalGetPayloadDto: {"conversation": "conversation", "requestId": "request_id"},
+    ConversationGoalResumePayloadDto: {"conversation": "conversation", "goal": "goal", "maxActivations": "max_activations", "maxModelCalls": "max_model_calls", "requestId": "request_id", "version": "version"},
+    ConversationGoalStartPayloadDto: {"agent": "agent", "conversation": "conversation", "criteria": "criteria", "maxActivations": "max_activations", "objective": "objective", "requestId": "request_id"},
     ConversationLatestPayloadDto: {"agent": "agent", "project": "project"},
     ConversationLifecyclePayloadDto: {"conversation": "conversation", "lifecycle": "lifecycle"},
     ConversationListPayloadDto: {"lifecycle": "lifecycle", "project": "project"},
@@ -10639,6 +11056,8 @@ _FIELDS = {
     EventFirePayloadDto: {"data": "data", "event": "event"},
     EventFirePayloadDtoDataVariant2Dto: {"text": "text"},
     FiringListPayloadDto: {"limit": "limit", "offset": "offset", "status": "status", "trigger": "trigger"},
+    GoalSourcesPayloadDto: {"after": "after", "conversation": "conversation", "goal": "goal", "kind": "kind", "limit": "limit", "prefix": "prefix"},
+    GoalStartPayloadDto: {"agent": "agent", "criteria": "criteria", "objective": "objective", "project": "project", "requestId": "request_id"},
     InboxListPayloadDto: {"limit": "limit", "offset": "offset", "project": "project", "unread": "unread"},
     InboxPublishPayloadDto: {"kind": "kind", "project": "project", "requestId": "request_id", "text": "text"},
     InboxReadPayloadDto: {"items": "items", "project": "project"},
@@ -10739,6 +11158,8 @@ _FIELDS = {
     MessageInstanceOpenPayloadDto: {"agent": "agent", "makeDefault": "make_default", "project": "project", "requestId": "request_id"},
     MessageInstanceStopPayloadDto: {"instance": "instance"},
     MessageInstancesPayloadDto: {"archived": "archived", "limit": "limit", "offset": "offset", "project": "project"},
+    MessageListenPayloadDto: {"batchCount": "batch_count", "conversation": "conversation", "generation": "generation", "goal": "goal", "maxDelaySeconds": "max_delay_seconds", "topic": "topic"},
+    MessageUnlistenPayloadDto: {"binding": "binding", "conversation": "conversation", "goal": "goal", "requestId": "request_id", "version": "version"},
     OrchestrationAnswerPayloadDto: {"answer": "answer", "choices": "choices", "id": "id"},
     OrchestrationCapsPayloadDto: {"project": "project"},
     OrchestrationListPayloadDto: {"limit": "limit", "project": "project", "state": "state"},
@@ -10914,6 +11335,11 @@ _FIELDS = {
     ConversationContextCountRequest: {"agent": "agent", "conversation": "conversation"},
     ConversationContextSnapshotRequest: {"agent": "agent", "conversation": "conversation", "measure": "measure"},
     ConversationFollowRequest: {},
+    ConversationGoalCancelRequest: {"conversation": "conversation", "goal": "goal", "requestId": "request_id", "version": "version"},
+    ConversationGoalGetRequest: {"conversation": "conversation", "requestId": "request_id"},
+    ConversationGoalPauseRequest: {"conversation": "conversation", "goal": "goal", "requestId": "request_id", "version": "version"},
+    ConversationGoalResumeRequest: {"conversation": "conversation", "goal": "goal", "maxActivations": "max_activations", "maxModelCalls": "max_model_calls", "requestId": "request_id", "version": "version"},
+    ConversationGoalStartRequest: {"agent": "agent", "conversation": "conversation", "criteria": "criteria", "maxActivations": "max_activations", "objective": "objective", "requestId": "request_id"},
     ConversationLatestRequest: {"agent": "agent", "project": "project"},
     ConversationLifecycleRequest: {"conversation": "conversation", "lifecycle": "lifecycle"},
     ConversationListRequest: {"lifecycle": "lifecycle", "project": "project"},
@@ -10937,6 +11363,12 @@ _FIELDS = {
     EventFireRequest: {"data": "data", "event": "event"},
     FilestoreListRequest: {},
     FiringListRequest: {"limit": "limit", "offset": "offset", "status": "status", "trigger": "trigger"},
+    GoalAnswerRequest: {"answer": "answer", "conversation": "conversation", "goal": "goal", "question": "question", "requestId": "request_id"},
+    GoalListRequest: {"after": "after", "limit": "limit", "project": "project"},
+    GoalReceiptRequest: {"project": "project", "requestId": "request_id"},
+    GoalSourcesRequest: {"after": "after", "conversation": "conversation", "goal": "goal", "kind": "kind", "limit": "limit", "prefix": "prefix"},
+    GoalStartRequest: {"agent": "agent", "criteria": "criteria", "objective": "objective", "project": "project", "requestId": "request_id"},
+    GoalStatusRequest: {"goal": "goal", "project": "project"},
     InboxListRequest: {"limit": "limit", "offset": "offset", "project": "project", "unread": "unread"},
     InboxPublishRequest: {"kind": "kind", "project": "project", "requestId": "request_id", "text": "text"},
     InboxReadRequest: {"items": "items", "project": "project"},
@@ -11036,6 +11468,8 @@ _FIELDS = {
     MessageInstanceOpenRequest: {"agent": "agent", "makeDefault": "make_default", "project": "project", "requestId": "request_id"},
     MessageInstanceStopRequest: {"instance": "instance"},
     MessageInstancesRequest: {"archived": "archived", "limit": "limit", "offset": "offset", "project": "project"},
+    MessageListenRequest: {"batchCount": "batch_count", "conversation": "conversation", "generation": "generation", "goal": "goal", "maxDelaySeconds": "max_delay_seconds", "topic": "topic"},
+    MessageUnlistenRequest: {"binding": "binding", "conversation": "conversation", "goal": "goal", "requestId": "request_id", "version": "version"},
     OrchestrationAnswerRequest: {"answer": "answer", "choices": "choices", "id": "id"},
     OrchestrationCancelRequest: {"id": "id"},
     OrchestrationCapsRequest: {"project": "project"},

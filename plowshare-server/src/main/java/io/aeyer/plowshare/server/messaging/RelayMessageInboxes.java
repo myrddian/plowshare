@@ -11,6 +11,8 @@ import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayConsumerRepository;
 import io.aeyer.plowshare.server.relay.RelayPayload;
 import io.aeyer.plowshare.server.relay.RelayRetirementRepository;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
@@ -101,8 +103,11 @@ public final class RelayMessageInboxes implements MessageInboxes {
             + "."
             + RelayPort.hash(instance.agent());
     var inbox = inboxes.retain(instance.account(), instance.project(), instance.agent(), name);
-    relay.registerTopic(
-        inbox.subscription().topic(), RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+    relay.registerOwnedTopic(
+        inbox.subscription().topic(),
+        RelayPayload.Kind.TEXT,
+        Relay.Policy.systemDefault(),
+        RelayTopicOwnership.internal(Owner.MESSAGING));
     relay.subscribe(inbox.subscription(), Relay.Start.OLDEST_RETAINED);
     return inbox;
   }

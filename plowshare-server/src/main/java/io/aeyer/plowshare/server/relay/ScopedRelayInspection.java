@@ -14,12 +14,14 @@ public final class ScopedRelayInspection implements RelayInspection {
   private final ProjectMembers members;
   private final ProjectWorkspaces projects;
   private final RelayLogRepository logs;
+  private final RelayProjectReadAccess readAccess;
 
   public ScopedRelayInspection(
       ProjectMembers members, ProjectWorkspaces projects, RelayLogRepository logs) {
     this.members = Objects.requireNonNull(members);
     this.projects = Objects.requireNonNull(projects);
     this.logs = Objects.requireNonNull(logs);
+    this.readAccess = RelayProjectReadAccess.existing(members, projects);
   }
 
   private Relay.Scope require(String account, String project, boolean system) {
@@ -29,8 +31,7 @@ public final class ScopedRelayInspection implements RelayInspection {
         throw new CallerFault("System Relay logs require server administration access");
       return Relay.SystemScope.SERVER;
     }
-    var owner = projects.personalOwner(project);
-    if (owner.isPresent() && !owner.get().equals(account) || !members.mayUse(project, account))
+    if (!readAccess.mayRead(account, project))
       throw new CallerFault("Relay project log is unavailable to this account");
     var id = projects.id(project);
     if (id == null) throw new CallerFault("Relay project log is unavailable to this account");

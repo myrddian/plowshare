@@ -19798,6 +19798,3666 @@
   },
   {
     "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 2,
+      "maxDelaySeconds": 1
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 16,
+      "maxDelaySeconds": 86400
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 8
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "maxDelaySeconds": 60
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": null,
+      "maxDelaySeconds": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 1,
+      "maxDelaySeconds": 60
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 17,
+      "maxDelaySeconds": 60
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 8,
+      "maxDelaySeconds": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 8,
+      "maxDelaySeconds": 86401
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.listen",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "topic": "news.feed",
+      "generation": "00000000-0000-0000-0000-000000000002",
+      "batchCount": 8,
+      "maxDelaySeconds": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000000"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 0,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 2147483648,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "topic": "news.feed"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "future": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "invalid"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000000",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 0,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "message.unlisten",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "binding": "00000000-0000-0000-0000-000000000004",
+      "version": 5.5,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": " "
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000000",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal\n",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "00000000-0000-0000-0000-000000000000",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": null,
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd\n",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "invalid",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "\t\u001c 　"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "data\u0000set"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n",
+      "version": 5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "future": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal\n",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": null,
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.answer",
+    "value": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "00000000-0000-0000-0000-000000000000"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": 1
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": 1000000
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": 1000001
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "conversation.goal.resume",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "version": 4,
+      "requestId": "00000000-0000-0000-0000-000000000003",
+      "maxModelCalls": "100"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.goal.get",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "criteria": null,
+      "state": "WAITING",
+      "version": 4,
+      "activations": 1,
+      "maxActivations": 8,
+      "lastJob": "job_1",
+      "lastTurn": 1,
+      "reason": null,
+      "detail": "Waiting for the dependency to settle",
+      "modelCallsSpent": 1,
+      "modelCallLimit": 8
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "conversation.goal.get",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "criteria": null,
+      "state": "waiting",
+      "version": 4,
+      "activations": 1,
+      "maxActivations": 8,
+      "lastJob": "job_1",
+      "lastTurn": 1,
+      "reason": null,
+      "detail": "Waiting for the dependency to settle",
+      "modelCallsSpent": 1,
+      "modelCallLimit": 8
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": [
+          "report-v1"
+        ]
+      },
+      "nextScheduleAt": "2026-01-01T00:01:00Z",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": "news.feed",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false,
+      "future": true
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": null,
+      "objective": null,
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": false,
+      "reason": null,
+      "detail": null,
+      "latestResult": null,
+      "nextScheduleAt": null,
+      "schedules": [],
+      "relayListeners": [],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": null,
+      "objective": "private",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": false,
+      "reason": null,
+      "detail": null,
+      "latestResult": null,
+      "nextScheduleAt": null,
+      "schedules": [],
+      "relayListeners": [],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": null,
+      "objective": null,
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": false,
+      "reason": null,
+      "detail": null,
+      "latestResult": null,
+      "nextScheduleAt": null,
+      "schedules": [],
+      "relayListeners": [],
+      "moreSchedules": true,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": [
+          "report-v1"
+        ]
+      },
+      "nextScheduleAt": "tomorrow",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": "news.feed",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": []
+      },
+      "nextScheduleAt": "2026-01-01T00:01:00Z",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": "news.feed",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": [
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ]
+      },
+      "nextScheduleAt": "2026-01-01T00:01:00Z",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": "news.feed",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": [
+          "report-v1"
+        ]
+      },
+      "nextScheduleAt": "2026-01-01T00:01:00Z",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": null,
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "project": "fixture",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "agent": "goal_worker",
+      "objective": "Check the report",
+      "lifecycle": "STANDING",
+      "state": "WAITING",
+      "version": 4,
+      "readable": true,
+      "reason": null,
+      "detail": "Waiting for another event",
+      "latestResult": {
+        "job": "job_Goal",
+        "turn": 1,
+        "summary": "Report landed",
+        "evidence": [
+          "report-v1"
+        ]
+      },
+      "nextScheduleAt": "2026-01-01T00:01:00Z",
+      "schedules": [
+        {
+          "schedule": "daily",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "paused": false,
+          "nextFireAt": "2026-01-01T00:01:00Z"
+        }
+      ],
+      "relayListeners": [
+        {
+          "binding": "00000000-0000-0000-0000-000000000004",
+          "topic": "News!",
+          "generation": "00000000-0000-0000-0000-000000000004",
+          "failure": null,
+          "pendingBatch": {
+            "id": "00000000-0000-0000-0000-000000000004",
+            "state": "READY",
+            "memberCount": 2,
+            "deadline": "2026-01-01T00:01:00Z"
+          }
+        }
+      ],
+      "moreSchedules": false,
+      "moreRelayListeners": false
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.list",
+    "value": {
+      "goals": [
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        }
+      ],
+      "next": "00000000-0000-0000-0000-000000000001"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.list",
+    "value": {
+      "goals": [],
+      "next": null
+    },
+    "valid": true
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.list",
+    "value": {
+      "goals": [
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        },
+        {
+          "goal": "00000000-0000-0000-0000-000000000001",
+          "project": "fixture",
+          "conversation": "cnv_Goal",
+          "instance": "ins_Goal",
+          "agent": "goal_worker",
+          "objective": "Check the report",
+          "lifecycle": "STANDING",
+          "state": "WAITING",
+          "version": 4,
+          "readable": true,
+          "reason": null,
+          "detail": "Waiting for another event",
+          "latestResult": {
+            "job": "job_Goal",
+            "turn": 1,
+            "summary": "Report landed",
+            "evidence": [
+              "report-v1"
+            ]
+          },
+          "nextScheduleAt": "2026-01-01T00:01:00Z",
+          "schedules": [
+            {
+              "schedule": "daily",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "paused": false,
+              "nextFireAt": "2026-01-01T00:01:00Z"
+            }
+          ],
+          "relayListeners": [
+            {
+              "binding": "00000000-0000-0000-0000-000000000004",
+              "topic": "news.feed",
+              "generation": "00000000-0000-0000-0000-000000000004",
+              "failure": null,
+              "pendingBatch": {
+                "id": "00000000-0000-0000-0000-000000000004",
+                "state": "READY",
+                "memberCount": 2,
+                "deadline": "2026-01-01T00:01:00Z"
+              }
+            }
+          ],
+          "moreSchedules": false,
+          "moreRelayListeners": false
+        }
+      ],
+      "next": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "result",
+    "operation": "goal.receipt",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001",
+      "conversation": "cnv_Goal",
+      "instance": "ins_Goal",
+      "version": 1,
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "after": "00000000-0000-0000-0000-000000000001",
+      "limit": 50
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": ""
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": " fixture "
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "after": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "after": "wrong"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "after": "00000000-0000-0000-0000-000000000000"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "limit": null
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "limit": 51
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "limit": "2"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "limit": 1.5
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.list",
+    "value": {
+      "project": "fixture",
+      "conversation": "cnv_Goal"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.status",
+    "value": {
+      "project": "fixture",
+      "goal": "00000000-0000-0000-0000-000000000001"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.status",
+    "value": {
+      "goal": "00000000-0000-0000-0000-000000000001"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.receipt",
+    "value": {
+      "project": "fixture",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": true
+  },
+  {
+    "boundary": "input",
+    "operation": "goal.receipt",
+    "value": {
+      "project": "fixture",
+      "requestId": "bad"
+    },
+    "valid": false
+  },
+  {
+    "boundary": "input",
     "operation": "inbox.publish",
     "value": {
       "project": "network-privacy-watch",

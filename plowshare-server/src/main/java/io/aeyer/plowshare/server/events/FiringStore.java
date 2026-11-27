@@ -3,6 +3,7 @@ package io.aeyer.plowshare.server.events;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Specialist persistence contract. SQL, row decoding and guarded transitions belong to its JDBC
@@ -19,6 +20,14 @@ public interface FiringStore {
       Instant fireAt,
       TriggerRecord trigger,
       Instant at);
+
+  /** Retains the scheduler's Goal binding evidence on its own exact trigger. */
+  Optional<FiringRecord> arriveGoalSchedule(
+      String event,
+      EventPayload.Scheduled data,
+      TriggerRecord trigger,
+      Instant at,
+      UUID generation);
 
   /**
    * Serializes scheduled admission and queue supersession across different publication scopes.

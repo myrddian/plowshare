@@ -120,7 +120,8 @@ export class ActivityClient {
       view !== 'runs' &&
       view !== 'definitions' &&
       view !== 'schedules' &&
-      view !== 'builder'
+      view !== 'builder' &&
+      view !== 'goals'
     )
       throw new Error('Choose an Activity view.');
     if (view === undefined) {
@@ -143,7 +144,8 @@ export class ActivityClient {
   }
   async refresh(view?: ActivityView) {
     if (view === 'inbox') return this.inbox();
-    if (view === 'definitions' || view === 'schedules') return;
+    if (view === 'definitions' || view === 'schedules' || view === 'goals')
+      return;
     if (view === 'runs' || view === 'builder') {
       await this.runs();
       const selected = this.selected.get(view);

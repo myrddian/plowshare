@@ -1046,7 +1046,7 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
 
   /** A caller-supplied durable key; repeated submissions never speak another first turn. */
   public OrchestrationRecord start(Start start, UUID requestId, String payload) {
-    return start(start, requestId, payload, null);
+    return start(start, requestId, payload, null, work, () -> {});
   }
 
   /**
@@ -1056,14 +1056,31 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
    */
   OrchestrationRecord startFromRun(
       Start start, OperationAuthority.Admission caller, UUID requestId, String payload) {
+    return startFromRun(start, caller, requestId, payload, work, () -> {});
+  }
+
+  /** Applies the caller path with an explicit deadline on the physical start transaction. */
+  OrchestrationRecord startFromRun(
+      Start start,
+      OperationAuthority.Admission caller,
+      UUID requestId,
+      String payload,
+      UnitOfWork startWork,
+      Runnable requireAcceptance) {
     Objects.requireNonNull(caller, "caller admission");
+    Objects.requireNonNull(requireAcceptance, "start acceptance fence");
     if (operations == null || start.parent() != null)
       throw new CallerFault("A caller turn can only start a root orchestration");
-    return start(start, requestId, payload, caller);
+    return start(start, requestId, payload, caller, startWork, requireAcceptance);
   }
 
   private OrchestrationRecord start(
-      Start start, UUID requestId, String payload, OperationAuthority.Admission admittedCaller) {
+      Start start,
+      UUID requestId,
+      String payload,
+      OperationAuthority.Admission admittedCaller,
+      UnitOfWork startWork,
+      Runnable requireAcceptance) {
     access.requireWork(start.home().project(), start.callerHandle());
     access.requireSession(start.callerSession(), start.callerHandle());
     var caller = callerAdmission(start, admittedCaller);
@@ -1086,8 +1103,11 @@ public final class Orchestrations implements ConductorActions, UsageAware, Orche
                         stage.holdsPhases()))
             .toList();
     CommittedStart committed =
-        work.inTransaction(
+        startWork.inTransaction(
             () -> {
+              // The Goal row is locked before the receipt, serializing start acceptance against
+              // cancellation without holding either lock while opening or speaking the new log.
+              requireAcceptance.run();
               Supplier<OrchestrationRecord> insert =
                   () -> {
                     OperationAuthority.Admission envelope = null;

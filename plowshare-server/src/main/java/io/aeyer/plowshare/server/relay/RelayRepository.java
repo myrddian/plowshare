@@ -17,6 +17,16 @@ public interface RelayRepository {
   /** Atomic default registration; existing policy remains unchanged under concurrent publishers. */
   Relay.Topic registerTopic(Relay.TopicKey key, RelayPayload.Kind kind, Relay.Policy initialPolicy);
 
+  /**
+   * Registers ownership in the topic transaction. Explicit deployment policy can replace retention.
+   */
+  Relay.Topic registerOwnedTopic(
+      Relay.TopicKey key,
+      RelayPayload.Kind kind,
+      Relay.Policy policy,
+      RelayTopicOwnership ownership,
+      boolean replacePolicy);
+
   /** Coherent metadata for an existing topic, without registration or policy changes. */
   Relay.Topic topic(Relay.TopicKey key);
 

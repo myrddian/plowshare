@@ -34,7 +34,18 @@ Desired schedule files and runtime projections are separate. Definition save
 writes desired state before reconciliation; unavailable/incomplete source scans
 must not become deletion. Mutable-source control and deployed application runtime
 overrides have different ownership. Preserve occurrence identity and current
-execution/control authority independently of historical registration.
+execution/control authority independently of historical registration. For dedicated Goal
+destinations, the existing file projection owns the binding generation. Capture
+it with the schedule claim and retain it on the corresponding firing for
+post-commit dispatch and recovery. Ordinary events and other trigger subscribers
+cannot mint this evidence. File replacement, refusal and effective pause changes
+invalidate earlier unclaimed Goal wakes. The schedule owner locks its source
+and affected Goal UUIDs in order before changing schedule, firing or file
+state in one bounded SQL transaction. Goal claims and settlement already hold
+the Goal row before inspecting bindings. Ticker publication locks the schedule
+before touching queued firings. An admitted cycle keeps its owned input during
+a binding change. Final removal closes a parked goal once no direct steering
+remains. The Goal row retains the active cycle and automatic rate timestamp.
 For web intent, a scheduled agent turn carries the saved instruction separately
 from its event payload and harness speaker. A workflow it starts can pin that
 instruction under the same execution owner. Manually fired events do not carry
@@ -66,6 +77,20 @@ still require attention.
 Current human Managers are resolved for attention copies; the registrar/executor
 is not an implicit recipient. Project Viewers can inspect shared output, Managers
 acknowledge it, and neither publication grants access to private execution logs.
+
+## Dedicated Goal waits
+
+Dedicated Goal roots park an exact retained file-read approval or a
+caller-bound orchestration started through `goal_orchestrate`. The Goal row owns
+park, pause, admission and cancellation, while the approval or orchestration
+owner retains the original effect and receipt. The wait keeps the same cycle,
+activation, origin call slot and wake generation. A resumed Goal rechecks its
+retained execution authority, source, and the owner's current decision or
+terminal attempt. Orchestration results carry typed provenance and inherit
+their information access requirements. An unknown start or effect blocks
+instead of enabling another dispatch. Exact owner cleanup happens outside the
+Goal transaction. The scheduler retains active work until the original job
+settles. [Goal waits](../../docs/conversation-goals-design.md#retained-dependency-waits)
 
 ## Agent budget approvals
 

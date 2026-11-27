@@ -1,9 +1,11 @@
 package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.server.archive.Conversations;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,8 +22,15 @@ public class TodoFrames implements FrameArea {
     this.conversations = Objects.requireNonNull(conversations, "conversations");
   }
 
+  private GoalConversationAccess goalAccess;
+
+  @Autowired(required = false)
+  void useGoalAccess(GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
+  }
+
   @Override
   public Map<String, FrameHandler> frames() {
-    return Map.of(FrameTypes.TODOS_READ, new TodosReadHandler(todos, conversations));
+    return Map.of(FrameTypes.TODOS_READ, new TodosReadHandler(todos, conversations, goalAccess));
   }
 }

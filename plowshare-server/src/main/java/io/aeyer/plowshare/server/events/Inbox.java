@@ -1,15 +1,18 @@
 package io.aeyer.plowshare.server.events;
 
 import io.aeyer.plowshare.protocol.AccountEvent;
+import io.aeyer.plowshare.protocol.RelayPort;
 import io.aeyer.plowshare.server.agents.Outcome;
+import io.aeyer.plowshare.server.archive.UnitOfWork;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /** Delivery into a user-inbox, and telling that account's sockets the count changed. */
-public class Inbox {
+public class Inbox implements GoalInbox {
 
   public static final String CHANGED = "inbox.changed";
 
@@ -17,6 +20,7 @@ public class Inbox {
   private final AccountPushes pushes;
   private final Supplier<Instant> clock;
   private final Duration questionAlertRetry;
+  private final UnitOfWork transactions;
 
   public Inbox(InboxStore store, AccountPushes pushes, Supplier<Instant> clock) {
     this(store, pushes, clock, EventsProperties.DEFAULT_QUESTION_ALERT_RETRY);
@@ -27,6 +31,16 @@ public class Inbox {
       AccountPushes pushes,
       Supplier<Instant> clock,
       Duration questionAlertRetry) {
+    this(store, pushes, clock, questionAlertRetry, UnitOfWork.NONE);
+  }
+
+  public Inbox(
+      InboxStore store,
+      AccountPushes pushes,
+      Supplier<Instant> clock,
+      Duration questionAlertRetry,
+      UnitOfWork transactions) {
+    this.transactions = Objects.requireNonNull(transactions, "transactions");
     if (questionAlertRetry == null
         || questionAlertRetry.isNegative()
         || questionAlertRetry.isZero())
@@ -115,6 +129,34 @@ public class Inbox {
     store.settle(about, at).stream()
         .distinct()
         .forEach(handle -> pushes.push(handle, changed(store.unread(handle))));
+  }
+
+  @Override
+  public String publish(String account, UUID goal, String conversation, UUID intent, Kind kind) {
+    RelayPort.identity(account);
+    Objects.requireNonNull(goal);
+    Objects.requireNonNull(intent);
+    Objects.requireNonNull(kind);
+    return transactions.inTransaction(
+        () -> {
+          var notice = store.goalNotice(account, goal, conversation, intent, kind, clock.get());
+          if (notice.inserted())
+            transactions.afterCommit(() -> pushes.push(account, changed(store.unread(account))));
+          return notice.id();
+        });
+  }
+
+  @Override
+  public void settleQuestion(String account, UUID goal, UUID intent) {
+    RelayPort.identity(account);
+    Objects.requireNonNull(goal);
+    Objects.requireNonNull(intent);
+    transactions.inTransaction(
+        () -> {
+          if (store.settleGoalQuestion(account, goal, intent, clock.get()))
+            transactions.afterCommit(() -> pushes.push(account, changed(store.unread(account))));
+          return null;
+        });
   }
 
   public int read(String handle, List<String> ids) {

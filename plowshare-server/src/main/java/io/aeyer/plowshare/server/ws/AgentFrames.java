@@ -11,8 +11,10 @@ import io.aeyer.plowshare.server.agents.Watchers;
 import io.aeyer.plowshare.server.agents.curator.Passes;
 import io.aeyer.plowshare.server.archive.Conversations;
 import io.aeyer.plowshare.server.archive.ProjectStore;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -109,6 +111,13 @@ public class AgentFrames implements FrameArea {
     this.orchestrations = orchestrations.getIfAvailable();
   }
 
+  private GoalConversationAccess goalAccess;
+
+  @Autowired(required = false)
+  void useGoalAccess(GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
+  }
+
   @Override
   public Map<String, FrameHandler> frames() {
     return Map.ofEntries(
@@ -122,7 +131,9 @@ public class AgentFrames implements FrameArea {
         Map.entry(FrameTypes.JOB_STATUS, new JobStatusHandler(jobs)),
         Map.entry(FrameTypes.JOB_CANCEL, new JobCancelHandler(jobs)),
         Map.entry(FrameTypes.JOB_STREAM, new JobStreamHandler(watchers)),
-        Map.entry(FrameTypes.CONVERSATION_FOLLOW, new ConversationFollowHandler(watchers, rules)),
+        Map.entry(
+            FrameTypes.CONVERSATION_FOLLOW,
+            new ConversationFollowHandler(watchers, rules, goalAccess)),
         Map.entry(FrameTypes.JOB_LIMITS, new JobLimitsHandler(limits)));
   }
 }

@@ -306,20 +306,25 @@ class Client:
             timeout=timeout,
             wait_for_capacity=wait_for_capacity,
         )
-        # Ex replies distinguish a resolved conversation from accepted durable work.
-        # A different success code is uncertain completion, never permission to replay.
-        expected_ex_code = {
+        # Operations with an exact success code cannot treat another success code
+        # as completion or replay the request.
+        expected_success = {
             "conversation.open.ex": "OK",
             "agent.run.ex": "ACCEPTED",
+            "message.unlisten": "OK",
+            "goal.answer": "OK",
+            "goal.list": "OK",
+            "goal.status": "OK",
+            "goal.receipt": "OK",
         }.get(operation)
         if (
-            expected_ex_code is not None
+            expected_success is not None
             and outcome.code in {"OK", "CREATED", "ACCEPTED", "NO_CONTENT"}
-            and outcome.code != expected_ex_code
+            and outcome.code != expected_success
         ):
             raise TransportError(
                 Delivery.INVALID_RESPONSE,
-                "Unexpected external conversation outcome; completion is unknown",
+                "Unexpected operation outcome; completion is unknown",
             )
         if outcome.code in {
             "OK",
@@ -329,7 +334,7 @@ class Client:
         } and not deployment_matches(operation, payload, outcome.payload):
             raise TransportError(
                 Delivery.INVALID_RESPONSE,
-                "Foreign Application deployment receipt; outcome is unknown",
+                "Foreign operation receipt; outcome is unknown",
             )
         return Reply(outcome.code, outcome.said, cast(T, outcome.payload))
 

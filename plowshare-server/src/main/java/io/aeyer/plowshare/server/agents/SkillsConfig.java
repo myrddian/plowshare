@@ -1,9 +1,12 @@
 package io.aeyer.plowshare.server.agents;
 
+import io.aeyer.plowshare.server.access.OperationRecords;
 import io.aeyer.plowshare.server.files.ProviderRouter;
+import io.aeyer.plowshare.server.goals.GoalHandoffs;
 import io.aeyer.plowshare.server.hooks.Hooks;
 import io.aeyer.plowshare.server.images.ImageStore;
 import java.util.function.Function;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -59,8 +62,12 @@ public class SkillsConfig {
       JobRuntime runtime,
       ImageStore images,
       io.aeyer.plowshare.server.archive.EntryStore entries,
-      Compaction compaction) {
-    SkillRuntime runner = new SkillRuntime(skills, callers, executions, runtime, images);
+      Compaction compaction,
+      ObjectProvider<GoalHandoffs> goals,
+      OperationRecords operations) {
+    SkillRuntime runner =
+        new SkillRuntime(
+            skills, callers, executions, runtime, images, goals::getIfAvailable, operations::find);
     runner.useContexts(new SkillContexts(entries, compaction, executions));
     runtime.useSkills(runner);
     return runner;

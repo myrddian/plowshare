@@ -14,10 +14,14 @@ public final class RetainedAgent {
   }
 
   public static void require(AgentDefinition definition) {
+    require(definition, false);
+  }
+
+  static void require(AgentDefinition definition, boolean goalOrchestrations) {
     AgentExposure.requireIntegration(definition);
     if (definition.tools().stream().anyMatch(tool -> !RetainedToolAccess.supported(tool))
         || !definition.skills().isEmpty()
-        || !definition.orchestrations().isEmpty()
+        || !goalOrchestrations && !definition.orchestrations().isEmpty()
         || definition.board()
         || definition.dynamic()
         || definition.announcesInbox()

@@ -4,6 +4,8 @@ import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -61,15 +63,19 @@ public final class RelayScheduledPublication implements ScheduledPublication {
     var accepted =
         transactions.inTransaction(
             () -> {
-              var scope = schedules.claimPublication(selected, following);
-              if (scope.isEmpty())
+              var claim = schedules.claimPublication(selected, following);
+              if (claim.isEmpty())
                 return java.util.Optional.<List<ScheduledArrival.Arrival>>empty();
               // Derived inside this package from the scope just claimed, never written down: a
               // topic name is private to the system that owns it (decision 0040). schedule.define
               // is this family's public contract; where its occurrences travel is not.
-              var topic = new Relay.TopicKey(scope.get(), EventTopics.scheduled(scope.get()));
-              relay.registerTopic(
-                  topic, RelayPayload.Kind.SCHEDULE_DUE, Relay.Policy.systemDefault());
+              var scope = claim.get().scope();
+              var topic = new Relay.TopicKey(scope, EventTopics.scheduled(scope));
+              relay.registerOwnedTopic(
+                  topic,
+                  RelayPayload.Kind.SCHEDULE_DUE,
+                  Relay.Policy.systemDefault(),
+                  RelayTopicOwnership.internal(Owner.EVENTS));
               var subscription = new Relay.SubscriptionKey(topic, "builtin.scheduling");
               // First registration starts at the cutover baseline without replaying legacy work.
               // Subsequent registration preserves the exact durable position.
@@ -79,7 +85,12 @@ public final class RelayScheduledPublication implements ScheduledPublication {
                 throw new IllegalStateException(
                     "scheduled Relay subscriber has an unadmitted publication");
               var copied =
-                  arrivals.record(payload.emits(), payload.schedule(), payload.fireAt(), now);
+                  arrivals.record(
+                      payload.emits(),
+                      payload.schedule(),
+                      payload.fireAt(),
+                      now,
+                      claim.get().goalGeneration());
               relay.advanceSeen(subscription, publication.position());
               return java.util.Optional.of(copied);
             });

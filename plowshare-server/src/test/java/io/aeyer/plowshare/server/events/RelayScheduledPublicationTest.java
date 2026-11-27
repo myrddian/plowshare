@@ -7,9 +7,12 @@ import io.aeyer.plowshare.protocol.RelayCausation;
 import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 
 class RelayScheduledPublicationTest {
   private static final Instant AT = Instant.parse("2026-10-05T01:00:00Z");
+  private static final UUID GENERATION = UUID.randomUUID();
   private final ScheduleStore schedules = mock(ScheduleStore.class);
   private final Relay relay = mock(Relay.class);
   private final ScheduledArrival arrivals = mock(ScheduledArrival.class);
@@ -52,7 +56,7 @@ class RelayScheduledPublicationTest {
         .when(guard)
         .requireOutsideTransaction();
     when(schedules.claimPublication(selected, AT.plusSeconds(3600)))
-        .thenReturn(Optional.of(Relay.SystemScope.SERVER));
+        .thenReturn(Optional.of(new ScheduleStore.Claim(Relay.SystemScope.SERVER, GENERATION)));
     when(relay.subscribe(subscriber, Relay.Start.LATEST))
         .thenReturn(new Relay.Subscription(subscriber, 0, AT));
     when(relay.publish(eq(topic), any()))
@@ -61,7 +65,7 @@ class RelayScheduledPublicationTest {
               assertTrue(inTransaction);
               return new Relay.Publication(topic, 1, AT, call.getArgument(1, Relay.Draft.class));
             });
-    when(arrivals.record("daily", "morning", AT, AT))
+    when(arrivals.record("daily", "morning", AT, AT, GENERATION))
         .thenAnswer(
             call -> {
               assertTrue(inTransaction);
@@ -84,7 +88,11 @@ class RelayScheduledPublicationTest {
     order.verify(schedules).claimPublication(selected, AT.plusSeconds(3600));
     order
         .verify(relay)
-        .registerTopic(topic, RelayPayload.Kind.SCHEDULE_DUE, Relay.Policy.systemDefault());
+        .registerOwnedTopic(
+            topic,
+            RelayPayload.Kind.SCHEDULE_DUE,
+            Relay.Policy.systemDefault(),
+            RelayTopicOwnership.internal(Owner.EVENTS));
     order.verify(relay).subscribe(subscriber, Relay.Start.LATEST);
     var draft = ArgumentCaptor.forClass(Relay.Draft.class);
     order.verify(relay).publish(eq(topic), draft.capture());
@@ -92,7 +100,7 @@ class RelayScheduledPublicationTest {
     assertEquals(new RelayPayload.ScheduleDue("morning", "daily", AT), draft.getValue().payload());
     assertTrue(draft.getValue().eventId().matches("schedule:[a-f0-9]{64}"));
     assertEquals(RelayCausation.root(draft.getValue().eventId()), draft.getValue().causation());
-    order.verify(arrivals).record("daily", "morning", AT, AT);
+    order.verify(arrivals).record("daily", "morning", AT, AT, GENERATION);
     order.verify(relay).advanceSeen(subscriber, 1);
     order.verify(guard).requireOutsideTransaction();
     order.verify(arrivals).dispatch(List.of());
@@ -108,12 +116,14 @@ class RelayScheduledPublicationTest {
 
   @Test
   void failed_durable_admission_or_acknowledgement_never_dispatches() {
-    doThrow(new IllegalStateException("storage")).when(arrivals).record("daily", "morning", AT, AT);
+    doThrow(new IllegalStateException("storage"))
+        .when(arrivals)
+        .record("daily", "morning", AT, AT, GENERATION);
     assertThrows(
         IllegalStateException.class, () -> publisher.publish(selected, AT.plusSeconds(3600), AT));
     verify(relay, never()).advanceSeen(any(), anyLong());
     verify(arrivals, never()).dispatch(anyList());
-    doReturn(List.of()).when(arrivals).record("daily", "morning", AT, AT);
+    doReturn(List.of()).when(arrivals).record("daily", "morning", AT, AT, GENERATION);
     when(relay.advanceSeen(subscriber, 1)).thenThrow(new IllegalStateException("cursor"));
     assertThrows(
         IllegalStateException.class, () -> publisher.publish(selected, AT.plusSeconds(3600), AT));

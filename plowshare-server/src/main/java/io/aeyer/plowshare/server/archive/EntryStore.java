@@ -12,6 +12,8 @@ import io.aeyer.plowshare.server.agents.EntryKind;
 import io.aeyer.plowshare.server.agents.InputProvenanceCodec;
 import io.aeyer.plowshare.server.agents.Invocation;
 import io.aeyer.plowshare.server.agents.LoggedEntry;
+import io.aeyer.plowshare.server.agents.SkillContextLog;
+import io.aeyer.plowshare.server.agents.SkillContextLogs;
 import io.aeyer.plowshare.server.agents.Speaker;
 import io.aeyer.plowshare.server.agents.WebReleaseAudit;
 import io.aeyer.plowshare.server.api.LogSearchView;
@@ -499,6 +501,12 @@ public final class EntryStore implements ConversationSearchRepository {
           + " AND role IS NOT NULL"
           + " AND ordinal <= ?"
           + " AND (superseded_by IS NULL OR superseded_by > ?)"
+          // A goal activation got one fresh opening; reconstruct the same history on readback.
+          + " AND NOT COALESCE(kind = 'utterance' AND speaker = 'harness' AND ordinal < ?"
+          + " AND speaker_name = (SELECT opener.speaker_name FROM entries opener"
+          + " WHERE opener.conversation_id = ? AND opener.ordinal = ?"
+          + " AND opener.kind = 'utterance' AND opener.speaker = 'harness'"
+          + " AND opener.speaker_name LIKE 'goal %'), FALSE)"
           + IN_CONVERSATION_ORDER;
 
   /*
@@ -1724,8 +1732,8 @@ public final class EntryStore implements ConversationSearchRepository {
     // Visibility preparation may perform independent SQL before this query. It has its own owner
     // budgets; only the actual query below starts this statement's completion deadline.
     return informationScoped
-        ? visibility.read(informationAccount, facts -> searchQuery(sql, mapper, facts, args))
-        : searchQuery(sql, mapper, null, args);
+        ? visibility.read(informationAccount, facts -> boundedEntryQuery(sql, mapper, facts, args))
+        : boundedEntryQuery(sql, mapper, null, args);
   }
 
   /**
@@ -1751,7 +1759,7 @@ public final class EntryStore implements ConversationSearchRepository {
     return sql.replace("/*information*/", " AND " + filter.sql());
   }
 
-  private <T> T searchQuery(
+  private <T> T boundedEntryQuery(
       String sql,
       ResultSetExtractor<T> mapper,
       InformationLogVisibility.Facts facts,
@@ -2486,15 +2494,33 @@ public final class EntryStore implements ConversationSearchRepository {
   /**
    * Immutable complete log data for skill handoff; prefix/system blocks live in turns, not entries.
    */
-  public io.aeyer.plowshare.server.agents.SkillContextLog snapshotForSkill(String conversationId) {
+  public SkillContextLog snapshotForSkill(String conversationId) {
     requireInformation(conversationId);
     String conversation = ConversationStore.named(conversationId);
-    return io.aeyer.plowshare.server.agents.SkillContextLogs.read(
-        jdbc.queryForObject(
-            "SELECT COALESCE(jsonb_agg(to_jsonb(e)-ARRAY['text_search','search_length','job_id','tool_observation','evidence_content','evidence_text_search','evidence_search_length'] ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text "
-                + "FROM entries e WHERE conversation_id = ?",
-            String.class,
-            conversation));
+    // Project the snapshot vocabulary explicitly. The parent's recovery receipts and future
+    // storage columns should not become inherited context when the entries table changes.
+    String source =
+        boundedEntryQuery(
+            """
+            SELECT COALESCE(jsonb_agg(snapshot ORDER BY turn_ordinal, ordinal), '[]'::jsonb)::text
+            FROM (
+              SELECT conversation_id, ordinal, kind, role, content, tool_call_id, tool_calls,
+                     superseded_by, turn_ordinal, handle, recorded_at, took_ms, ejected_at, export,
+                     ejected_chars, learned_at, invocation, produced_by, dispatch, model_specifier,
+                     model_pool, wire_model, completion, finish_reason, prompt_tokens,
+                     completion_tokens, reasoning_tokens, sent_at, fallback_reason,
+                     first_token_ms, speaker, speaker_name, outcome, salients, input_provenance,
+                     file_window
+              FROM entries WHERE conversation_id = ?
+            ) snapshot
+            """,
+            rows -> {
+              rows.next();
+              return rows.getString(1);
+            },
+            null,
+            conversation);
+    return SkillContextLogs.read(source);
   }
 
   /**
@@ -2537,23 +2563,34 @@ public final class EntryStore implements ConversationSearchRepository {
    * @throws ValidationException if the conversation id cannot be named
    */
   public List<EntryRecord> thatProjectFor(String conversationId) {
+    return thatProjectFor(conversationId, null);
+  }
+
+  /** Earlier openings from this exact harness goal are replaced by its fresh opening. */
+  public List<EntryRecord> thatProjectFor(String conversationId, Speaker goal) {
     requireInformation(conversationId);
     String conversation = ConversationStore.named(conversationId);
+    String exclusion =
+        goal == null
+            ? ""
+            : " AND NOT COALESCE(kind = 'utterance' AND speaker = 'harness' AND speaker_name = ?,"
+                + " FALSE)";
+    String query =
+        "SELECT "
+            + COLUMNS
+            + DIRECT_ANSWER_COLUMN
+            + " FROM entries WHERE conversation_id = ? AND ((TRUE "
+            + THAT_PROJECT
+            + exclusion
+            + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
+            + IN_CONVERSATION_ORDER;
+    String diagnostics = WebReleaseAudit.PREFIX + "%";
     return ArchiveUnavailableException.translating(
         "read what a conversation projects",
         () ->
-            jdbc.query(
-                "SELECT "
-                    + COLUMNS
-                    + DIRECT_ANSWER_COLUMN
-                    + " FROM entries WHERE conversation_id = ?"
-                    + " AND ((TRUE "
-                    + THAT_PROJECT
-                    + ") OR (superseded_by IS NULL AND kind = 'diagnostic' AND content LIKE ?))"
-                    + IN_CONVERSATION_ORDER,
-                PROJECTION_MAPPER,
-                conversation,
-                WebReleaseAudit.PREFIX + "%"));
+            goal == null
+                ? jdbc.query(query, PROJECTION_MAPPER, conversation, diagnostics)
+                : jdbc.query(query, PROJECTION_MAPPER, conversation, goal.name(), diagnostics));
   }
 
   /** A scripted orchestration's authenticated opening, independent of later harness messages. */
@@ -2676,7 +2713,14 @@ public final class EntryStore implements ConversationSearchRepository {
                     + " this conversation had.");
           }
           return jdbc.query(
-              THAT_PROJECTED_AT, PROJECTION_MAPPER, conversation, assembled, assembled);
+              THAT_PROJECTED_AT,
+              PROJECTION_MAPPER,
+              conversation,
+              assembled,
+              assembled,
+              assembled,
+              conversation,
+              assembled);
         });
   }
 

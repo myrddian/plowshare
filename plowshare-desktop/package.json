@@ -45,6 +45,7 @@
     "test:information": "node scripts/build.mjs && node --experimental-strip-types scripts/information-smoke.mjs",
     "test:sync": "node scripts/build.mjs && node scripts/sync-smoke.mjs",
     "test:builder": "node scripts/build.mjs && node --experimental-strip-types scripts/builder-smoke.mjs",
+    "test:goals": "node scripts/build.mjs && node --experimental-strip-types scripts/goal-agents-smoke.mjs",
     "test:controls": "node scripts/build.mjs && node --experimental-strip-types scripts/controls-smoke.mjs",
     "test:transport": "node scripts/build.mjs && node --experimental-strip-types scripts/transport-smoke.mjs",
     "test:reasoning": "node scripts/build.mjs && node --experimental-strip-types scripts/reasoning-smoke.mjs",

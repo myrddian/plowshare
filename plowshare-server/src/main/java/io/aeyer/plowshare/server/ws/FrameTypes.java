@@ -338,6 +338,21 @@ public final class FrameTypes {
    */
   public static final String CONVERSATION_RESUME = "conversation.resume";
 
+  public static final String GOAL_START = "goal.start";
+  public static final String GOAL_LIST = "goal.list";
+  public static final String GOAL_STATUS = "goal.status";
+  public static final String GOAL_RECEIPT = "goal.receipt";
+  public static final String GOAL_ANSWER = "goal.answer";
+  public static final String GOAL_SOURCES = "goal.sources";
+  public static final String MESSAGE_LISTEN = "message.listen";
+  public static final String MESSAGE_UNLISTEN = "message.unlisten";
+
+  public static final String CONVERSATION_GOAL_START = "conversation.goal.start";
+  public static final String CONVERSATION_GOAL_GET = "conversation.goal.get";
+  public static final String CONVERSATION_GOAL_PAUSE = "conversation.goal.pause";
+  public static final String CONVERSATION_GOAL_RESUME = "conversation.goal.resume";
+  public static final String CONVERSATION_GOAL_CANCEL = "conversation.goal.cancel";
+
   /**
    * Follow conversation logs: from now on this session is pushed {@code conversation.appended} —
    * the conversation and its highest ordinal, no content — whenever entries are committed to it.

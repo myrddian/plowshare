@@ -2341,6 +2341,18 @@ public final class AgentRegistry {
    * does not escalate. {@link #withholdEscalatingEdges}' own test, package private so that an
    * orchestration's conductor edges are held to the identical comparison rather than a copy.
    */
+  /** A durable handoff uses the caller's declared route and existing tool and file ceilings. */
+  public static boolean permitsGoalHandoff(AgentDefinition caller, AgentDefinition target) {
+    return caller.canUseSkill("goal")
+        && target.delegable()
+        && !target.bot()
+        && caller.calls().contains(target.name())
+        && caller.tools().containsAll(target.tools())
+        && caller.calls().containsAll(target.calls())
+        && caller.orchestrations().containsAll(target.orchestrations())
+        && escalatingGrant(caller, target).isEmpty();
+  }
+
   static Optional<Grant> escalatingGrant(AgentDefinition caller, AgentDefinition callee) {
     for (Grant held : callee.scopes()) {
       if (!covers(caller.scopes(), held)) {

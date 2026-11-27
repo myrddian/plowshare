@@ -5,6 +5,8 @@ import io.aeyer.plowshare.server.archive.UnitOfWork;
 import io.aeyer.plowshare.server.faults.CallerFault;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayPayload;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership;
+import io.aeyer.plowshare.server.relay.RelayTopicOwnership.Owner;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -147,7 +149,11 @@ public final class RelayEventPublication implements EventPublication {
     var recorded =
         transactions.inTransaction(
             () -> {
-              relay.registerTopic(topic, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+              relay.registerOwnedTopic(
+                  topic,
+                  RelayPayload.Kind.TEXT,
+                  Relay.Policy.systemDefault(),
+                  RelayTopicOwnership.internal(Owner.EVENTS));
               // First registration starts at the cutover baseline rather than replaying the
               // installation's legacy work, which is the choice the schedules migration made for
               // the same reason: a firing already in the inbox must not arrive a second time.

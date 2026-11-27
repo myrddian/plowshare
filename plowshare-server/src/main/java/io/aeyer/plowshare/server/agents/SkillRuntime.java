@@ -4,13 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.aeyer.plowshare.protocol.Home;
 import io.aeyer.plowshare.server.access.OperationAuthority;
+import io.aeyer.plowshare.server.goals.GoalHandoffs;
 import io.aeyer.plowshare.server.images.ImageStore;
 import io.aeyer.plowshare.server.llm.dispatch.ToolSchema;
 import io.aeyer.plowshare.server.orchestrations.scripted.ScriptProgram;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /** Granted skills: model discovery is opt-in; explicit commands use the same pinned execution. */
 public final class SkillRuntime {
@@ -22,6 +26,8 @@ public final class SkillRuntime {
   private final SkillExecutions executions;
   private final JobRuntime runtime;
   private final ImageStore images;
+  private final Supplier<GoalHandoffs> goals;
+  private final Function<UUID, Optional<OperationAuthority.Admission>> handoffAdmissions;
   private SkillContexts contexts;
 
   public void useContexts(SkillContexts contexts) {
@@ -38,6 +44,19 @@ public final class SkillRuntime {
       SkillExecutions executions,
       JobRuntime runtime,
       ImageStore images) {
+    this(skills, callers, executions, runtime, images, () -> null, ignored -> Optional.empty());
+  }
+
+  SkillRuntime(
+      SkillResolver skills,
+      Callers callers,
+      SkillExecutions executions,
+      JobRuntime runtime,
+      ImageStore images,
+      Supplier<GoalHandoffs> goals,
+      Function<UUID, Optional<OperationAuthority.Admission>> handoffAdmissions) {
+    this.goals = goals;
+    this.handoffAdmissions = handoffAdmissions;
     this.skills = skills;
     this.callers = callers;
     this.executions = executions;
@@ -105,7 +124,8 @@ public final class SkillRuntime {
         .forEach(
             (name, resolved) -> {
               SkillDefinition skill = resolved.definition();
-              if (!skill.agentVisible()) return;
+              if (!skill.agentVisible()
+                  || GoalSkillTools.SKILL.equals(name) && availableGoals() == null) return;
               catalog
                   .addObject()
                   .put("name", name)
@@ -183,6 +203,93 @@ public final class SkillRuntime {
         });
   }
 
+  List<AgentTool> goalTools(
+      AgentDefinition admitted,
+      Transcript transcript,
+      String session,
+      String account,
+      TurnEnd end,
+      OperationAuthority.Admission operation) {
+    if (!admitted.canUseSkill(GoalSkillTools.SKILL)
+        || operation == null
+        || !operation.executor().equals(account)
+        || transcript.conversationId() == null) return List.of();
+    var handoffs = availableGoals();
+    if (handoffs == null) return List.of();
+    var conversation = transcript.conversationId();
+    return GoalSkillTools.bind(
+        handoffs,
+        operation.home(),
+        tool -> {
+          var active =
+              executions.active(conversation).stream()
+                  .filter(
+                      execution ->
+                          execution.account().equals(account)
+                              && execution.executor().equals(admitted.name())
+                              && execution.mode() == SkillDefinition.Mode.DIRECT
+                              && execution.skill().name().equals(GoalSkillTools.SKILL))
+                  .toList();
+          if (active.size() != 1 || !active.getFirst().skill().allowedTools().contains(tool))
+            throw bad(
+                "Activate one granted goal skill in this conversation before using a handoff tool.");
+          var execution = active.getFirst();
+          var current =
+              skills
+                  .forCaller(callers.callerForConversation(conversation, session))
+                  .granted(admitted)
+                  .get(GoalSkillTools.SKILL);
+          if (current == null
+              || !current.definition().hash().equals(execution.skill().hash())
+              || !current.definition().origin().equals(execution.skill().origin()))
+            throw bad("The active goal skill is unavailable or has changed.");
+          var ceiling = execution.handoff();
+          if (ceiling == null
+              || !ceiling.capabilities().equals(OperationExecution.fingerprint(admitted)))
+            throw bad(
+                "The calling agent's capabilities changed. Start a new goal skill invocation.");
+          var original =
+              operation.id().equals(ceiling.operation())
+                  ? operation
+                  : handoffAdmissions
+                      .apply(ceiling.operation())
+                      .orElseThrow(() -> bad("The original goal skill admission is unavailable."));
+          if (!original.executor().equals(operation.executor())
+              || !original.home().equals(operation.home())
+              || !original.account().equals(operation.account())
+              || !original.scope().equals(operation.scope())
+              || !original.source().equals(operation.source()))
+            throw bad("This turn cannot replace the original goal skill admission.");
+          if (ceiling.human() && !humanSpeaker(transcript.speaker(), account))
+            throw bad("Continue this Goal handoff as the person who started it.");
+          return new GoalSkillTools.Invocation(
+              execution.invocation(),
+              new GoalHandoffs.Caller(
+                  conversation, admitted, original, ceiling.human(), ceiling.message()));
+        },
+        end);
+  }
+
+  private static boolean humanSpeaker(Speaker speaker, String account) {
+    return speaker != null
+        && speaker.kind() == Speaker.Kind.PERSON
+        && account != null
+        && account.equals(speaker.name());
+  }
+
+  private static String messageSpeaker(Speaker speaker) {
+    if (speaker == null
+        || speaker.kind() != Speaker.Kind.HARNESS
+        || !speaker.name().startsWith("message ")) return null;
+    var message = speaker.name().substring("message ".length());
+    return message.matches("bdm_[A-Za-z0-9_-]{1,252}") ? message : null;
+  }
+
+  private GoalHandoffs availableGoals() {
+    var handoffs = goals.get();
+    return handoffs != null && handoffs.enabled() ? handoffs : null;
+  }
+
   private String invoke(
       String json,
       Home home,
@@ -227,6 +334,10 @@ public final class SkillRuntime {
     SkillResolver.Resolved resolved = skills.forCaller(authority).granted(caller).get(name);
     if (resolved == null) throw bad("The skill is unavailable or refused. Nothing ran.");
     SkillDefinition skill = resolved.definition();
+    if (GoalSkillTools.SKILL.equals(name)
+        && (availableGoals() == null || operation == null || !operation.executor().equals(account)))
+      throw bad(
+          "The goal skill requires enabled Goal Agents and an admitted calling conversation.");
     if (expectedHash != null && !expectedHash.equals(skill.hash()))
       throw bad("The bound skill definition changed. Nothing ran.");
     if (expectedHash == null && !skill.agentVisible()) {
@@ -279,15 +390,38 @@ public final class SkillRuntime {
         && AgentRegistry.escalatingGrant(caller, executor).isPresent()) {
       throw bad("The selected executor would widen this caller's filesystem grants. Nothing ran.");
     }
+    boolean goalHandoff = GoalSkillTools.SKILL.equals(name) && mode == SkillDefinition.Mode.DIRECT;
     // Provider-specific allowed-tools expressions are not guessed into native grants.
-    if (skill.allowedTools().stream()
-        .anyMatch(tool -> !runtime.knownTools(authority.projectId()).contains(tool))) {
-      throw bad("The skill declares an unsupported allowed-tools name. Nothing ran.");
+    if (!skill.allowedTools().isEmpty()) {
+      var known = runtime.knownTools(authority.projectId());
+      if (skill.allowedTools().stream()
+          .anyMatch(
+              tool ->
+                  !known.contains(tool) && !(goalHandoff && GoalSkillTools.NAMES.contains(tool))))
+        throw bad("The skill declares an unsupported allowed-tools name. Nothing ran.");
     }
-    if (!executions.claim(
-        account, id, payload, parent.conversationId(), executor.name(), skill, mode)) {
-      return receipt(executions.find(account, id).orElseThrow(), payload);
-    }
+    if (goalHandoff
+        && executions.active(parent.conversationId()).stream()
+            .anyMatch(active -> active.skill().name().equals(GoalSkillTools.SKILL)))
+      throw bad(
+          "This conversation already has an active Goal Agent handoff. Continue that invocation.");
+    boolean claimed =
+        goalHandoff
+            ? executions.claimHandoff(
+                account,
+                id,
+                payload,
+                parent.conversationId(),
+                executor.name(),
+                skill,
+                new SkillExecutions.Handoff(
+                    operation.id(),
+                    OperationExecution.fingerprint(caller),
+                    expectedHash != null && humanSpeaker(parent.speaker(), account),
+                    messageSpeaker(parent.speaker())))
+            : executions.claim(
+                account, id, payload, parent.conversationId(), executor.name(), skill, mode);
+    if (!claimed) return receipt(executions.find(account, id).orElseThrow(), payload);
     try {
       if (mode == SkillDefinition.Mode.DIRECT) {
         executions.running(account, id, parent.conversationId());

@@ -193,7 +193,11 @@ public final class ProjectRelayPorts implements RelayPorts {
         && tools.permits(account, project, topic, direction, group))
       // Deliberately not memoized: unlike publish, the egress callers (subscribe, consume,
       // observe) have no repair path if the topic is deleted after being memoized.
-      relay.registerTopic(key, RelayPayload.Kind.TEXT, Relay.Policy.systemDefault());
+      relay.registerOwnedTopic(
+          key,
+          RelayPayload.Kind.TEXT,
+          Relay.Policy.systemDefault(),
+          RelayTopicOwnership.internal(RelayTopicOwnership.Owner.HOSTED_TOOLS));
     return key;
   }
 

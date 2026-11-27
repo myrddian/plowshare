@@ -65,7 +65,9 @@ describe('messaging contracts and controls', () => {
     const operations = discovery().commands.filter((row) =>
       row.operation.startsWith('message.'),
     );
-    expect(operations).toHaveLength(9);
+    expect(operations).toHaveLength(11);
+    expect(isMutation('message.listen')).toBe(true);
+    expect(isMutation('message.unlisten')).toBe(true);
     expect(isMutation('message.instance.open')).toBe(true);
     expect(isMutation('message.cancel')).toBe(true);
     expect(isMutation('message.delivery')).toBe(false);

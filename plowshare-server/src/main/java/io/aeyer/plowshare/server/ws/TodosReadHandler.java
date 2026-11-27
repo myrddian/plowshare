@@ -2,6 +2,7 @@ package io.aeyer.plowshare.server.ws;
 
 import io.aeyer.plowshare.protocol.frames.Outcome;
 import io.aeyer.plowshare.server.archive.Conversations;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
 import io.aeyer.plowshare.server.todos.TodoLists;
 import java.util.Map;
 import java.util.Objects;
@@ -16,7 +17,15 @@ public final class TodosReadHandler implements FrameHandler {
   private final TodoLists todos;
   private final Conversations conversations;
 
+  private final GoalConversationAccess goalAccess;
+
   public TodosReadHandler(TodoLists todos, Conversations conversations) {
+    this(todos, conversations, null);
+  }
+
+  TodosReadHandler(
+      TodoLists todos, Conversations conversations, GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
     this.todos = Objects.requireNonNull(todos, "todos");
     this.conversations = Objects.requireNonNull(conversations, "conversations");
   }
@@ -29,6 +38,7 @@ public final class TodosReadHandler implements FrameHandler {
             "conversation",
             FrameTypes.TODOS_READ,
             "the conversation whose todo list to read. Nothing was read.");
+    if (goalAccess != null) goalAccess.requireLog(asking.handle(), conversation);
     conversations.requireExistsOrThereIsNo(conversation, "todo list to read");
     return Outcome.ok(todos.list(conversation).stream().map(TodoView::of).toList());
   }

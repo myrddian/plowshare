@@ -20,8 +20,10 @@ import io.aeyer.plowshare.server.llm.accounting.UsageAttribution;
 import io.aeyer.plowshare.server.swarm.SwarmScheduler;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -84,7 +86,33 @@ public interface MessageService
       boolean generated,
       String ending,
       boolean handled,
-      RelayCausation causation) {
+      RelayCausation causation,
+      GoalMessagePurpose goalPurpose) {
+    public Route(
+        String message,
+        String sender,
+        String recipient,
+        String replyTo,
+        boolean replyExpected,
+        boolean finalReply,
+        boolean generated,
+        String ending,
+        boolean handled,
+        RelayCausation causation) {
+      this(
+          message,
+          sender,
+          recipient,
+          replyTo,
+          replyExpected,
+          finalReply,
+          generated,
+          ending,
+          handled,
+          causation,
+          GoalMessagePurpose.ORDINARY);
+    }
+
     public Route(
         String message,
         String sender,
@@ -109,6 +137,7 @@ public interface MessageService
     }
 
     public Route {
+      Objects.requireNonNull(goalPurpose);
       message = MessagePayload.identifier(message, "bdm_");
       sender = MessagePayload.identifier(sender, "ins_");
       recipient = MessagePayload.identifier(recipient, "ins_");
@@ -305,6 +334,16 @@ public interface MessageService
 
   Optional<Route> route(String message);
 
+  /**
+   * Bind a passive Goal return reader to one live native transport. The lineage callback brings the
+   * exact source log's current information restrictions into this run's authenticated log before
+   * reply prose enters it.
+   */
+  default Optional<AgentTool> goalReturnReader(
+      RunExtras.Context context, Consumer<String> inherit) {
+    return Optional.empty();
+  }
+
   SendMessageTool tool(RunExtras.Context context);
 
   String send(RunExtras.Context context, SendMessageTool.Request request, Home home);
@@ -320,6 +359,11 @@ public interface MessageService
   String incoming(String message);
 
   void complete(String message, Outcome outcome);
+
+  /** Projects an addressed input only for its exact retained recipient. */
+  default Optional<String> goalInput(Instance recipient, String message) {
+    return Optional.empty();
+  }
 
   boolean owns(FiringRecord wake);
 
@@ -344,6 +388,123 @@ public interface MessageService
 
   InstanceView open(
       String account, String project, String agent, boolean makeDefault, String requestId);
+
+  /** Checked only by the schedule owner while resolving an existing Messaging destination. */
+  default boolean goalScheduleTarget(Instance instance) {
+    return false;
+  }
+
+  /** Allocates a non-default inbox inside the authorized Goal launch transaction. */
+  default InstanceView openGoalInbox(String account, String project, String agent) {
+    throw new UnsupportedOperationException("A persistent Goal inbox is unavailable");
+  }
+
+  /** An exact native Messaging request retained for one Goal handoff. */
+  record GoalReturn(String sender, String recipient, String message) {
+    public GoalReturn {
+      sender = MessagePayload.identifier(sender, "ins_");
+      recipient = MessagePayload.identifier(recipient, "ins_");
+      message = MessagePayload.identifier(message, "bdm_");
+      if (sender.equals(recipient))
+        throw new IllegalArgumentException("Distinct Goal return endpoints required");
+    }
+  }
+
+  /** Purpose encoded by the native invocation namespace, outside model call IDs. */
+  enum GoalMessagePurpose {
+    ORDINARY(""),
+    HANDOFF("goal-return:launch:"),
+    QUESTION("goal-return:question:"),
+    NOTICE("goal-return:notice:"),
+    TERMINAL("goal-return:terminal:");
+
+    private final String prefix;
+
+    GoalMessagePurpose(String prefix) {
+      this.prefix = prefix;
+    }
+
+    String invocation(UUID identity) {
+      if (this == ORDINARY) throw new IllegalStateException("Native Goal purpose required");
+      return prefix + identity;
+    }
+
+    static GoalMessagePurpose of(String invocation) {
+      if (invocation == null || !invocation.startsWith("goal-return:")) return ORDINARY;
+      for (var purpose : List.of(HANDOFF, QUESTION, NOTICE, TERMINAL)) {
+        if (invocation.startsWith(purpose.prefix)) return purpose;
+      }
+      return ORDINARY;
+    }
+  }
+
+  enum GoalReturnKind {
+    RESULT,
+    QUESTION,
+    BLOCKED,
+    CANCELLED
+  }
+
+  sealed interface GoalReturnAttempt permits GoalReturnPublished, GoalReturnUnavailable {}
+
+  record GoalReturnPublished(String message) implements GoalReturnAttempt {}
+
+  record GoalReturnUnavailable() implements GoalReturnAttempt {}
+
+  /**
+   * Join the launch transaction and retain a passive native request addressed to the new Goal. The
+   * original request is supplied by the skill's admitted turn, never by its arguments.
+   */
+  default GoalReturn openGoalReturn(
+      String account,
+      String project,
+      String conversation,
+      AgentDefinition caller,
+      String originalMessage,
+      String goalInstance,
+      UUID invocation) {
+    throw new MessageRefused("A correlated Goal return is unavailable");
+  }
+
+  /**
+   * Publish a passive reply to the exact retained request. The acceptance callback runs with
+   * Messaging's mailbox and request locks, in the same transaction as the reply.
+   */
+  default GoalReturnAttempt publishGoalReturn(
+      GoalReturn binding,
+      UUID intent,
+      String body,
+      GoalReturnKind kind,
+      Consumer<String> accepted) {
+    return new GoalReturnUnavailable();
+  }
+
+  sealed interface GoalAnswer permits GoalAnswerReady, GoalAnswerPending, GoalAnswerClosed {}
+
+  record GoalAnswerReady(MessageRecord message) implements GoalAnswer {}
+
+  record GoalAnswerPending() implements GoalAnswer {}
+
+  record GoalAnswerClosed() implements GoalAnswer {}
+
+  /** Read the exact bound caller's final answer or report that the native question has closed. */
+  default GoalAnswer goalAnswer(GoalReturn binding, String questionMessage) {
+    return new GoalAnswerClosed();
+  }
+
+  /** Claim an exact still-authorized response while serialized against native route closure. */
+  default boolean withGoalAnswer(
+      GoalReturn binding, String questionMessage, String answerMessage, Runnable claim) {
+    return false;
+  }
+
+  /** Record a body-free unavailable outcome for the exact native launch. */
+  default void withholdGoalReturn(GoalReturn binding, Runnable recorded) {
+    recorded.run();
+  }
+
+  /** Settle a withdrawn exact Goal question without generating a Messaging outcome. */
+  default void settleGoalQuestion(GoalReturn binding, String questionMessage) {}
 
   InstanceView makeDefault(String id, String account);
 

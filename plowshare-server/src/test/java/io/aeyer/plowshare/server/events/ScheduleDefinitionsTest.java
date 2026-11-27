@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import io.aeyer.plowshare.protocol.ScheduledWork;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.files.WorkspaceUnavailableException;
+import io.aeyer.plowshare.server.reads.ReadFailedException;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,18 @@ class ScheduleDefinitionsTest {
     verify(authority).validate(source, definition);
     verify(store).apply(eq(source), eq("daily"), eq(definition), any());
     verify(store).reject(eq(source), eq("broken"), anyString());
+    verify(store, never()).remove(any(), anyString());
+  }
+
+  @Test
+  void an_uncertain_projection_does_not_refuse_or_remove_previous_files() {
+    when(files.read(source))
+        .thenReturn(
+            List.of(new ScheduleFiles.Entry("daily", ScheduleDefinitionCodec.write(definition))));
+    var expired = ReadFailedException.deadlineExceeded();
+    when(store.apply(eq(source), eq("daily"), eq(definition), any())).thenThrow(expired);
+    assertSame(expired, assertThrows(ReadFailedException.class, service::poll));
+    verify(store, never()).reject(any(), anyString(), anyString());
     verify(store, never()).remove(any(), anyString());
   }
 

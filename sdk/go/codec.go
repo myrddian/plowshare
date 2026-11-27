@@ -281,6 +281,10 @@ func requestTyped[T any](ctx context.Context, c *Client, operation string, reque
 	if err = reservation.convert(ctx); err != nil {
 		return result, err
 	}
+	// The JSON encoder would silently replace invalid UTF-8 in a typed answer.
+	if answer, ok := request.(GoalAnswerRequest); ok && !utf8.ValidString(answer.Answer) {
+		return result, contractError
+	}
 	data, err := json.Marshal(request)
 	if err != nil {
 		return result, err
@@ -295,10 +299,10 @@ func requestTyped[T any](ctx context.Context, c *Client, operation string, reque
 	}
 	result.Code, result.Said = outcome.Code, outcome.Said
 	if result.Successful() {
-		// Ex resolution and durable admission have distinct success outcomes. Do not
-		// turn a malformed acknowledgement into a success or another submission.
-		if operation == "conversation.open.ex" && result.Code != "OK" || operation == "agent.run.ex" && result.Code != "ACCEPTED" {
-			return Reply[T]{}, &TransportError{Delivery: InvalidResponse, Cause: errors.New("unexpected external conversation outcome; completion is unknown")}
+		// An unexpected success code leaves the operation outcome uncertain.
+		if (operation == "conversation.open.ex" || operation == "message.unlisten" || operation == "goal.answer" || operation == "goal.list" || operation == "goal.status" || operation == "goal.receipt") && result.Code != "OK" ||
+			operation == "agent.run.ex" && result.Code != "ACCEPTED" {
+			return Reply[T]{}, &TransportError{Delivery: InvalidResponse, Cause: errors.New("unexpected operation outcome; completion is unknown")}
 		}
 		data, err = project(catalog.Results[operation], outcome.Payload, false)
 		if err == nil {
@@ -343,8 +347,94 @@ func decodePush(data []byte) (ServerPush, error) {
 	return result, err
 }
 
-// Transport boundary correlation supplements schema validation for retained deployment receipts.
+func goalDiscoveryMatches(operation string, request, reply []byte) bool {
+	type coordinates struct {
+		Project   string `json:"project"`
+		Goal      string `json:"goal"`
+		RequestID string `json:"requestId"`
+	}
+	asked := struct {
+		coordinates
+		After string  `json:"after"`
+		Limit float64 `json:"limit"`
+	}{Limit: 20}
+	// A differently cased output extension must never supply a coordinate.
+	var answered map[string]json.RawMessage
+	read := func(fields map[string]json.RawMessage, key string) string {
+		var value string
+		if json.Unmarshal(fields[key], &value) != nil {
+			return ""
+		}
+		return value
+	}
+	if json.Unmarshal(request, &asked) != nil || json.Unmarshal(reply, &answered) != nil {
+		return false
+	}
+	switch operation {
+	case "goal.receipt":
+		return asked.RequestID != "" && strings.EqualFold(asked.RequestID, read(answered, "requestId"))
+	case "goal.status":
+		return asked.Project != "" && asked.Project == read(answered, "project") && asked.Goal != "" && strings.EqualFold(asked.Goal, read(answered, "goal"))
+	default:
+		var goals []map[string]json.RawMessage
+		var next *string
+		if json.Unmarshal(answered["goals"], &goals) != nil || json.Unmarshal(answered["next"], &next) != nil || float64(len(goals)) > asked.Limit {
+			return false
+		}
+		seen := make(map[string]bool, len(goals))
+		var last string
+		for _, status := range goals {
+			goal := read(status, "goal")
+			if goal == "" || read(status, "project") != asked.Project || strings.EqualFold(asked.After, goal) || seen[goal] {
+				return false
+			}
+			seen[goal] = true
+			last = goal
+		}
+		return next == nil || len(goals) > 0 && *next == last
+	}
+}
+
+// Correlate retained receipts with the request before exposing them to callers.
 func deploymentMatches(operation string, request, reply []byte) bool {
+	if operation == "goal.list" || operation == "goal.status" || operation == "goal.receipt" {
+		return goalDiscoveryMatches(operation, request, reply)
+	}
+	if operation == "message.unlisten" || operation == "goal.answer" {
+		// Read the same exact wire keys as the DTO decoder. A differently cased
+		// extension must never replace a receipt coordinate.
+		var asked, answered map[string]json.RawMessage
+		if json.Unmarshal(request, &asked) != nil || json.Unmarshal(reply, &answered) != nil {
+			return false
+		}
+		ids := []string{"goal", "requestId"}
+		if operation == "goal.answer" {
+			var expected, actual string
+			if json.Unmarshal(asked["conversation"], &expected) != nil ||
+				json.Unmarshal(answered["conversation"], &actual) != nil ||
+				expected == "" || expected != actual {
+				return false
+			}
+			ids = append(ids, "question")
+		} else {
+			var previous, version float64
+			if json.Unmarshal(asked["version"], &previous) != nil ||
+				json.Unmarshal(answered["version"], &version) != nil ||
+				previous < 1 || version != previous+1 {
+				return false
+			}
+			ids = append(ids, "binding")
+		}
+		for _, key := range ids {
+			var expected, actual string
+			if json.Unmarshal(asked[key], &expected) != nil ||
+				json.Unmarshal(answered[key], &actual) != nil ||
+				expected == "" || !strings.EqualFold(expected, actual) {
+				return false
+			}
+		}
+		return true
+	}
 	if operation == "relay.group.delete" || operation == "relay.group.inspect" {
 		type coordinates struct {
 			Project    string `json:"project"`

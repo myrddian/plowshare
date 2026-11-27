@@ -16,6 +16,39 @@ import type { FileStoreReference } from '../binding/filestores.ts';
 /** WS request shapes. Optional fields retain the server's defaults. */
 type Tier = { readonly project?: string | null };
 type Conversation = { readonly conversation: string };
+type GoalRequest = Conversation & { readonly requestId: string };
+type GoalControl = GoalRequest & {
+  readonly goal: string;
+  readonly version: number;
+};
+/** The current question UUID fences answers against concurrent goal changes. */
+/** Discover dedicated Goal Agents in one explicit project. Use the last page's next cursor. */
+export interface GoalListRequest {
+  readonly project: string;
+  readonly after?: string;
+  readonly limit?: number;
+}
+
+/** Read the current authorized status of one dedicated Goal Agent. */
+export interface GoalStatusRequest {
+  readonly project: string;
+  readonly goal: string;
+}
+
+/** Recover a launch response by its original request ID without repeating the launch. */
+export interface GoalReceiptRequest {
+  readonly project: string;
+  readonly requestId: string;
+}
+
+/** The current question UUID fences answers against concurrent goal changes. */
+export type GoalAnswerRequest = GoalRequest & {
+  readonly goal: string;
+  readonly question: string;
+  readonly answer: string;
+};
+type GoalLimit = { readonly maxActivations?: number | null };
+
 type Page = { readonly offset?: number; readonly limit?: number };
 type Turns = { readonly maxTurns?: number; readonly noTurnCap?: boolean };
 type Budget = { readonly maxModelCalls?: number };
@@ -76,6 +109,49 @@ export interface ExtendedPayloads
   'conversation.resume': Conversation &
     Turns &
     Budget & { readonly agent?: string; readonly session?: string | null };
+  'goal.start': {
+    readonly project: string;
+    readonly agent: string;
+    readonly objective: string;
+    readonly criteria?: string | null;
+    readonly requestId: string;
+  };
+  'goal.answer': GoalAnswerRequest;
+  'goal.list': GoalListRequest;
+  'goal.status': GoalStatusRequest;
+  'goal.receipt': GoalReceiptRequest;
+  'goal.sources': Conversation & {
+    readonly goal: string;
+    readonly prefix?: string | null;
+    readonly kind?: 'TEXT' | 'EMPTY' | null;
+    readonly after?: string | null;
+    readonly limit?: number | null;
+  };
+  'message.listen': Conversation & {
+    readonly goal: string;
+    readonly topic: string;
+    readonly generation: string;
+    /** Supply both batching fields together. Omit both to deliver one event at a time. */
+    readonly batchCount?: number;
+    readonly maxDelaySeconds?: number;
+  };
+  'message.unlisten': GoalControl & { readonly binding: string };
+  'conversation.goal.start': GoalRequest &
+    GoalLimit & {
+      readonly agent: string;
+      readonly objective: string;
+      readonly criteria?: string | null;
+    };
+  'conversation.goal.get': Conversation & {
+    readonly requestId?: string | null;
+  };
+  'conversation.goal.pause': GoalControl;
+  'conversation.goal.resume': GoalControl &
+    GoalLimit & {
+      /** An explicit new absolute model-call ceiling for a dedicated goal. */
+      readonly maxModelCalls?: number;
+    };
+  'conversation.goal.cancel': GoalControl;
   'agent.list': Tier;
   'agent.define': Tier & {
     readonly name: string;
@@ -502,6 +578,19 @@ export const CLI_OPERATIONS = {
   'conversation context': 'conversation.context',
   'conversation projection': 'conversation.projection',
   'conversation resume': 'conversation.resume',
+  'goal start': 'goal.start',
+  'goal list': 'goal.list',
+  'goal status': 'goal.status',
+  'goal receipt': 'goal.receipt',
+  'goal answer': 'goal.answer',
+  'goal sources': 'goal.sources',
+  'message listen': 'message.listen',
+  'message unlisten': 'message.unlisten',
+  'conversation goal start': 'conversation.goal.start',
+  'conversation goal get': 'conversation.goal.get',
+  'conversation goal pause': 'conversation.goal.pause',
+  'conversation goal resume': 'conversation.goal.resume',
+  'conversation goal cancel': 'conversation.goal.cancel',
   'agent list': 'agent.list',
   'agent define': 'agent.define',
   'agent run': 'agent.run',

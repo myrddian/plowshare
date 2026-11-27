@@ -192,6 +192,11 @@ public interface SuspendedRunCalls {
    */
   Optional<Call> find(String approval);
 
+  /** Disarm continuation after the owner fenced and drained the exact conversation. */
+  default void retireGoalCall(String conversation, String approval) {
+    throw new UnsupportedOperationException("Goal approval retirement is unavailable");
+  }
+
   /** Answered calls with an unacknowledged outcome, for server-owned recovery after restart. */
   List<Call> recoverable();
 

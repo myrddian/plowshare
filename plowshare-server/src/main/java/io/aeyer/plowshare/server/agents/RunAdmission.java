@@ -13,7 +13,17 @@ public record RunAdmission(
     Consumer<String> started,
     Runnable ended,
     String subject,
-    RunAuthority authority) {
+    RunAuthority authority,
+    GoalTurn goal) {
+  public RunAdmission(
+      Runnable check,
+      Consumer<String> started,
+      Runnable ended,
+      String subject,
+      RunAuthority authority) {
+    this(check, started, ended, subject, authority, null);
+  }
+
   public RunAdmission {
     Objects.requireNonNull(check);
     Objects.requireNonNull(started);

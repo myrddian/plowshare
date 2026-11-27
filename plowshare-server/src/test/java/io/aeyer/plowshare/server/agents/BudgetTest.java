@@ -17,6 +17,19 @@ import org.junit.jupiter.api.Test;
 class BudgetTest {
 
   @Test
+  void a_goal_window_needs_the_durable_owner_to_change_its_allowance() {
+    var canonical = Budget.of(4);
+    var cycle = Budget.goalWindow(canonical.identity(), 1, canonical::tryClaim);
+    assertThatThrownBy(() -> cycle.changeToOrRefuse("job", 2))
+        .isInstanceOf(CallerFault.class)
+        .hasMessageContaining("pause and resume");
+    assertThat(cycle.trySpend()).isTrue();
+    assertThat(cycle.trySpend()).isFalse();
+    assertThat(canonical.spent()).isEqualTo(1);
+    assertThat(canonical.limit()).isEqualTo(4);
+  }
+
+  @Test
   void a_call_is_not_claimed_when_its_durable_charge_fails() {
     var attempts = new java.util.concurrent.atomic.AtomicInteger();
     Budget budget =

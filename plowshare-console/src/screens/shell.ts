@@ -1,3 +1,7 @@
+import type { RequestOptions } from '../../../sdk/typescript/src/binding/acting.ts';
+import { ConnectionFault } from '../../../sdk/typescript/src/binding/connection.ts';
+import { checkedTransport } from '../../../sdk/typescript/src/operations/transport.ts';
+import { createGoalAgents } from './goal-agents';
 import { socketTransport } from '../transport';
 import { background } from '../background.ts';
 import { createUsage } from './usage';
@@ -92,6 +96,7 @@ import { asInboxChanged, type InboxPage } from './wire';
 export const VIEWS = [
   'inbox',
   'chat',
+  'goal-agents',
   'documents',
   'information',
   'usage',
@@ -110,6 +115,7 @@ export type ViewName = (typeof VIEWS)[number];
 const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
   inbox: 'inbox',
   chat: 'chat',
+  'goal-agents': 'goal agents',
   documents: 'documents',
   information: 'information',
   usage: 'usage',
@@ -133,6 +139,7 @@ const LABELS: Readonly<Record<ViewName, string>> = Object.freeze({
 const GROUPS: Readonly<Record<ViewName, 'work' | 'system'>> = Object.freeze({
   inbox: 'work',
   chat: 'work',
+  'goal-agents': 'work',
   documents: 'work',
   information: 'work',
   usage: 'work',
@@ -263,12 +270,21 @@ export function multiplex(
           watchers.delete(watcher);
         }
       },
-      ask: (type: string, payload?: unknown): Promise<FrameOutcome> =>
+      ask: (
+        type: string,
+        payload?: unknown,
+        options?: RequestOptions,
+      ): Promise<FrameOutcome> =>
         real === null
           ? Promise.reject(
-              new Error(`the event socket is not open; "${type}" was not sent`),
+              new ConnectionFault(
+                'NOT_SUBMITTED',
+                `the event socket is not open; "${type}" was not sent`,
+              ),
             )
-          : real.ask(type, payload),
+          : options === undefined
+            ? real.ask(type, payload)
+            : real.ask(type, payload, options),
     };
   };
   return {
@@ -419,6 +435,15 @@ export function createShell(options: ShellOptions): Shell {
         openStream: shared.open,
         session,
         project,
+      });
+    }
+    if (name === 'goal-agents') {
+      borrowed ??= shared.open({ session, onEvent: () => {} });
+      return createGoalAgents({
+        root: host,
+        project,
+        transport,
+        operations: checkedTransport(borrowed),
       });
     }
     if (name === 'usage')

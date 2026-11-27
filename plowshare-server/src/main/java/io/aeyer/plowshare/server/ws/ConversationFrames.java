@@ -14,9 +14,11 @@ import io.aeyer.plowshare.server.archive.ConversationStore;
 import io.aeyer.plowshare.server.archive.Conversations;
 import io.aeyer.plowshare.server.archive.EntryStore;
 import io.aeyer.plowshare.server.archive.TurnStore;
+import io.aeyer.plowshare.server.goals.GoalConversationAccess;
 import io.aeyer.plowshare.server.llm.tokens.Tokenizer;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -120,6 +122,13 @@ public class ConversationFrames implements FrameArea {
     information = inputs;
   }
 
+  private GoalConversationAccess goalAccess;
+
+  @Autowired(required = false)
+  void useGoalAccess(GoalConversationAccess goalAccess) {
+    this.goalAccess = goalAccess;
+  }
+
   @Override
   public Map<String, FrameHandler> frames() {
     ConversationOpenHandler open =
@@ -153,7 +162,7 @@ public class ConversationFrames implements FrameArea {
             Map.entry(
                 FrameTypes.CONVERSATION_RESUME,
                 new ConversationResumeHandler(rules, callers, speaking, access)));
-    if (information == null) return handlers;
+    if (information == null && goalAccess == null) return handlers;
     Map<String, FrameHandler> secured = new java.util.LinkedHashMap<>();
     handlers.forEach(
         (type, handler) ->
@@ -162,8 +171,13 @@ public class ConversationFrames implements FrameArea {
                 (payload, asking) -> {
                   if (payload != null
                       && payload.get("conversation") instanceof String log
-                      && !log.isBlank()) information.requireLog(log, asking.handle());
-                  if (type.equals(FrameTypes.CONVERSATION_SEARCH))
+                      && !log.isBlank()) {
+                    boolean dedicated =
+                        goalAccess != null && goalAccess.requireLog(asking.handle(), log);
+                    if (!dedicated && information != null)
+                      information.requireLog(log, asking.handle());
+                  }
+                  if (information != null && type.equals(FrameTypes.CONVERSATION_SEARCH))
                     return new ConversationSearchHandler(entries.forAccount(asking.handle()))
                         .handle(payload, asking);
                   return handler.handle(payload, asking);

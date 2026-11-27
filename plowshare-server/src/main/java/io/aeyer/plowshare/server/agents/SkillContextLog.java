@@ -1,7 +1,10 @@
 package io.aeyer.plowshare.server.agents;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.aeyer.plowshare.protocol.ToolCall;
+import io.aeyer.plowshare.server.files.FileReadWindow;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -63,7 +66,9 @@ public record SkillContextLog(List<Entry> entries) {
       @JsonProperty("speaker_name") String speakerName,
       String outcome,
       java.util.Map<String, String> salients,
-      @JsonProperty("input_provenance") InputProvenance inputProvenance) {
+      @JsonProperty("input_provenance") InputProvenance inputProvenance,
+      @JsonProperty("file_window") @JsonInclude(JsonInclude.Include.NON_NULL)
+          FileReadWindow fileWindow) {
     public Entry {
       if (inputProvenance != null) {
         if (!kind.equals("utterance"))
@@ -73,7 +78,12 @@ public record SkillContextLog(List<Entry> entries) {
       InvocationValues.identity(conversationId);
       if (ordinal < 1 || turnOrdinal < 1)
         throw new IllegalArgumentException("invalid skill context ordinal");
-      EntryKind.of(kind);
+      var entryKind = EntryKind.of(kind);
+      if (fileWindow != null
+          && (entryKind != EntryKind.TOOL_RESULT
+              || content != null
+                  && content.getBytes(StandardCharsets.UTF_8).length != fileWindow.byteLength()))
+        throw new IllegalArgumentException("Invalid file window in skill context");
       if (role != null && !Set.of("system", "user", "assistant", "tool").contains(role))
         throw new IllegalArgumentException("invalid skill context role");
       for (String identity :

@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.aeyer.plowshare.server.agents.Outcome;
 import io.aeyer.plowshare.server.messaging.MessageRefused.Code;
+import io.aeyer.plowshare.server.messaging.MessageService.GoalReturnKind;
+import io.aeyer.plowshare.server.messaging.MessagingRepository.GoalReturnReply;
 import java.io.IOException;
 import java.util.List;
 
@@ -42,6 +44,37 @@ public final class MessageToolCodec {
       String replyTo,
       String ending) {}
 
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record GoalReturnPage(
+      String message,
+      String state,
+      String ending,
+      List<GoalReturnItem> replies,
+      String nextBefore) {}
+
+  @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record GoalReturnItem(
+      String id,
+      String replyTo,
+      GoalReturnKind kind,
+      String state,
+      boolean replyExpected,
+      String ending,
+      String body) {
+    static GoalReturnItem of(GoalReturnReply reply) {
+      return new GoalReturnItem(
+          reply.id(),
+          reply.replyTo(),
+          reply.kind(),
+          reply.handled() ? "handled" : "awaiting",
+          reply.replyExpected(),
+          reply.ending(),
+          reply.body());
+    }
+  }
+
   private record DelegateResult(Outcome.Ending ending, String output) {}
 
   // Keep the receipt's `message` field reserved for an accepted message ID.
@@ -72,6 +105,10 @@ public final class MessageToolCodec {
   }
 
   static String directory(DirectoryPage page) {
+    return encode(page);
+  }
+
+  static String goalReturns(GoalReturnPage page) {
     return encode(page);
   }
 

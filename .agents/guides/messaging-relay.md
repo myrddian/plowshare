@@ -61,6 +61,42 @@ append operation rather than pre-locking a topic or converting storage errors
 into a successful unavailable/empty result. Retention and topic recreation must
 not silently target a replacement incarnation.
 
+Owning subsystems register Relay topic metadata with `registerOwnedTopic`.
+The declaration belongs to the current topic row and a conflicting declaration
+fails under the topic lock. Neutral ensure calls can reuse an existing topic
+without changing ownership or exposure. Only new explicitly exposed feeds and
+general-purpose data topics are eligible for Goal sources. Keep exact scoped
+generation and live caller authority as independent checks when using
+[RelayTopicRegistry](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/RelayTopicRegistry.java).
+Topic names alone do not prove provenance for historical topics. The
+[Goal source selector](../../plowshare-server/src/main/java/io/aeyer/plowshare/server/relay/GoalRelaySources.java)
+uses the shared Relay read policy. Its binding check runs inside the owning
+bounded SQL write transaction and locks the selected generation through
+commit. The caller retains the binding in that same transaction. Dedicated
+Goal instances use the existing Messaging address and a Goal-owned inbox.
+Addressed sends stage their retained message reference in the send transaction.
+The Goal listener stages Relay input and advances its exact-generation cursor
+in one transaction. An open batch freezes at count or at its first event's age
+limit. The Goal row serializes the freeze, inbox claims, source disarm and
+settlement. Admission checks current read authority, topic and cursor
+generations, and the Relay retention gap. Removing a listener disarms only
+unclaimed work. The retirement worker fences the exact broker cursor and
+leaves the topic available.
+A scheduled Goal wake stages the scheduler's private firing receipt with the
+message reference. Staging and admission verify the current schedule
+generation and retained Goal authority. Goal settlement records a disposition
+before the Messaging owner completes the addressed receipt outside the Goal
+transaction.
+
+Authenticated Goal returns retain either a person’s Inbox or the exact native
+launch request created by Messaging. Passive bot replies reuse native route and
+final-reply receipts without starting a new run in the caller conversation.
+The Goal transition and outbox intent commit together. Publication and bot
+answer intake take mailbox and native request locks before the Goal row.
+Bot answer admission rechecks the exact open launch and native final answer
+under those same locks. Human answers bind the delivered question UUID and
+account. See [Goal returns](../../docs/conversation-goals-design.md#steering-and-notifications).
+
 ## Budget consent and message continuation
 
 A pending budget checkpoint keeps the original message route and task instance

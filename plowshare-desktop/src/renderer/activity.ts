@@ -13,6 +13,7 @@ import {
   scheduledAction,
 } from './schedule-controls.ts';
 import { rememberQuestion, questionAction } from './run-controls.ts';
+import { goalDetail, goalList, goalAction } from './goal-controls.ts';
 import { runDetailHtml } from './run-detail.ts';
 import { replyState } from '../shared.ts';
 import type { ActivityView, DesktopState, Request } from '../shared.ts';
@@ -46,6 +47,7 @@ const approvalControls = installApprovalControls(
   render,
 );
 let view: ActivityView = 'inbox';
+let goalProjectsStamp = '';
 let pageGroup = 'inbox',
   initialized = false;
 const groupOf = (tab: ActivityView) =>
@@ -148,7 +150,9 @@ function render() {
           ? 'Definitions'
           : view === 'builder'
             ? 'Orchestration builder'
-            : 'Scheduled work';
+            : view === 'goals'
+              ? 'Goal Agents'
+              : 'Scheduled work';
   $('#activity-icon').innerHTML = icon(view === 'inbox' ? 'inbox' : 'route');
   $('#activity-caption').textContent =
     view === 'inbox'
@@ -159,9 +163,11 @@ function render() {
           ? 'Available orchestration definitions and stages'
           : view === 'builder'
             ? 'Interview, draft, validate and review an agent-driven procedure'
-            : scheduleProject
-              ? `Schedules that name ${scheduleProject}`
-              : 'Schedules, triggers and recent firings across your account';
+            : view === 'goals'
+              ? ''
+              : scheduleProject
+                ? `Schedules that name ${scheduleProject}`
+                : 'Schedules, triggers and recent firings across your account';
   $('#activity-unread').textContent =
     inbox.unread === undefined ? '—' : String(inbox.unread);
   $('.activity-tabs').hidden = pageGroup !== 'studio';
@@ -184,23 +190,54 @@ function render() {
         ? runs.error
         : view === 'definitions'
           ? activity.definitions?.error
-          : [
-              activity.schedules?.error,
-              ...Object.entries(activity.schedules?.panels ?? {}).map(
-                ([name, panel]) =>
-                  panel?.error ? `${name}: ${panel.error}` : '',
-              ),
-            ]
-              .filter(Boolean)
-              .join(' · '),
+          : view === 'goals'
+            ? activity.goals?.error
+            : [
+                activity.schedules?.error,
+                ...Object.entries(activity.schedules?.panels ?? {}).map(
+                  ([name, panel]) =>
+                    panel?.error ? `${name}: ${panel.error}` : '',
+                ),
+              ]
+                .filter(Boolean)
+                .join(' · '),
     state.mode === 'live' && !state.connected
       ? 'Reconnect in the main window to update activity. Shown information may be out of date.'
       : '',
   ].filter(Boolean);
   $('#activity-error').hidden = !errors.length;
   $('#activity-error').textContent = errors.join(' ');
+  $('#goals-scope').hidden = view !== 'goals';
+  $('#activity-search-field').hidden = view === 'goals';
   $('#builder-form').hidden = view !== 'builder';
   $('#builder-status').hidden = view !== 'builder';
+  if (view === 'goals') {
+    const chooser = $<HTMLSelectElement>('#goals-project');
+    const stamp = JSON.stringify(state.projects.map((project) => project.name));
+    if (goalProjectsStamp !== stamp) {
+      goalProjectsStamp = stamp;
+      chooser.replaceChildren(
+        new Option('Choose a project', '', true, true),
+        ...state.projects.map(({ name }) => new Option(name, name)),
+      );
+      const placeholder = chooser.options.item(0);
+      if (placeholder) placeholder.disabled = true;
+    }
+    chooser.disabled = !state.connected || state.mode !== 'live';
+    chooser.value = activity.goals?.project ?? '';
+    $('#inbox-filter-control').hidden = true;
+    $('#definitions-scope').hidden = true;
+    $('#inbox-older').hidden = true;
+    $('#activity-list-note').hidden = true;
+    listHtml(goalList(activity.goals, chooser.disabled));
+    const detail = goalDetail(activity.goals, chooser.disabled);
+    if (detail !== detailStamp) {
+      detailStamp = detail;
+      $('#activity-detail').innerHTML = detail;
+    }
+    return;
+  }
+  $('#activity-list-note').hidden = false;
   if (view === 'builder') builderForm(state);
   const query = $<HTMLInputElement>('#activity-search').value.toLowerCase();
   const filter = $<HTMLSelectElement>('#inbox-filter').value;
@@ -586,6 +623,10 @@ $('#activity-refresh').addEventListener('click', () => {
   outputsStamp = '';
   background(action({ action: 'activity-refresh', view }));
 });
+$<HTMLSelectElement>('#goals-project').addEventListener('change', (event) => {
+  const project = (event.currentTarget as HTMLSelectElement).value;
+  if (project) background(action({ action: 'goal-project', project }));
+});
 $('#activity-list').addEventListener('click', (event) => {
   const id = (event.target as HTMLElement).closest<HTMLElement>('[data-item]')
     ?.dataset.item;
@@ -607,6 +648,11 @@ $('#activity-list').addEventListener('click', (event) => {
 });
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
+  if (view === 'goals') {
+    const goal = goalAction(state.activity.goals, target);
+    if (goal) background(action(goal));
+    return;
+  }
   rememberQuestion(state, runId, $('#activity-detail'));
   rememberSchedule($('#activity-detail'));
   const scheduled =

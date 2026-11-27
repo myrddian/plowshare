@@ -1,0 +1,122 @@
+[
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": true
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+      "conversation": "cnv_Goal",
+      "question": "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD",
+      "requestId": "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": true
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    },
+    "valid": false
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    },
+    "valid": false
+  },
+  {
+    "operation": "goal.answer",
+    "request": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "answer": "  Use the approved dataset.\n"
+    },
+    "reply": {
+      "goal": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "conversation": "cnv_Goal",
+      "question": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "requestId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "Question": "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    },
+    "valid": false
+  }
+]

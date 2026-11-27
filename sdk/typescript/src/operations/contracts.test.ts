@@ -92,7 +92,7 @@ describe('typed requests cover the actual server contracts', () => {
       (frame) => !cli.has(frame),
     );
     expect([...cli, ...remaining].sort()).toEqual(typed);
-    expect(cli.size).toBe(293);
+    expect(cli.size).toBe(306);
     expect(remaining.sort()).toEqual([
       'acting.context.close',
       'acting.context.open',
@@ -119,6 +119,10 @@ describe('typed requests cover the actual server contracts', () => {
     ['tool.scope.connect', 'protocol/ToolScopes', 'Connect', []],
     ['tool.scope.list', 'protocol/ToolScopes', 'Query', []],
     ['tool.scope.disconnect', 'protocol/ToolScopes', 'Disconnect', []],
+    ['goal.answer', 'ws/GoalAgentFrames', 'Answer', []],
+    ['goal.list', 'ws/GoalAgentFrames', 'ListGoals', []],
+    ['goal.status', 'ws/GoalAgentFrames', 'GoalStatus', []],
+    ['goal.receipt', 'ws/GoalAgentFrames', 'GoalReceipt', []],
     ['approval.list', 'ws/ApprovalFrames', 'ListBody', []],
     ['approval.answer', 'ws/ApprovalFrames', 'AnswerBody', []],
     ['approval.revoke', 'ws/ApprovalFrames', 'RevokeBody', []],

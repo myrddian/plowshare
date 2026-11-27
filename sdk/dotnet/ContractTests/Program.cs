@@ -15,6 +15,21 @@ foreach (var test in fixture.RootElement.EnumerateArray())
     catch (JsonException) { accepted = false; }
     if (accepted != test.GetProperty("valid").GetBoolean()) throw new Exception("Boundary case failed: " + test.GetRawText());
 }
+var goalAnswer = new GoalAnswerRequest
+{
+    Goal = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    Conversation = "cnv_Goal",
+    Question = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    RequestId = "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    Answer = "  Approved.\n",
+};
+if (Codec.Input("goal.answer", goalAnswer).GetProperty("answer").GetString() != goalAnswer.Answer)
+    throw new Exception("Goal answer text changed during encoding");
+var invalidGoalAnswerRejected = false;
+try { Codec.Input("goal.answer", goalAnswer with { Answer = "x\ud800" }); }
+catch (JsonException) { invalidGoalAnswerRejected = true; }
+if (!invalidGoalAnswerRejected) throw new Exception("Invalid Unicode goal answer accepted");
+
 using(var askedTool=JsonDocument.Parse("""{"project":"atlas","invocation":"11111111-1111-1111-1111-111111111111"}""")) {
  foreach(var id in new[]{"11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222"}) {
   bool accepted=true;try{Codec.CorrelateDeployment("tool.invocation.read",askedTool.RootElement,JsonSerializer.SerializeToElement(new{id}));}catch(JsonException){accepted=false;}
@@ -159,12 +174,12 @@ await DrainChecks.RunAsync();
 
 ToolSchemaChecks.Run();
 
-foreach(var correlations in new[]{"hosted-scope-correlations.json","relay-group-correlations.json"})
-using(var hosted=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PLOWSHARE_SDK_DTO_FIXTURES"))!,correlations))))
+foreach(var correlations in new[]{"hosted-scope-correlations.json","relay-group-correlations.json","goal-listener-correlations.json","goal-answer-correlations.json","goal-discovery-correlations.json"})
+using(var fixtures=JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Environment.GetEnvironmentVariable("PLOWSHARE_SDK_DTO_FIXTURES"))!,correlations))))
 {
- foreach(var row in hosted.RootElement.EnumerateArray()){
+ foreach(var row in fixtures.RootElement.EnumerateArray()){
   bool accepted=true;try{Codec.CorrelateDeployment(row.GetProperty("operation").GetString()!,row.GetProperty("request"),row.GetProperty("reply"));}catch(JsonException){accepted=false;}
-  if(accepted!=row.GetProperty("valid").GetBoolean())throw new Exception("Hosted coordinates differ");
+  if(accepted!=row.GetProperty("valid").GetBoolean())throw new Exception("Receipt coordinates differ");
   if(row.GetProperty("operation").GetString()=="tool.scope.worker.credential"){
    var value=Codec.Result<HostedToolCredentialDto>("tool.scope.worker.credential",row.GetProperty("reply"));
    if(value.ToString().Contains(value.Value,StringComparison.Ordinal))throw new Exception("Hosted secret leaked");

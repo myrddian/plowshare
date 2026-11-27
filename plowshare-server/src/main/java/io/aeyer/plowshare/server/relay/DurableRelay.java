@@ -42,12 +42,25 @@ public final class DurableRelay implements Relay {
   @Override
   public Topic registerTopic(TopicKey key, RelayPayload.Kind kind, Policy initialPolicy) {
     var validated = new Topic(key, kind, initialPolicy, 0, 0);
-    var configured =
-        key.scope() == SystemScope.SERVER
-            ? Objects.requireNonNull(systemPolicies.apply(key))
-            : Optional.<Policy>empty();
+    var configured = configuredPolicy(key);
     if (configured.isPresent()) return repository.configureTopic(key, kind, configured.get());
     return repository.registerTopic(validated.key(), validated.kind(), validated.policy());
+  }
+
+  @Override
+  public Topic registerOwnedTopic(
+      TopicKey key, RelayPayload.Kind kind, Policy initialPolicy, RelayTopicOwnership ownership) {
+    var validated = new Topic(key, kind, initialPolicy, 0, 0);
+    Objects.requireNonNull(ownership).requireSubsystem(kind);
+    var configured = configuredPolicy(key);
+    return repository.registerOwnedTopic(
+        key, kind, configured.orElse(validated.policy()), ownership, configured.isPresent());
+  }
+
+  private Optional<Policy> configuredPolicy(TopicKey key) {
+    return key.scope() == SystemScope.SERVER
+        ? Objects.requireNonNull(systemPolicies.apply(key))
+        : Optional.empty();
   }
 
   @Override

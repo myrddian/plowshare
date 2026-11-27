@@ -19,6 +19,8 @@ import io.aeyer.plowshare.server.messaging.MessageInboxWorker;
 import io.aeyer.plowshare.server.messaging.MessageRelayWorker;
 import io.aeyer.plowshare.server.messaging.MessageService;
 import io.aeyer.plowshare.server.personal.PersonalSpaces;
+import io.aeyer.plowshare.server.pool.SqlWorkBudget;
+import io.aeyer.plowshare.server.pool.SqlWorkBudgetProperties;
 import io.aeyer.plowshare.server.relay.Relay;
 import io.aeyer.plowshare.server.relay.RelayInternalWorkers;
 import java.time.Duration;
@@ -86,14 +88,18 @@ public class EventsConfig {
 
   @Bean
   public Inbox inbox(
-      InboxStore store, ObjectProvider<AccountPushes> pushes, EventsProperties properties) {
+      InboxStore store,
+      ObjectProvider<AccountPushes> pushes,
+      EventsProperties properties,
+      UnitOfWork transactions) {
     // Lazy: the push side is the event channel, which is built after the frame router,
     // which needs this. Resolved on the first delivery, not at wiring.
     return new Inbox(
         store,
         (handle, body) -> pushes.getIfAvailable(() -> AccountPushes.NONE).push(handle, body),
         Instant::now,
-        properties.getQuestionAlertRetryInterval());
+        properties.getQuestionAlertRetryInterval(),
+        transactions);
   }
 
   @Bean
@@ -200,12 +206,17 @@ public class EventsConfig {
 
   @Bean
   public ScheduledPublication scheduledPublication(
-      ScheduleStore schedules, Relay relay, ScheduledArrival arrivals, UnitOfWork transactions) {
+      ScheduleStore schedules,
+      Relay relay,
+      ScheduledArrival arrivals,
+      UnitOfWork transactions,
+      SqlWorkBudget sql,
+      SqlWorkBudgetProperties limits) {
     return new RelayScheduledPublication(
         schedules,
         relay,
         arrivals,
-        transactions,
+        sql.transactions(transactions, limits.queryCeiling()),
         () -> {
           if (TransactionSynchronizationManager.isActualTransactionActive())
             throw new IllegalStateException(
