@@ -143,11 +143,29 @@ slot target before its source, verifies both snapshots and validates the vector.
 Source deletion cascades staging deletion; source edits may leave old staged
 revisions for diagnosis, but those revisions cannot be published to active rows.
 Configuration updates advance a version for compare-and-set writes. Triggers do
-not activate slots: `JdbcEmbeddingWorkRepository` reconciles all five stores,
+not activate slots: `JdbcEmbeddingWorkRepository` reconciles each slot's stores,
 copies current staged vectors, builds the requested indexes and changes the
 active pointer in one version-fenced transaction. `V116__embedding_runtime.sql`
 adds permanent policy/input-bound/retry metadata and permits source-fenced
 staging for either the current serving or replacement space.
+
+Conversation and digest passages use the prose slot. Migration V291 reclaims
+their code vectors and indexes. Code search continues to use code embeddings
+in the document corpus.
+
+Passages, document chunks and document summaries consume a staged vector in the same transaction that
+publishes it. The slot and source locks preserve the first committed result on
+retry. Unpublished replacement vectors remain available to resume a rebuild.
+When a different space takes over, activation stages the outgoing serving
+vectors in the same transaction so a later rollback can reuse them.
+Migration V288 rewrites passage staging to reclaim disk space for vectors that
+exactly match the published slot, space and source revision. It takes a write
+lock on passages and an exclusive lock on passage staging during the rewrite.
+Migration V292 similarly rewrites chunk and document staging. New revision
+manifests fingerprint the serving vectors and the staging rows that retain
+distinct material. Pending approvals prepared with the older fingerprint
+retain their original staging rows. These migrations bound lock waits to five
+seconds and rewrite statements to ten minutes.
 
 The typed `EmbeddingSpaceRepository` registers exact descriptors idempotently;
 SQL owns canonical SHA-256 generation and prevents descriptor mutation. Its
@@ -204,17 +222,15 @@ Source references:
 
 ## Runtime contracts
 
-Support exactly two active embedding slots: `code` and `prose`. Every unit stored
-for embedding receives both vectors, irrespective of whether its content is
-code, prose or a mixture. This applies to every existing embedding store:
-memories, memory digests, document chunks, document summaries and retrieval
-passages. Code stored in the document store uses the same contract as any other
-document; content classification does not determine which vectors are created.
+The two active embedding slots are `code` and `prose`. Memories, memory digests,
+document chunks and document summaries receive both vectors regardless of content
+classification. Retrieval passages receive a prose vector for conversation search
+and digest navigation.
 
 Each slot is a typed pair of embedding-space identity and vector, also bound to
 the source revision/hash. Track readiness and failures independently for each
 slot. Missing or failed vectors do not discard the source or count as successful
-coverage. Creating or editing content schedules both slots; repairing one slot
+coverage. Creating or editing content schedules the slots owned by its store. Repairing one slot
 does not recompute the other when its space and source revision still match.
 Budget embedding work, storage and index maintenance for both representations.
 
@@ -540,7 +556,7 @@ Verify on restored database copies before deployment. Use mocks for lifecycle,
 allowances, cancellation and invalid input. Focused opt-in PostgreSQL tests are
 required for new vector constraints, casts/index plans, cross-space isolation,
 atomic activation, concurrent changes, rollback and restart checkpoints. Confirm
-that all five stores receive both slots, searches use only their selected slot,
+that each store receives its supported slots, searches use only their selected slot,
 and changing one slot preserves valid vectors in the other. Confirm that text,
 history, memberships and accounting survive migration. Journal
 compatibility for integrations remains a separate adapter-owned verification.

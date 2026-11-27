@@ -84,7 +84,8 @@ public final class JdbcInformationProjectionRepository implements InformationPro
         arguments);
   }
 
-  private String snapshotHash(UUID revision, long generation, List<String> reusable) {
+  private String snapshotHash(
+      UUID revision, long generation, List<String> reusable, int snapshotVersion) {
     var hashes = new ArrayList<String>();
     hashes.add(
         hashRows(
@@ -116,11 +117,17 @@ public final class JdbcInformationProjectionRepository implements InformationPro
               revision));
       hashes.add(
           hashRows(
-              "SELECT to_jsonb(s) content FROM documents_embedding_staging s WHERE source_id=?",
+              "SELECT "
+                  + stageMaterial(snapshotVersion)
+                  + " content "
+                  + stagingForRevision(true, snapshotVersion),
               revision));
       hashes.add(
           hashRows(
-              "SELECT to_jsonb(s) content FROM chunks_embedding_staging s JOIN chunks c ON c.id=s.source_id JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?",
+              "SELECT "
+                  + stageMaterial(snapshotVersion)
+                  + " content "
+                  + stagingForRevision(false, snapshotVersion),
               revision));
     }
     hashes.add(hashRows("SELECT to_jsonb(s) content FROM embedding_slots s"));
@@ -138,7 +145,24 @@ public final class JdbcInformationProjectionRepository implements InformationPro
     return InformationCatalogue.sha256(String.join(":", hashes).getBytes(StandardCharsets.UTF_8));
   }
 
-  private boolean complete(String stage, UUID revision) {
+  private static String stageMaterial(int snapshotVersion) {
+    // These are view metadata, outside the original five-column staging identity.
+    return snapshotVersion == 0
+        ? "to_jsonb(material)"
+        : "(to_jsonb(material)-ARRAY['document_id','redundant'])";
+  }
+
+  private static String stagingForRevision(boolean summary, int snapshotVersion) {
+    if (snapshotVersion == 0)
+      return summary
+          ? "FROM documents_embedding_staging material WHERE material.source_id=?"
+          : "FROM chunks_embedding_staging material JOIN chunks c ON c.id=material.source_id JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?";
+    return "FROM "
+        + (summary ? "information_document_staging_state" : "information_chunk_staging_state")
+        + " material WHERE material.document_id=? AND NOT material.redundant";
+  }
+
+  private boolean complete(String stage, UUID revision, int snapshotVersion) {
     return switch (stage) {
       case "extract" ->
           Boolean.TRUE.equals(
@@ -146,7 +170,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
                   "SELECT extracted_text IS NOT NULL AND text_hash IS NOT NULL FROM information_revision_allowances WHERE id=?",
                   Boolean.class,
                   revision));
-      case "derive" -> boundedCorpus(revision);
+      case "derive" -> boundedCorpus(revision, snapshotVersion);
       case "embed" -> vectorsComplete(revision, false);
       case "summarise" ->
           Boolean.TRUE.equals(
@@ -166,7 +190,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
   }
 
   /** Bound all material entering a reuse manifest; oversized outputs remain unprepared. */
-  private boolean boundedCorpus(UUID revision) {
+  private boolean boundedCorpus(UUID revision, int snapshotVersion) {
     Long paragraphs =
         jdbc.queryForObject(
             "SELECT count(*) FROM paragraphs WHERE document_id=?", Long.class, revision);
@@ -193,21 +217,20 @@ public final class JdbcInformationProjectionRepository implements InformationPro
             case "documents" -> "FROM documents material WHERE material.id=?";
             case "chunks" ->
                 "FROM chunks material JOIN paragraphs p ON p.id=material.paragraph_id WHERE p.document_id=?";
-            case "documents_embedding_staging" ->
-                "FROM documents_embedding_staging material WHERE material.source_id=?";
-            case "chunks_embedding_staging" ->
-                "FROM chunks_embedding_staging material JOIN chunks c ON c.id=material.source_id JOIN paragraphs p ON p.id=c.paragraph_id WHERE p.document_id=?";
+            case "documents_embedding_staging" -> stagingForRevision(true, snapshotVersion);
+            case "chunks_embedding_staging" -> stagingForRevision(false, snapshotVersion);
             default -> "FROM " + table + " material WHERE material.document_id=?";
           };
+      boolean staging = table.endsWith("_staging");
+      String material = staging ? stageMaterial(snapshotVersion) : "to_jsonb(material)";
       // Count and expanded bytes describe the exact same selected material. One aggregate keeps
       // both bounds on one statement snapshot; compressed/TOAST size is not a RAM allocation bound.
       var bounds =
           jdbc.queryForObject(
-              "SELECT count(*),coalesce(sum(octet_length(to_jsonb(material)::text)),0) " + selected,
+              "SELECT count(*),coalesce(sum(octet_length(" + material + "::text)),0) " + selected,
               (row, index) -> new MaterialBounds(row.getLong(1), row.getLong(2)),
               revision);
-      if (bounds == null || bounds.count() > (table.endsWith("_staging") ? 20000 : 10000))
-        return false;
+      if (bounds == null || bounds.count() > (staging ? 20000 : 10000)) return false;
       bytes += bounds.bytes();
       if (bytes > 64L * 1024 * 1024) return false;
     }
@@ -254,7 +277,10 @@ public final class JdbcInformationProjectionRepository implements InformationPro
   }
 
   private Manifest capture(
-      InformationContext context, UUID revision, Map<String, String> configuration) {
+      InformationContext context,
+      UUID revision,
+      Map<String, String> configuration,
+      int snapshotVersion) {
     var header = lock(context, revision);
     var stages =
         jdbc.query(
@@ -264,7 +290,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
                     row.getString(1),
                     row.getString(2),
                     row.getString(3),
-                    complete(row.getString(1), revision)),
+                    complete(row.getString(1), revision, snapshotVersion)),
             revision,
             header.generation());
     var reusable = InformationProjectionReuse.select(stages, configuration);
@@ -272,9 +298,10 @@ public final class JdbcInformationProjectionRepository implements InformationPro
         revision,
         header.resource(),
         header.generation(),
-        snapshotHash(revision, header.generation(), reusable),
+        snapshotHash(revision, header.generation(), reusable, snapshotVersion),
         configuration,
-        reusable);
+        reusable,
+        snapshotVersion);
   }
 
   /**
@@ -334,7 +361,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
         throw new CallerFault("INFORMATION_REVISION_CONFLICT");
       return previous;
     }
-    var prepared = new Prepared(capture(context, revision, configuration), binding);
+    var prepared = new Prepared(capture(context, revision, configuration, 1), binding);
     jdbc.update(
         "INSERT INTO information_reuse_preparations(actor,request_id,payload) VALUES(?,?,CAST(? AS jsonb))",
         context.account(),
@@ -479,8 +506,10 @@ public final class JdbcInformationProjectionRepository implements InformationPro
             + table
             + "_embedding_staging(source_id,slot,space_id,source_revision,embedding)"
             + " SELECT map.destination,staged.slot,staged.space_id,new.embedding_source_revision,staged.embedding FROM "
-            + table
-            + "_embedding_staging staged"
+            + (table.equals("chunks")
+                ? "information_chunk_staging_state"
+                : "information_document_staging_state")
+            + " staged"
             + " JOIN "
             + table
             + " old ON old.id=staged.source_id JOIN "
@@ -488,7 +517,7 @@ public final class JdbcInformationProjectionRepository implements InformationPro
             + " ON old.id=map.origin JOIN "
             + table
             + " new ON new.id=map.destination"
-            + " WHERE staged.source_revision=old.embedding_source_revision AND staged.space_id IN (SELECT active_space_id FROM embedding_slots UNION SELECT target_space_id FROM embedding_slots)",
+            + " WHERE NOT staged.redundant AND staged.source_revision=old.embedding_source_revision AND staged.space_id IN (SELECT active_space_id FROM embedding_slots UNION SELECT target_space_id FROM embedding_slots)",
         mapping);
   }
 
@@ -499,7 +528,8 @@ public final class JdbcInformationProjectionRepository implements InformationPro
       Prepared prepared,
       Map<String, String> currentConfiguration) {
     var manifest = prepared.manifest();
-    var current = capture(context, manifest.revision(), currentConfiguration);
+    var current =
+        capture(context, manifest.revision(), currentConfiguration, manifest.snapshotVersion());
     if (!current.equals(manifest)) throw new CallerFault("INFORMATION_REVISION_CONFLICT");
     UUID target = UUID.randomUUID();
     jdbc.update(

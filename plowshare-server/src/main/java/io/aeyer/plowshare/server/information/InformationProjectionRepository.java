@@ -11,11 +11,14 @@ public interface InformationProjectionRepository {
       long generation,
       String snapshotHash,
       Map<String, String> configured,
-      List<String> reusable) {
+      List<String> reusable,
+      int snapshotVersion) {
     public Manifest {
       Objects.requireNonNull(revision);
       Objects.requireNonNull(resource);
       if (generation < 1) throw new IllegalArgumentException("Invalid source generation");
+      if (snapshotVersion < 0 || snapshotVersion > 1)
+        throw new IllegalArgumentException("Unknown projection snapshot version");
       snapshotHash = InformationContent.digest(snapshotHash);
       configured = Map.copyOf(configured);
       reusable = List.copyOf(reusable);

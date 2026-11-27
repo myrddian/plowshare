@@ -7,10 +7,10 @@ import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * Cross-store embedding lifecycle. Locks slot before sources; activation then locks all five tables
- * in enum order to freeze the coverage check and publication. Remote calls never run here. Staging
- * is durable progress: restarts recompute only missing/current inputs. Multiple processes may
- * compute the same input, but source/target fences prevent stale publication.
+ * Cross-store embedding lifecycle. Locks slot before sources; activation then locks that slot's
+ * tables in enum order to freeze the coverage check and publication. Remote calls never run here.
+ * Staging is durable progress: restarts recompute only missing/current inputs. Multiple processes
+ * may compute the same input, but source/target fences prevent stale publication.
  */
 public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   private final JdbcTemplate jdbc;
@@ -537,6 +537,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     Objects.requireNonNull(store);
     if (limit < 1 || limit > 100)
       throw new IllegalArgumentException("embedding repair batch must be 1..100");
+    if (!store.supports(target.slot())) return List.of();
     return transactions.inTransaction(
         () -> {
           // Scope compilation to short discovery SQL. Provider calls and activation/index DDL
@@ -672,6 +673,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   @Override
   public boolean ready(EmbeddingProfile target, Source source) {
+    if (!source.key().store().supports(target.slot())) return false;
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM "
@@ -691,6 +693,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   @Override
   public boolean publish(EmbeddingProfile target, Source expected, float[] vector, Runnable fence) {
+    if (!expected.key().store().supports(target.slot())) return false;
     return transactions.inTransaction(
         () -> {
           // Activation locks slot before source tables. The consumer fence must use that same
@@ -734,6 +737,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
   }
 
   public boolean publish(EmbeddingProfile target, Source expected, float[] vector) {
+    if (!expected.key().store().supports(target.slot())) return false;
     float[] checked = EmbeddingQuery.validate(target, vector);
     return transactions.inTransaction(
         () -> {
@@ -742,38 +746,47 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
               && !target.equals(active(target.slot()).orElse(null))) return false;
           Key key = expected.key();
           Store store = key.store();
-          var arguments = new ArrayList<>(keyArguments(key));
+          var arguments = new ArrayList<Object>();
+          arguments.add(target.space().id());
+          arguments.addAll(keyArguments(key));
           arguments.add(expected.revision());
-          var exists =
-              jdbc.queryForList(
-                  "SELECT s.embedding_source_revision FROM "
+          var represented =
+              jdbc.query(
+                  "SELECT s."
+                      + target.slot().stored()
+                      + "_space_id IS NOT DISTINCT FROM ? FROM "
                       + table(store)
                       + " s WHERE "
                       + identity(key)
                       + " AND s.embedding_source_revision=? AND "
                       + eligible(store)
                       + " FOR UPDATE",
+                  (row, index) -> row.getBoolean(1),
                   arguments.toArray());
-          if (exists.isEmpty()) return false;
-          var values = new ArrayList<>(keyArguments(key));
-          values.add(target.slot().stored());
-          values.add(target.space().id());
-          values.add(expected.revision());
-          values.add(Arrays.toString(checked));
-          int keyCount = keyArguments(key).size();
-          jdbc.update(
-              "INSERT INTO "
-                  + table(store)
-                  + "_embedding_staging("
-                  + keys(store)
-                  + ",slot,space_id,source_revision,embedding) VALUES("
-                  + "?,".repeat(keyCount)
-                  + "?,?,?,CAST(? AS vector)) ON CONFLICT DO NOTHING",
-              values.toArray());
+          if (represented.isEmpty()) return false;
+          // Compacting stores consume staging. The locked serving vector then provides the
+          // first-write-wins fence that the staged row previously provided on retry.
+          if (!consumesStaging(store) || !represented.getFirst()) {
+            var values = new ArrayList<>(keyArguments(key));
+            values.add(target.slot().stored());
+            values.add(target.space().id());
+            values.add(expected.revision());
+            values.add(Arrays.toString(checked));
+            int keyCount = keyArguments(key).size();
+            jdbc.update(
+                "INSERT INTO "
+                    + table(store)
+                    + "_embedding_staging("
+                    + keys(store)
+                    + ",slot,space_id,source_revision,embedding) VALUES("
+                    + "?,".repeat(keyCount)
+                    + "?,?,?,CAST(? AS vector)) ON CONFLICT DO NOTHING",
+                values.toArray());
+          }
           // Once active, publish individual new/edit repairs immediately. During a rebuild the old
           // columns remain intact until the complete corpus and indexes can switch atomically.
           if (active(target.slot()).filter(p -> p.space().equals(target.space())).isPresent())
-            copy(target, store, " AND " + identity(key), keyArguments(key).toArray());
+            publishStaged(target, store, " AND " + identity(key), keyArguments(key).toArray());
           jdbc.update(
               "DELETE FROM "
                   + table(store)
@@ -795,9 +808,13 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     return result.toArray();
   }
 
-  private void copy(EmbeddingProfile target, Store store, String scope, Object... extra) {
+  private static boolean consumesStaging(Store store) {
+    return store == Store.PASSAGES || store == Store.CHUNKS || store == Store.DOCUMENTS;
+  }
+
+  private void publishStaged(EmbeddingProfile target, Store store, String scope, Object... extra) {
     String slot = target.slot().stored();
-    jdbc.update(
+    String update =
         "UPDATE "
             + table(store)
             + " s SET "
@@ -813,14 +830,42 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
             + link(store, "staged")
             + " AND staged.slot=? AND staged.space_id=? AND staged.source_revision=s.embedding_source_revision AND "
             + eligible(store)
-            + scope,
-        append(List.of(target.slot().stored(), target.space().id()), extra));
+            + scope;
+    if (consumesStaging(store)) {
+      // Consume only the exact rows this update materialized. The source and slot locks are held
+      // through commit, and activation/index failures roll back both writes.
+      String extraKeys = store == Store.PASSAGES ? ",staged.source_type,staged.position" : "";
+      String preserve =
+          switch (store) {
+            case PASSAGES ->
+                " AND staged.source_type=published.source_type AND staged.position=published.position";
+            case DOCUMENTS ->
+                " AND NOT EXISTS(SELECT 1 FROM information_legacy_reuse_projections p WHERE p.revision_id=published.source_id)";
+            case CHUNKS ->
+                " AND NOT EXISTS(SELECT 1 FROM paragraphs p JOIN information_legacy_reuse_projections old ON old.revision_id=p.document_id WHERE p.id=published.paragraph_id)";
+            default -> throw new IllegalArgumentException("Store does not consume staging");
+          };
+      if (store == Store.CHUNKS) extraKeys = ",s.paragraph_id";
+      update =
+          "WITH published AS ("
+              + update
+              + " RETURNING staged.source_id,staged.slot,staged.space_id,staged.source_revision"
+              + extraKeys
+              + ") DELETE FROM "
+              + table(store)
+              + "_embedding_staging staged USING published"
+              + " WHERE (staged.source_id,staged.slot,staged.space_id,staged.source_revision)"
+              + " = (published.source_id,published.slot,published.space_id,published.source_revision)"
+              + preserve;
+    }
+    jdbc.update(update, append(List.of(target.slot().stored(), target.space().id()), extra));
   }
 
   @Override
   public void failed(EmbeddingProfile target, Source expected, String category) {
     if (category == null || !category.matches("[A-Za-z][A-Za-z0-9]{0,79}"))
       throw new IllegalArgumentException("invalid failure category");
+    if (!expected.key().store().supports(target.slot())) return;
     transactions.inTransaction(
         () -> {
           lock(target.slot(), false);
@@ -1068,6 +1113,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
 
   @Override
   public boolean beginRepair(EmbeddingProfile target, Source expected) {
+    if (!expected.key().store().supports(target.slot())) return false;
     return transactions.inTransaction(
         () -> {
           lock(target.slot(), false);
@@ -1116,6 +1162,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     var plan = new EmbeddingIndexPlan(profile);
     if (plan.exact()) return;
     for (Store store : Store.values()) {
+      if (!store.supports(profile.slot())) continue;
       if (indexReady(profile, store)) continue;
       jdbc.execute("DROP INDEX IF EXISTS " + plan.indexName(store));
       Long rows =
@@ -1136,6 +1183,32 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
     }
   }
 
+  private void retainGeneration(EmbeddingProfile previous, Store store) {
+    String slot = previous.slot().stored();
+    String sourceColumns =
+        store == Store.PASSAGES ? "s.source_type,s.source_id,s.position" : "s.id";
+    // A space change overwrites the serving columns. Preserve the outgoing generation for a
+    // future rollback while it is still the active space and passes the staging guard.
+    jdbc.update(
+        "INSERT INTO "
+            + table(store)
+            + "_embedding_staging("
+            + keys(store)
+            + ",slot,space_id,source_revision,embedding)"
+            + " SELECT "
+            + sourceColumns
+            + ",?,s."
+            + slot
+            + "_space_id,s.embedding_source_revision,s."
+            + slot
+            + "_embedding FROM "
+            + table(store)
+            + " s WHERE "
+            + new EmbeddingIndexPlan(previous).present("s")
+            + " ON CONFLICT DO NOTHING",
+        slot);
+  }
+
   @Override
   public boolean activate(EmbeddingProfile target) {
     return transactions.inTransaction(
@@ -1149,11 +1222,13 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
             indexes(target);
             return true;
           }
-          // Source writes do not acquire slot locks. Table locks make the all-store coverage check
+          var stores =
+              Arrays.stream(Store.values()).filter(store -> store.supports(target.slot())).toList();
+          // Source writes do not acquire slot locks. Table locks make the coverage check
           // authoritative, including inserts/deletes, and keep publication/index training atomic.
-          for (Store store : Store.values())
+          for (Store store : stores)
             jdbc.execute("LOCK TABLE " + table(store) + " IN SHARE ROW EXCLUSIVE MODE");
-          for (Store store : Store.values()) {
+          for (Store store : stores) {
             Long missing =
                 jdbc.queryForObject(
                     "SELECT count(*) FROM "
@@ -1168,7 +1243,13 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
                     target.space().id());
             if (missing == null || missing != 0) return false;
           }
-          for (Store store : Store.values()) copy(target, store, "");
+          for (Store store : stores) {
+            if (consumesStaging(store)
+                && active.isPresent()
+                && !active.get().space().equals(target.space()))
+              retainGeneration(active.get(), store);
+            publishStaged(target, store, "");
+          }
           indexes(target);
           int changed =
               jdbc.update(
@@ -1195,7 +1276,7 @@ public class JdbcEmbeddingWorkRepository implements EmbeddingWorkRepository {
                 "embedding configuration changed during this query; submit a new search");
           if (!new EmbeddingIndexPlan(expected).exact())
             for (Store store : Store.values())
-              if (!indexReady(expected, store))
+              if (store.supports(expected.slot()) && !indexReady(expected, store))
                 throw new EmbeddingException(
                     "configured embedding index is unavailable; rebuild it before searching");
           return work.get();

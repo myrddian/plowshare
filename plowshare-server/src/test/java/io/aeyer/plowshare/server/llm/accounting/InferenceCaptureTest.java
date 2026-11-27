@@ -275,9 +275,10 @@ class InferenceCaptureTest {
       assertNull(
           jdbc.queryForObject("SELECT provider_request_id FROM inference_attempts", String.class));
       assertFalse(
-          jdbc.queryForObject(
-                  "SELECT string_agg(event_data::text, '') FROM inference_accounting_events",
-                  String.class)
+          AccountingFixtures.MAPPER
+              .copy()
+              .findAndRegisterModules()
+              .writeValueAsString(harness.journal.readBatch(100))
               .contains("fake-accounting-secret"));
     }
   }

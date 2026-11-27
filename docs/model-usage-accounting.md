@@ -41,6 +41,20 @@ No account provisioning or schema migration is required.
 
 Calls and upstream attempts are different units. A retry adds an attempt to the same call; an earlier attempt with missing usage remains unknown after a successful retry. Project totals sum atomic attempts once. A conversation/run/orchestration subtree uses captured ancestor IDs rather than adding already inclusive reports.
 
+The database retains replay receipts with the event identifier, journal and call
+sequences, and a SHA-256 digest of the normalized event. The digest preserves
+idempotent replay and conflicting-event detection after journal acknowledgement.
+Migration V289 rewrites the existing event table to reclaim space. Take a matched
+database and journal backup before upgrading. An older server requires its
+matching database schema to resume projection.
+
+Fleet usage reports use daily UTC rollups for successful, single-attempt system
+embedding repairs without user or execution lineage. Each rollup retains the
+project, pool, model and billing route, per-currency amounts, token sums and the
+number of known observations. Reports combine complete days from these rollups
+with atomic rows for partial days and other activity. Scoped reports and
+`usage.calls` retain per-call and per-attempt detail.
+
 Input, output, provider total, cache read/write and reasoning observations remain independently nullable. Cache and reasoning are subsets, not extra tokens to add to the provider total. Reports return known subtotals, known-field counts and incomplete-attempt counts. All cumulative quantities and monetary amounts are decimal strings. Money is separated by currency, and estimates are not invoices.
 
 The text usage view and shared console/desktop panel expose provider total, cache

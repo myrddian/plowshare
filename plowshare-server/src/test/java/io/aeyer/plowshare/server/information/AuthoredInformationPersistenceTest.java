@@ -5,13 +5,20 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.aeyer.plowshare.protocol.*;
 import io.aeyer.plowshare.server.archive.*;
 import io.aeyer.plowshare.server.cache.*;
+import io.aeyer.plowshare.server.embedding.EmbeddingSlot;
+import io.aeyer.plowshare.server.embedding.EmbeddingSpace;
+import io.aeyer.plowshare.server.embedding.EmbeddingWorkRepository;
+import io.aeyer.plowshare.server.embedding.JdbcEmbeddingSpaceRepository;
+import io.aeyer.plowshare.server.embedding.JdbcEmbeddingWorkRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.*;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 
@@ -449,6 +456,122 @@ class AuthoredInformationPersistenceTest {
         work.inTransaction(
             () -> projections.prepare(own, nextRequest, copy.revision(), null, configuration));
     assertEquals(List.of("extract", "derive"), incomplete.manifest().reusable());
+  }
+
+  @Test
+  void staged_duplicates_reclaim_storage_without_changing_pending_legacy_or_current_manifests()
+      throws Exception {
+    UUID legacy = original(true, "source"), current = original(true, "source");
+    var active =
+        new JdbcEmbeddingSpaceRepository(jdbc)
+            .register(
+                new EmbeddingSpace.Definition(
+                    "compaction-fixture",
+                    "active",
+                    3,
+                    "",
+                    "",
+                    "cls",
+                    EmbeddingSpace.Normalization.NONE,
+                    "none"));
+    jdbc.update(
+        """
+        UPDATE embedding_slots SET active_space_id=?,target_space_id=?,active_mode='exact',
+            target_mode='exact',active_distance='COSINE',target_distance='COSINE' WHERE slot='prose'
+        """,
+        active.id(),
+        active.id());
+    for (String table : List.of("documents", "chunks")) {
+      jdbc.update(
+          "UPDATE "
+              + table
+              + " SET prose_embedding='[1,0,0]'::vector,prose_space_id=?,"
+              + "prose_source_revision=embedding_source_revision",
+          active.id());
+      jdbc.update(
+          "INSERT INTO "
+              + table
+              + "_embedding_staging(source_id,slot,space_id,source_revision,embedding)"
+              + " SELECT id,'prose',prose_space_id,embedding_source_revision,prose_embedding FROM "
+              + table);
+    }
+    UUID legacyRequest = request(), currentRequest = request();
+    work.inTransaction(
+        () -> {
+          InformationProjectionRepository.Manifest manifest =
+              ReflectionTestUtils.invokeMethod(
+                  projections, "capture", own, legacy, configuration, 0);
+          jdbc.update(
+              """
+              INSERT INTO information_reuse_preparations(actor,request_id,payload)
+              VALUES('author',?,?::jsonb #- '{manifest,snapshotVersion}')
+              """,
+              legacyRequest,
+              InformationJson.json(new InformationProjectionRepository.Prepared(manifest, null)));
+          return null;
+        });
+    var legacyPrepared =
+        work.inTransaction(
+            () -> projections.prepare(own, legacyRequest, legacy, null, configuration));
+    var prepared =
+        work.inTransaction(
+            () -> projections.prepare(own, currentRequest, current, null, configuration));
+    assertEquals(0, legacyPrepared.manifest().snapshotVersion());
+    assertEquals(1, prepared.manifest().snapshotVersion());
+    assertTrue(legacyPrepared.manifest().reusable().contains("summary_embed"));
+    assertTrue(prepared.manifest().reusable().contains("summary_embed"));
+    var node =
+        jdbc.queryForObject(
+            "SELECT pg_relation_filenode('chunks_embedding_staging')::bigint", Long.class);
+    String migration =
+        new ClassPathResource("db/migration/V292__compact_document_embedding_staging.sql")
+            .getContentAsString(StandardCharsets.UTF_8);
+    work.inTransaction(
+        () -> {
+          jdbc.execute(
+              "DROP VIEW information_legacy_reuse_projections,information_document_staging_state,information_chunk_staging_state");
+          jdbc.execute(migration);
+          return null;
+        });
+    assertNotEquals(
+        node,
+        jdbc.queryForObject(
+            "SELECT pg_relation_filenode('chunks_embedding_staging')::bigint", Long.class));
+    for (String view :
+        List.of("information_document_staging_state", "information_chunk_staging_state"))
+      assertEquals(
+          List.of(legacy), jdbc.queryForList("SELECT document_id FROM " + view, UUID.class));
+
+    var runtime = new JdbcEmbeddingWorkRepository(jdbc, work);
+    var profile = runtime.active(EmbeddingSlot.PROSE).orElseThrow();
+    var source =
+        runtime
+            .source(
+                EmbeddingWorkRepository.Key.of(
+                    EmbeddingWorkRepository.Store.DOCUMENTS, legacy.toString()))
+            .orElseThrow();
+    assertTrue(runtime.publish(profile, source, new float[] {0, 1, 0}));
+    assertEquals(
+        List.of(legacy),
+        jdbc.queryForList(
+            "SELECT document_id FROM information_document_staging_state", UUID.class));
+    var oldCopy =
+        work.inTransaction(
+            () -> projections.copy(own, legacyRequest, legacyPrepared, configuration));
+    var copy =
+        work.inTransaction(() -> projections.copy(own, currentRequest, prepared, configuration));
+    for (UUID revision : List.of(oldCopy.revision(), copy.revision())) {
+      assertEquals(
+          "[1,0,0]",
+          jdbc.queryForObject(
+              "SELECT prose_embedding::text FROM documents WHERE id=?", String.class, revision));
+      assertEquals(
+          0,
+          jdbc.queryForObject(
+              "SELECT count(*) FROM documents_embedding_staging WHERE source_id=?",
+              Integer.class,
+              revision));
+    }
   }
 
   @Test

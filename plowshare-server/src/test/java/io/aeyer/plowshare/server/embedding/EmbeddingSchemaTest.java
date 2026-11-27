@@ -328,7 +328,7 @@ class EmbeddingSchemaTest {
   }
 
   @ParameterizedTest
-  @EnumSource(Kind.class)
+  @EnumSource(value = Kind.class, names = "PASSAGE", mode = EnumSource.Mode.EXCLUDE)
   void bothSlotsUseIndependentWidthsAndSourceChangesInvalidateBoth(Kind kind) {
     Source source = fixtures().stream().filter(s -> s.kind == kind).findFirst().orElseThrow();
     long before = source.revision();
@@ -360,41 +360,41 @@ class EmbeddingSchemaTest {
     long before = source.revision();
     assertNull(source.text(kind.legacyColumn + "::text"));
     var maximum = register("maximum-width", 16000);
-    source.publish("code", maximum.id(), vector(16000), before);
+    String slot = kind == Kind.PASSAGE ? "prose" : "code";
+    if (kind != Kind.PASSAGE) source.publish("code", maximum.id(), vector(16000), before);
     source.publish("prose", maximum.id(), vector(16000), before);
-    assertEquals("16000", source.text("vector_dims(code_embedding)::text"));
+    if (kind != Kind.PASSAGE)
+      assertEquals("16000", source.text("vector_dims(code_embedding)::text"));
     assertEquals("16000", source.text("vector_dims(prose_embedding)::text"));
-    for (String slot : List.of("code", "prose")) {
-      target(slot, maximum.id());
-      source.stage(slot, maximum.id(), vector(16000), before);
+    var supported = kind == Kind.PASSAGE ? List.of("prose") : List.of("code", "prose");
+    for (String selected : supported) {
+      target(selected, maximum.id());
+      source.stage(selected, maximum.id(), vector(16000), before);
     }
-    assertEquals(2, source.staged());
+    assertEquals(supported.size(), source.staged());
+    assertThrows(
+        DataAccessException.class, () -> source.publish(slot, maximum.id(), vector(15999), before));
+    assertThrows(
+        DataAccessException.class, () -> source.publish(slot, maximum.id(), vector(16001), before));
+    assertThrows(
+        DataAccessException.class, () -> source.publish(slot, null, vector(16000), before));
+    assertThrows(DataAccessException.class, () -> source.publish(slot, maximum.id(), null, before));
     assertThrows(
         DataAccessException.class,
-        () -> source.publish("code", maximum.id(), vector(15999), before));
-    assertThrows(
-        DataAccessException.class,
-        () -> source.publish("code", maximum.id(), vector(16001), before));
-    assertThrows(
-        DataAccessException.class, () -> source.publish("code", null, vector(16000), before));
-    assertThrows(
-        DataAccessException.class, () -> source.publish("code", maximum.id(), null, before));
-    assertThrows(
-        DataAccessException.class,
-        () -> source.publish("code", "0".repeat(64), vector(16000), before));
+        () -> source.publish(slot, "0".repeat(64), vector(16000), before));
     var small = register("small-unscaled", 3);
     assertThrows(
-        DataAccessException.class, () -> source.publish("code", small.id(), "[0,0,0]", before));
+        DataAccessException.class, () -> source.publish(slot, small.id(), "[0,0,0]", before));
     assertThrows(
-        DataAccessException.class, () -> source.publish("code", small.id(), "[NaN,0,0]", before));
+        DataAccessException.class, () -> source.publish(slot, small.id(), "[NaN,0,0]", before));
     var normalized = spaces.register(definition("small-unit", 3, EmbeddingSpace.Normalization.L2));
     assertThrows(
-        DataAccessException.class,
-        () -> source.publish("code", normalized.id(), "[2,0,0]", before));
-    source.publish("code", normalized.id(), "[0.6,0.8,0]", before);
-    assertEquals(maximum.id(), source.text("prose_space_id"));
+        DataAccessException.class, () -> source.publish(slot, normalized.id(), "[2,0,0]", before));
+    source.publish(slot, normalized.id(), "[0.6,0.8,0]", before);
+    assertEquals(
+        kind == Kind.PASSAGE ? normalized.id() : maximum.id(), source.text("prose_space_id"));
     assertThrows(DataAccessException.class, () -> source.update("embedding_source_revision=5"));
-    assertThrows(DataAccessException.class, () -> source.update("code_source_revision=NULL"));
+    assertThrows(DataAccessException.class, () -> source.update(slot + "_source_revision=NULL"));
   }
 
   @ParameterizedTest
@@ -402,31 +402,30 @@ class EmbeddingSchemaTest {
   void stagingFencesTargetsAndSourceVersionsAndCascadesOnDeletion(Kind kind) {
     Source source = fixtures().stream().filter(s -> s.kind == kind).findFirst().orElseThrow();
     long before = source.revision();
+    String slot = kind == Kind.PASSAGE ? "prose" : "code";
     var old = register("serving-fixture", 3);
     var replacement = register("replacement-fixture", 4);
-    source.publish("code", old.id(), vector(3), before);
-    target("code", replacement.id());
-    assertThrows(
-        DataAccessException.class, () -> source.stage("code", old.id(), vector(3), before));
-    source.stage("code", replacement.id(), vector(4), before);
-    assertEquals(old.id(), source.text("code_space_id"));
+    source.publish(slot, old.id(), vector(3), before);
+    target(slot, replacement.id());
+    assertThrows(DataAccessException.class, () -> source.stage(slot, old.id(), vector(3), before));
+    source.stage(slot, replacement.id(), vector(4), before);
+    assertEquals(old.id(), source.text(slot + "_space_id"));
     source.change();
     assertThrows(
-        DataAccessException.class, () -> source.stage("code", replacement.id(), vector(4), before));
+        DataAccessException.class, () -> source.stage(slot, replacement.id(), vector(4), before));
     // Old and new source revisions coexist for diagnosis; neither is automatically activated.
-    source.stage("code", replacement.id(), vector(4), source.revision());
+    source.stage(slot, replacement.id(), vector(4), source.revision());
     assertEquals(2, source.staged());
-    assertNull(source.text("code_space_id"));
+    assertNull(source.text(slot + "_space_id"));
     long rebuiltRevision = source.revision();
-    target("code", old.id());
+    target(slot, old.id());
     assertThrows(
         DataAccessException.class,
-        () -> source.stage("code", replacement.id(), vector(4), source.revision()));
+        () -> source.stage(slot, replacement.id(), vector(4), source.revision()));
     source.delete();
     assertEquals(0, source.staged());
     assertThrows(
-        DataAccessException.class,
-        () -> source.stage("code", old.id(), vector(3), rebuiltRevision));
+        DataAccessException.class, () -> source.stage(slot, old.id(), vector(3), rebuiltRevision));
   }
 
   @Test
@@ -520,8 +519,8 @@ class EmbeddingSchemaTest {
     var source = fixtures().stream().filter(s -> s.kind == Kind.PASSAGE).findFirst().orElseThrow();
     long before = source.revision();
     var space = register("recreation-fixture", 3);
-    target("code", space.id());
-    source.stage("code", space.id(), vector(3), before);
+    target("prose", space.id());
+    source.stage("prose", space.id(), vector(3), before);
     source.delete();
     jdbc.update(
         "INSERT INTO retrieval_passages(source_type, source_id, position, passage, embedding) VALUES ('entry', ?, 0, 'different source', ?::vector)",
@@ -530,10 +529,10 @@ class EmbeddingSchemaTest {
     assertTrue(source.revision() > before);
     assertEquals(0, source.staged());
     assertThrows(
-        DataAccessException.class, () -> source.stage("code", space.id(), vector(3), before));
+        DataAccessException.class, () -> source.stage("prose", space.id(), vector(3), before));
     assertThrows(
-        DataAccessException.class, () -> source.publish("code", space.id(), vector(3), before));
-    source.publish("code", space.id(), vector(3), source.revision());
+        DataAccessException.class, () -> source.publish("prose", space.id(), vector(3), before));
+    source.publish("prose", space.id(), vector(3), source.revision());
   }
 
   @Test

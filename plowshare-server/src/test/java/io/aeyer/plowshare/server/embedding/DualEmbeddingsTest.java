@@ -182,6 +182,24 @@ class DualEmbeddingsTest {
   }
 
   @Test
+  void repairing_a_conversation_passage_dispatches_only_the_prose_encoder() {
+    var key =
+        new EmbeddingWorkRepository.Key(
+            EmbeddingWorkRepository.Store.PASSAGES, "conversation:1", "entry", 0);
+    var source = new EmbeddingWorkRepository.Source(key, 1, "passage", null);
+    var prose = profile(EmbeddingSlot.PROSE, "", EmbeddingSpace.Normalization.NONE);
+    when(work.source(key)).thenReturn(Optional.of(source));
+    when(work.target(EmbeddingSlot.PROSE)).thenReturn(Optional.of(prose));
+    when(work.inputLimit(prose.space())).thenReturn(100);
+    when(work.publish(eq(prose), eq(source), any())).thenReturn(true);
+    when(dispatcher.embed(any())).thenReturn(new Embeddings(List.of(new float[] {1, 0, 0}), null));
+    assertTrue(dual.repair(key, owner));
+    verify(work, never()).target(EmbeddingSlot.CODE);
+    verify(dispatcher).embed(argThat(request -> request.specifier().equals("prose-encoder")));
+    verifyNoMoreInteractions(dispatcher);
+  }
+
+  @Test
   void failureInOneSlotDoesNotPreventPublicationInTheOther() {
     var source =
         new EmbeddingWorkRepository.Source(
